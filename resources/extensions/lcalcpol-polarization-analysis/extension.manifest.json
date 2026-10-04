@@ -1,0 +1,76 @@
+{
+  "schema": "fpilot.extension.v2",
+  "id": "lcalcpol-polarization-analysis",
+  "name": "形式极化与双结果比较",
+  "version": "2.0.0",
+  "description": "读取 LCALCPOL 偶极；支持单结果或在共同晶格下比较两个端点。约化候选不等于同分支物理极化。",
+  "entrypoint": "scripts/cli.py",
+  "contexts": [
+    "attempt"
+  ],
+  "stages": [
+    "scf"
+  ],
+  "sources": {
+    "min": 1,
+    "max": 2
+  },
+  "inputs": [
+    {
+      "role": "structure",
+      "title": "结构",
+      "names": [
+        "POSCAR",
+        "CONTCAR"
+      ],
+      "max_bytes": 10485760
+    },
+    {
+      "role": "outcar",
+      "title": "极化输出",
+      "names": [
+        "OUTCAR"
+      ],
+      "max_bytes": 1099511627776
+    }
+  ],
+  "evidence": [
+    "COMPLETED",
+    "vasp_timing",
+    "ediff_reached"
+  ],
+  "execution": {
+    "locations": [
+      "local",
+      "ssh",
+      "scheduler"
+    ],
+    "timeout_seconds": 300
+  },
+  "dependencies": [
+    "numpy"
+  ],
+  "options_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "lattice_tolerance_angstrom": {
+        "type": "number",
+        "title": "晶格比较绝对容差 / Å",
+        "minimum": 0,
+        "default": 1e-08
+      }
+    },
+    "required": [
+      "lattice_tolerance_angstrom"
+    ]
+  },
+  "ui_schema": {},
+  "outputs": [
+    "table",
+    "file"
+  ],
+  "fixtures": [
+    "fixtures/POSCAR"
+  ]
+}

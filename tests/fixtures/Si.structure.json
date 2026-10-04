@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "formula": "Si2",
+  "lattice": [
+    [
+      0.0,
+      2.715,
+      2.715
+    ],
+    [
+      2.715,
+      0.0,
+      2.715
+    ],
+    [
+      2.715,
+      2.715,
+      0.0
+    ]
+  ],
+  "lengths": [
+    3.839589821842953,
+    3.839589821842953,
+    3.839589821842953
+  ],
+  "angles": [
+    60.00000000000001,
+    60.00000000000001,
+    60.00000000000001
+  ],
+  "volume": 40.02575174999999,
+  "atoms": [
+    {
+      "id": "b8ced0e6c18ada17:1",
+      "element": "Si",
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "cartesian": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selective": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "id": "b8ced0e6c18ada17:2",
+      "element": "Si",
+      "fractional": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "cartesian": [
+        1.3575,
+        1.3575,
+        1.3575
+      ],
+      "selective": [
+        false,
+        true,
+        false
+      ]
+    }
+  ],
+  "warnings": [],
+  "source": {
+    "filename": "Si.POSCAR",
+    "format": "poscar",
+    "sha256": "b8ced0e6c18ada17630003ea7e130064449d8a705bde2e73376b0e8a12b83578",
+    "base64": "U2kgdGVzdCBjZWxsCjEuMAowLjAgMi43MTUgMi43MTUKMi43MTUgMC4wIDIuNzE1CjIuNzE1IDIuNzE1IDAuMApTaQoyClNlbGVjdGl2ZSBkeW5hbWljcwpEaXJlY3QKMCAwIDAgVCBUIFQKMC4yNSAwLjI1IDAuMjUgRiBUIEYK"
+  },
+  "parser": {
+    "name": "pymatgen",
+    "version": "2024.8.9"
+  },
+  "poscar": "Si2\n1.0\n   0.0000000000000000    2.7149999999999999    2.7149999999999999\n   2.7149999999999999    0.0000000000000000    2.7149999999999999\n   2.7149999999999999    2.7149999999999999    0.0000000000000000\nSi\n2\nSelective dynamics\ndirect\n   0.0000000000000000    0.0000000000000000    0.0000000000000000 T T T Si\n   0.2500000000000000    0.2500000000000000    0.2500000000000000 F T F Si\n"
+}

@@ -1,0 +1,420 @@
+"""Frozen VASP parameter scans and batch dispatch."""
+import copy
+import difflib
+import hashlib
+import itertools
+import json
+import re
+import uuid
+from contextlib import closing
+from decimal import Decimal
+from pathlib import Path, PurePosixPath
+
+from . import execution as ex
+from . import recycle, execution_control as control, inputs, parameter_catalog, servers, candidate_pool
+from .storage import validate_workspace
+
+SCHEMA = 'fpilot.vasp-scan.v1'
+
+
+def packed(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def digest(value):
+    return hashlib.sha256(packed(value).encode()).hexdigest()
+
+
+def decimal(raw):
+    if not isinstance(raw, str) or not re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?', raw.strip()):
+        raise ValueError('扫描值须为有限十进制数')
+    value = Decimal(raw)
+    if not value.is_finite() or abs(value) > Decimal('1e12'):
+        raise ValueError('扫描数值超出范围')
+    return value
+
+
+def axis(dimension, stage):
+    kind = dimension.get('kind')
+    if kind == 'kmesh':
+        meshes = dimension.get('meshes')
+        if not isinstance(meshes, list) or not 1 <= len(meshes) <= 64 or any(not isinstance(m, list) or len(m) != 3 or any(type(x) is not int or not 1 <= x <= 1000 for x in m) for m in meshes):
+            raise ValueError('k 网格须为 1–64 个整数三元组')
+        values = [' '.join(map(str, m)) for m in meshes]
+    else:
+        if kind == 'incar':
+            tag = dimension.get('tag')
+            definition = parameter_catalog.DEFINITIONS.get(tag)
+            if not definition or definition['type'] not in ('number', 'integer', 'ediffg') or tag in parameter_catalog.MANAGED | parameter_catalog.CONTRACT_LOCKED or definition.get('applies_to') and stage not in definition['applies_to']:
+                raise ValueError('只能扫描当前阶段已登记的数值型 INCAR 参数')
+        elif kind in ('u', 'j'):
+            if not re.fullmatch(r'[A-Z][a-z]?', str(dimension.get('element', ''))):
+                raise ValueError('U/J 元素无效')
+        else:
+            raise ValueError('扫描维度类型无效')
+        start, end, step = (decimal(dimension.get(k)) for k in ('start', 'end', 'step'))
+        if step == 0 or (end-start)*step < 0: raise ValueError('扫描步长方向错误')
+        values = []
+        current = start
+        while (current <= end if step > 0 else current >= end) and len(values) <= 64:
+            value = format(current.normalize(), 'f')
+            if value == '-0': value = '0'
+            if kind == 'incar': parameter_catalog.validate_value(tag, value)
+            if kind in ('u', 'j') and current < 0: raise ValueError('U/J 不得为负')
+            values.append(value)
+            current += step
+        if not values or len(values) > 64: raise ValueError('单维最多 64 个值')
+    if len(values) != len(set(values)): raise ValueError('扫描维度值重复')
+    return values
+
+
+def case_project(project, base_id, dimensions, values):
+    clone = copy.deepcopy(project)
+    node = next(n for n in clone['nodes'] if n['id'] == base_id)
+    layer = node['data'].setdefault('parameters', {'values': {}})
+    base_hubbard = project.get('parameters', {}).get('shared', {}).get('hubbard', {})
+    for dimension, value in zip(dimensions, values):
+        kind = dimension['kind']
+        if kind == 'incar': layer.setdefault('values', {})[dimension['tag']] = value
+        elif kind in ('u', 'j'):
+            element = dimension['element']
+            row = layer.setdefault('hubbard', {}).setdefault(element, copy.deepcopy(base_hubbard.get(element, {'l':'-1','u':'0','j':'0'})))
+            row[kind] = value
+        else: node['data'].setdefault('inputDraft', {})['grid'] = value
+    return clone
+
+
+def source_project(project,scan_node_id,base_node_id):
+    """The scan's electronic source belongs to its own execution identity."""
+    scan=next((n for n in project['nodes'] if n['id']==scan_node_id),None)
+    if scan and scan['data'].get('sourceDraft'):
+        project=copy.deepcopy(project)
+        base=next(n for n in project['nodes'] if n['id']==base_node_id)
+        base['data']['sourceDraft']=copy.deepcopy(scan['data']['sourceDraft'])
+    return project
+
+
+def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', frozen_id=None, window_search=None):
+    if mode == 'wannier90-window':
+        from . import wannier_scans
+        return wannier_scans.preview(project,scan_node_id,base_node_id,frozen_id,window_search)
+    if mode != 'vasp':raise ValueError('迭代模式无效')
+    project=source_project(project,scan_node_id,base_node_id)
+    validate_workspace({'activeId':project['id'], 'projects':[project]})
+    nodes = {n['id']:n for n in project['nodes']}
+    scan, base = nodes.get(scan_node_id), nodes.get(base_node_id)
+    if not scan or scan['data']['kind'] != 'scan' or not base or base['data']['kind'] not in ('relax','scf') or not any(e['source']==base_node_id and e['target']==scan_node_id for e in project['edges']):
+        raise ValueError('迭代节点须直接连接一个 relax 或 SCF 基础节点')
+    if not isinstance(dimensions, list) or not 1 <= len(dimensions) <= 4 or any(not isinstance(d, dict) for d in dimensions):
+        raise ValueError('请输入 1–4 个扫描维度')
+    keys = [(d.get('kind'), d.get('tag') or d.get('element')) for d in dimensions]
+    if len(keys) != len(set(keys)): raise ValueError('扫描维度重复')
+    if any(d['kind'] in ('u','j') for d in dimensions):
+        effective = dict(project.get('parameters', {}).get('shared', {}).get('values', {}))
+        effective.update(base['data'].get('parameters', {}).get('values', {}))
+        if effective.get('LDAU') != 'true': raise ValueError('U/J 扫描要求基础计算启用 LDAU')
+    axes = [axis(d, base['data']['kind']) for d in dimensions]
+    count = 1
+    for values in axes: count *= len(values)
+    if count > 64: raise ValueError('扫描超过 64 个 case')
+    cases = []
+    seen_inputs = set()
+    base_files = inputs.generate(project, base_node_id)['files']
+    for index, values in enumerate(itertools.product(*axes)):
+        report = inputs.generate(case_project(project, base_node_id, dimensions, values), base_node_id)
+        hashes={name:hashlib.sha256(raw.encode()).hexdigest() for name,raw in report['files'].items() if name in ('INCAR','KPOINTS','POSCAR','POSCAR.reference')}
+        fingerprint=(hashes.get('INCAR'),hashes.get('KPOINTS'))
+        errors=list(report['errors'])
+        if fingerprint in seen_inputs: errors.append('此 case 的实际 INCAR/KPOINTS 与另一 case 相同')
+        seen_inputs.add(fingerprint)
+        differences = {}
+        for name in ('INCAR', 'KPOINTS'):
+            before = base_files.get(name, '').splitlines()
+            after = report['files'].get(name, '').splitlines()
+            if before != after:
+                differences[name] = '\n'.join(difflib.unified_diff(before, after, fromfile='base/'+name, tofile='case/'+name, lineterm=''))
+        cases.append({'index':index, 'parameters':[{'kind':d['kind'],'key':d.get('tag') or d.get('element') or 'grid','value':v} for d,v in zip(dimensions,values)], 'input_hashes':hashes, 'input_diff':differences, 'errors':errors, 'warnings':report['warnings'], 'dependencies':report['dependencies']})
+    return {'project_id':project['id'], 'scan_node_id':scan_node_id, 'base_node_id':base_node_id, 'stage':base['data']['kind'], 'dimensions':dimensions, 'case_count':count, 'cases':cases, 'ready':all(not c['errors'] for c in cases), 'definition_hash':digest({'project':project,'scan_node_id':scan_node_id,'base_node_id':base_node_id,'dimensions':dimensions})}
+
+
+def database():
+    db = ex.db()
+    db.execute('CREATE TABLE IF NOT EXISTS scan_batches (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL)')
+    db.commit()
+    return db
+
+
+def save(batch):
+    if recycle.inactive('scans',batch['id'],batch):return batch
+    with closing(database()) as db:
+        db.execute('BEGIN IMMEDIATE')
+        row=db.execute('SELECT body FROM scan_batches WHERE id=?',(batch['id'],)).fetchone()
+        revision=json.loads(row[0]).get('revision',0) if row else 0
+        if revision!=batch.get('revision',0):
+            db.rollback();raise ValueError('批次状态已由其他操作更新；请刷新')
+        batch['revision']=revision+1
+        batch['updated_at']=ex.now()
+        db.execute('INSERT OR REPLACE INTO scan_batches VALUES(?,?,?,?)',(batch['id'],batch['project_id'],batch['state'],packed(batch)))
+        db.commit()
+    return batch
+
+
+def get(batch_id):
+    with closing(database()) as db:
+        row = db.execute('SELECT body FROM scan_batches WHERE id=?',(batch_id,)).fetchone()
+    if not row: raise ValueError('扫描批次不存在')
+    return json.loads(row[0])
+
+
+def history(project_id):
+    with closing(database()) as db:
+        rows = db.execute('SELECT body FROM scan_batches WHERE project_id=? ORDER BY rowid DESC',(project_id,)).fetchall()
+    from .recycle import is_recycled
+    return [item for row in rows if not recycle.inactive('scans',(item := json.loads(row[0]))['id'],item)]
+
+
+def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_definition_hash=None, mode='vasp', frozen_id=None, window_search=None):
+    if mode == 'wannier90-window':
+        from . import wannier_scans
+        return wannier_scans.freeze(project,scan_node_id,base_node_id,frozen_id,window_search,reason,expected_definition_hash)
+    if mode != 'vasp':raise ValueError('迭代模式无效')
+    project=source_project(project,scan_node_id,base_node_id)
+    if not isinstance(reason,str) or not reason.strip() or len(reason)>2000: raise ValueError('请填写批次输入理由')
+    report = preview(project,scan_node_id,base_node_id,dimensions)
+    if expected_definition_hash is not None and report['definition_hash']!=expected_definition_hash:
+        raise ValueError('基础输入或扫描定义已变化，请重新预览')
+    if not report['ready']: raise ValueError('存在输入错误的 case，不能冻结')
+    batch_id = uuid.uuid4().hex
+    cases = []
+    axes = [axis(d,report['stage']) for d in dimensions]
+    for item, values in zip(report['cases'],itertools.product(*axes)):
+        case=case_project(project,base_node_id,dimensions,values)
+        base=next(n for n in case['nodes'] if n['id']==base_node_id)
+        if not base['data'].get('sourceDraft'):
+            from .source_contracts import draft
+            base['data']['sourceDraft']=draft(case,base_node_id)[0]
+        frozen = inputs.freeze(case,base_node_id,reason,execution_scope=scan_node_id)
+        cases.append({**item,'id':hashlib.sha256((batch_id+':'+str(item['index'])+':'+packed(item['parameters'])).encode()).hexdigest()[:24], 'bundle_id':frozen['id'], 'state':'PENDING', 'attempt_id':None, 'attempt_history':[], 'retry_count':0})
+    batch = {'schema':SCHEMA,'id':batch_id,'project_id':project['id'],'scan_node_id':scan_node_id,'base_node_id':base_node_id,'stage':report['stage'],'definition_hash':report['definition_hash'],'dimensions':dimensions,'cases':cases,'state':'FROZEN','created_at':ex.now(),'reason':reason.strip()}
+    manifest,_=ex.bundle(cases[0]['bundle_id'],allow_dependencies=True)
+    batch['requires_ncl']=any(str(manifest.get('incar_tags',{}).get(tag,{}).get('value','')).strip().upper() in ('.TRUE.','TRUE','T') for tag in ('LSORBIT','LNONCOLLINEAR'))
+    batch['case_table_hash'] = digest([{k:c[k] for k in ('id','bundle_id','parameters','input_hashes')} for c in cases])
+    return save(batch)
+
+
+def resource_preview(batch_id, project_id, config, candidates):
+    batch = get(batch_id)
+    if batch['project_id'] != project_id or batch['state'] != 'FROZEN':
+        raise ValueError('请选择当前项目的冻结批次')
+    from . import wannier_scans
+    if wannier_scans.is_window(batch):return wannier_scans.resources(batch,config,candidates)
+    candidates = candidate_pool.validate(candidates)
+    probe = servers.probe(config)
+    return {'previews': candidate_pool.previews(config, probe, candidates)}
+
+
+def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None, reason='', approved_script='', approved_profile=None, template_id=None, dependency_attempt_id=None, dependency_reason='', candidates=None, approved_previews=None, max_parallel=None):
+    batch = get(batch_id)
+    from . import wannier_scans
+    if wannier_scans.is_window(batch):
+        return wannier_scans.authorize(batch,project_id,case_table_hash,config,candidates,approved_previews,max_parallel)
+    recycle.assert_available('scans',batch['id'],batch)
+    batch.pop('local_cleanup_blocker',None)
+    if batch['project_id'] != project_id or batch['state'] != 'FROZEN' or batch['case_table_hash'] != case_table_hash: raise ValueError('冻结 case 表或批次状态已变化；未授权')
+    if not isinstance(reason,str) or len(reason)>2000: raise ValueError('资源选择理由无效')
+    if template_id is None:
+        from .workbench_settings import read
+        template_id=read()['defaults'].get(config['alias']+':'+PurePosixPath(config.get('vasp_executable','vasp_std')).name)
+    from . import branch_bindings
+    for case in batch['cases']:
+        manifest,_=ex.bundle(case['bundle_id'],allow_dependencies=True)
+        branch_bindings.check(ex.frozen_project(case['bundle_id']),batch['base_node_id'],config['alias'],manifest.get('source_contract'),batch['scan_node_id'])
+    probe = servers.probe(config)
+    checked = None
+    if candidates is not None:
+        candidates = candidate_pool.validate(candidates)
+        checked = candidate_pool.approve(candidates, candidate_pool.previews(config, probe, candidates), approved_previews)
+        if max_parallel is None: max_parallel = len(checked)
+        if type(max_parallel) is not int or not 1 <= max_parallel <= len(checked):
+            raise ValueError('本批同时运行上限须在 1 与候选节点数量之间')
+    else:
+        # Already frozen older clients/authorizations keep their single-node contract.
+        rendered = servers.preview(config,probe['id'],node,cores,reason)
+        if not rendered['resource_ready']: raise ValueError('资源检查未通过：'+'; '.join(rendered['blockers']))
+        if rendered['script'] != approved_script or rendered['profile'] != approved_profile:
+            raise ValueError('脚本或资源预览已变化；请重新预览后授权')
+    from .workbench_settings import snapshot as settings_snapshot
+    batch['authorization']={'settings_snapshot':settings_snapshot(config['alias'],PurePosixPath(config.get('vasp_executable','vasp_std')).name),'at':ex.now(),'case_table_hash':case_table_hash,'config':config,'reason':reason,'template_id':template_id,'dependency_attempt_id':dependency_attempt_id,'dependency_reason':dependency_reason,'approved_case_count':len(batch['cases'])}
+    if checked is not None:
+        batch['authorization'].update(candidates=checked, max_parallel=max_parallel)
+    else:
+        batch['authorization'].update(node=node,cores=cores,preview_profile=rendered['profile'],approved_script_sha256=hashlib.sha256(rendered['script'].encode()).hexdigest())
+    batch['state']='ACTIVE'
+    return save(batch)
+
+
+def pause(batch_id, project_id):
+    batch=get(batch_id)
+    if batch['project_id']!=project_id or batch['state'] not in ('ACTIVE','BLOCKED'): raise ValueError('批次不能暂停')
+    batch['state']='PAUSED'
+    return save(batch)
+
+
+def resume(batch_id, project_id):
+    batch=get(batch_id)
+    recycle.assert_available('scans',batch['id'],batch)
+    batch.pop('local_cleanup_blocker',None)
+    if batch['project_id']!=project_id or batch['state'] not in ('PAUSED','BLOCKED'): raise ValueError('批次不能继续')
+    from . import wannier_scans
+    if wannier_scans.is_window(batch):
+        for case in batch['cases']:
+            if case.get('attempt_id'):
+                record=ex.get(case['attempt_id']);recycle.assert_available('attempts',record['id'],record);case['state']=record['state']
+    if any(c['state']=='UNKNOWN' for c in batch['cases']): raise ValueError('仍有 UNKNOWN case，须先核对原作业')
+    batch['state']='ACTIVE'
+    batch.pop('blocker',None)
+    return save(batch)
+
+
+def case_scopes():
+    """Read execution ownership of legacy case bundles without rewriting them."""
+    if not (ex.ROOT/'execution.sqlite3').exists():return {}
+    result={}
+    with closing(ex.db()) as c:
+        if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scan_batches'").fetchone():return result
+        for (body,) in c.execute('SELECT body FROM scan_batches'):
+            batch=json.loads(body)
+            for case in batch['cases']:
+                result.setdefault(case['bundle_id'],set()).add(batch['scan_node_id'])
+    return {key:sorted(values) for key,values in result.items()}
+
+
+def retry_case(batch_id, project_id, case_id):
+    batch=get(batch_id)
+    case=next((c for c in batch['cases'] if c['id']==case_id),None)
+    if batch['project_id']!=project_id or not case or case['state']!='FAILED' or case['retry_count']>=1 or batch['state'] not in ('ACTIVE','PAUSED','COMPLETE'): raise ValueError('不满足单次显式重试条件')
+    case['attempt_history'].append(case['attempt_id'])
+    case.update(state='PENDING',attempt_id=None,retry_count=1)
+    if batch['state']=='COMPLETE': batch['state']='ACTIVE'
+    return save(batch)
+
+
+def tick():
+    """Fill available candidates within one cycle; keep exact receipts on recovery."""
+    with closing(database()) as db:
+        ids=[r[0] for r in db.execute("SELECT id FROM scan_batches WHERE state IN ('ACTIVE','BLOCKED','PAUSED') ORDER BY rowid")]
+    capacity_context={}
+    for batch_id in ids:
+        dispatched=set()
+        for _ in range(64):
+            if not _tick_batch_once(batch_id,capacity_context,dispatched):break
+
+
+def _tick_batch_once(batch_id,capacity_context,dispatched):
+    batch=get(batch_id)
+    if recycle.inactive('scans',batch['id'],batch) or batch.get('local_cleanup_blocker'):return False
+    from . import wannier_scans
+    window_mode=wannier_scans.is_window(batch)
+    try:
+        for case in batch['cases']:
+            if window_mode:recycle.assert_available('wannier-inputs',case['bundle_id'])
+            if case['attempt_id']:
+                record=ex.get(case['attempt_id'])
+                recycle.assert_available('attempts',record['id'],record)
+                case['state']=record['state']
+    except (ValueError,OSError) as exc:
+        batch.update(state='BLOCKED',blocker=str(exc));save(batch);return False
+    if any(c['state']=='UNKNOWN' for c in batch['cases']):
+        batch['state']='BLOCKED';batch['blocker']='UNKNOWN case 须核对原 job ID；未重投';save(batch);return False
+    if batch['state'] in ('BLOCKED','PAUSED'): save(batch);return False
+    waiting=next((c for c in batch['cases'] if c['state'] in ('PENDING','PREPARED')),None)
+    if not waiting:
+        if all(c['state'] in ('COMPLETED','FAILED') for c in batch['cases']): batch['state']='COMPLETE'
+        save(batch);return False
+    if waiting['id'] in dispatched:return False
+    auth=batch['authorization'];limits=control.settings()
+    render=(lambda config,probe,node,cores,reason: wannier_scans.render(config,probe,node,cores,reason,auth['template_id'])) if window_mode else None
+    purpose='wannier90' if window_mode else 'vasp'
+    with closing(ex.db()) as db:
+        active=[json.loads(r[0]) for r in db.execute('SELECT body FROM attempts WHERE state IN ('+','.join('?' for _ in control.ACTIVE)+')',control.ACTIVE)]
+    from .extension_runs import active_usage
+    active += active_usage()
+    same = [r for r in active if r['config']['alias']==auth['config']['alias']]
+    batch_active = sum(c['state'] in control.ACTIVE for c in batch['cases'])
+    if (len(active)>=limits['max_inflight_total'] or len(same)>=limits['max_inflight_per_host'] or
+            batch_active>=auth.get('max_parallel',len(batch['cases']))):
+        batch['waiting_reason']='达到同时运行上限，已有任务结束后继续派发'
+        save(batch);return False
+    try:
+        from .workbench_settings import assert_current
+        assert_current(auth.get('settings_snapshot'))
+        choices=auth.get('candidates') or [{'node':auth['node'],'cores':auth['cores'],'reason':auth['reason'],'profile':auth['preview_profile'],'script_sha256':auth['approved_script_sha256']}]
+        deterministic_id=hashlib.sha256((waiting['id']+':'+str(waiting['retry_count'])).encode()).hexdigest()[:32]
+        if waiting['state']=='PENDING':
+            # Recover the exact attempt if the process stopped after its save.
+            try: existing=ex.get(deterministic_id)
+            except ValueError: existing=None
+            if existing:
+                allowed=next((c for c in choices if c['node']==existing.get('node')),None)
+                if (not allowed or existing.get('bundle_id')!=waiting['bundle_id'] or
+                        existing.get('project_id')!=batch['project_id'] or existing.get('config')!=auth['config'] or
+                        existing.get('profile')!=allowed['profile'] or
+                        existing.get('execution_scope')!=batch['scan_node_id'] or
+                        existing.get('scan_case_id',waiting['id'])!=waiting['id']):
+                    raise ValueError('原 case attempt 与授权不一致，须核查原记录')
+                waiting.update(attempt_id=existing['id'],state=existing['state']);save(batch)
+                if existing['state']!='PREPARED':
+                    return existing['state'] not in ('UNKNOWN','DISPATCHING')
+        probe=None
+        if waiting['state']=='PENDING' or auth.get('candidates'):
+            probe=(servers.capacity_probe(auth['config'],context=capacity_context,**({'purpose':purpose} if window_mode else {})) if auth.get('candidates')
+                   else servers.probe(auth['config']))
+        if waiting['state']=='PENDING':
+            occupied={r.get('node') for r in same}
+            choice,message=candidate_pool.select(auth['config'],probe,choices,occupied,**({'render':render} if window_mode else {}))
+            if choice is None:
+                batch['waiting_reason']=message;save(batch);return False
+            cap=limits['max_cores_per_host']
+            counts=[r.get('profile',{}).get('ppn',r.get('profile',{}).get('ntasks')) for r in same]
+            required=choice['profile'].get('ppn',choice['profile'].get('ntasks'))
+            if cap is not None and (type(required) is not int or any(type(n) is not int for n in counts) or sum(counts)+required>cap):
+                batch['waiting_reason']='每主机在途核数预算不足，等待已有任务结束';save(batch);return False
+            prepared=wannier_scans.prepare_case(batch,waiting,auth,choice,probe,deterministic_id) if window_mode else ex.prepare(waiting['bundle_id'],auth['config'],probe['id'],choice['node'],choice['cores'],choice['reason'],auth['template_id'],dependency_attempt_id=auth['dependency_attempt_id'],dependency_reason=auth['dependency_reason'],project_id=batch['project_id'],attempt_id=deterministic_id,execution_scope=batch['scan_node_id'])
+            prepared.update(scan_batch_id=batch['id'],scan_case_id=waiting['id'],scan_case_table_hash=batch['case_table_hash'])
+            ex.save(prepared)
+            waiting['attempt_id']=prepared['id'];waiting['state']=prepared['state'];save(batch)
+        if waiting['state']=='PREPARED':
+            prepared=ex.get(waiting['attempt_id'])
+            allowed=next((c for c in choices if c['node']==prepared.get('node')),None)
+            if auth.get('candidates') and (not allowed or prepared.get('profile')!=allowed['profile']):
+                raise ValueError('准备记录已偏离本批候选池；请核查准确 attempt')
+            if allowed and auth.get('candidates'):
+                _,message=candidate_pool.select(auth['config'],probe,[allowed],{r.get('node') for r in same},**({'render':render} if window_mode else {}))
+                if message: batch['waiting_reason']=message;save(batch);return False
+            cap=limits['max_cores_per_host']
+            counts=[r.get('profile',{}).get('ppn',r.get('profile',{}).get('ntasks')) for r in same+[prepared]]
+            if cap is not None and (any(type(n) is not int or n<1 for n in counts) or sum(counts)>cap):
+                batch['waiting_reason']='每主机在途核数预算不足，等待已有任务结束';save(batch);return False
+        if get(batch_id)['state']!='ACTIVE': return False
+        batch.pop('waiting_reason',None)
+        dispatched.add(waiting['id'])
+        waiting['state']=ex.submit(waiting['attempt_id'])['state']
+        if waiting['state']=='UNKNOWN':
+            batch['state']='BLOCKED';batch['blocker']='UNKNOWN case 须核对原 job ID；未重投'
+        save(batch)
+        return waiting['state'] in control.ACTIVE and waiting['state']!='UNKNOWN'
+    except Exception as exc:
+        if waiting['attempt_id']: waiting['state']=ex.get(waiting['attempt_id'])['state']
+        if waiting['state']=='PREPARED' and str(exc).startswith(('在途任务数已达上限','每主机在途核数预算不足')):
+            batch['waiting_reason']=str(exc);save(batch);return False
+        if waiting['state']=='PREPARED' and str(exc).startswith(('实时资源已变化或不可用','Wannier90 实时资源已变化')):
+            # Capacity may change between selection and the final submit gate.
+            # Keep the exact unsubmitted attempt; other contract changes block.
+            prepared=ex.get(waiting['attempt_id'])
+            try:
+                fresh=servers.capacity_probe(auth['config'],**({'purpose':purpose} if window_mode else {}))
+                current=(render or servers.preview)(auth['config'],fresh['id'],prepared['node'],prepared['cores'],prepared['reason'])
+                if candidate_pool.capacity_wait(current) and current['profile']==prepared['profile']:
+                    batch['waiting_reason']='原准备节点暂时占用，等待空闲后提交同一个 attempt';save(batch);return False
+            except (ValueError,KeyError,OSError):pass
+        batch['state']='BLOCKED';batch['blocker']=control.redact(str(exc))[:1000];save(batch)

@@ -1,0 +1,18 @@
+{
+  "schema": "fpilot.extension-sdk.v1",
+  "id": "_template",
+  "name": "Replace with extension name",
+  "version": "0.1.0",
+  "description": "Replace this scaffold with one read-only scientific extension.",
+  "adapter": "cli-v1",
+  "input_selectors": [
+    {"id": "structure", "artifact_names": ["POSCAR", "CONTCAR"], "max_bytes": 10485760}
+  ],
+  "applicability": {"result_schema": "fpilot.extension-applicability.v1"},
+  "outputs": {"schema": "replace.analysis-result.v1", "files": ["result.json"]},
+  "dependencies": {"python_modules": []},
+  "runtime": {"interpreter": "registered-python", "timeout_seconds": 120},
+  "side_effects": ["local_read", "local_write"],
+  "fixtures": ["tests/fixtures/README.md"],
+  "entrypoint": "scripts/extension.py"
+}

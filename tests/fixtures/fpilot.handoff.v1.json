@@ -1,0 +1,36 @@
+{
+  "schema": "fpilot.handoff.v1",
+  "binding": {
+    "attempt": "/home/user/230269265lht/material-projects/si/flows/single/stages/scf/attempts/attempt-0001",
+    "job_id": "123.node01",
+    "profile": "/home/user/fpilot/jobs/profiles/jutai-1.json",
+    "contract": "/home/user/230269265lht/contracts/scf-output.json"
+  },
+  "created_at": "2026-09-10T08:03:47.140122+00:00",
+  "scheduler": {
+    "status": "TERMINAL",
+    "job": {
+      "qstat": {
+        "stdout": "Job Id: 123.node01\n    job_state = C\n    Exit_status = 0\n"
+      }
+    }
+  },
+  "review_receipt": {
+    "status": "REVIEWED",
+    "decision": "REVISE",
+    "program_status": "COMPLETE",
+    "calculation_status": "INCOMPLETE",
+    "promotion_performed": false
+  },
+  "output_summary": {
+    "schema": "fpilot.output-summary.v1",
+    "input_manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "timing_found": true
+  },
+  "audit": {
+    "decision": "REVISE",
+    "program_status": "COMPLETE",
+    "calculation_status": "INCOMPLETE"
+  },
+  "limits": "终态与审核建议不是物理结论；原始大文件留在服务器。"
+}

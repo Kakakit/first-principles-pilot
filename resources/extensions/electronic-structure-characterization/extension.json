@@ -1,0 +1,341 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "electronic-structure-characterization",
+  "version": "0.3.0",
+  "status": "ready",
+  "domain": "first-principles/electronic-structure",
+  "description": "Prepare reusable spin-resolved VASP band, PROCAR-weight and PDOS datasets; extract bounded electronic descriptors; and selectively compose publication-ready band+DOS, PDOS and fatband figures.",
+  "entrypoints": [
+    {
+      "name": "eschar",
+      "path": "src/eschar.py",
+      "usage": "python src/eschar.py <prepare|characterize|plot> ..."
+    },
+    {
+      "name": "banddos",
+      "path": "src/banddos.py",
+      "usage": "Compatibility entrypoint: python src/banddos.py <prepare|characterize|plot|vasp-band|vaspkit-band|wannier-band|compare|fatband|fatband-panel|dos|panel> ..."
+    },
+    {
+      "name": "vasp-band",
+      "path": "scripts/plot_vasp_band.py",
+      "usage": "python scripts/plot_vasp_band.py --eigenval EIGENVAL [--outcar OUTCAR] [--kpoints KPOINTS] [--poscar POSCAR] --output figures/vasp_band"
+    },
+    {
+      "name": "vaspkit-band",
+      "path": "src/banddos.py",
+      "usage": "python src/banddos.py vaspkit-band --band-file REFORMATTED_BAND_UP.dat --output figures/vaspkit_band"
+    },
+    {
+      "name": "wannier-band",
+      "path": "scripts/plot_wannier_band.py",
+      "usage": "python scripts/plot_wannier_band.py --directory wannier --output figures/wannier_band"
+    },
+    {
+      "name": "compare",
+      "path": "scripts/compare_dft_wannier.py",
+      "usage": "python scripts/compare_dft_wannier.py --dft-format vaspkit --dft-band DFT.dat --wannier-dir wannier --output figures/compare"
+    },
+    {
+      "name": "fatband",
+      "path": "scripts/plot_fatband.py",
+      "usage": "python scripts/plot_fatband.py --procar PROCAR --ions 1 --orbitals d --output figures/fatband"
+    },
+    {
+      "name": "fatband-panel",
+      "path": "src/banddos.py",
+      "usage": "python src/banddos.py fatband-panel --procar PROCAR --poscar POSCAR --kpoints KPOINTS --band-outcar OUTCAR --reference-outcar ../scf/OUTCAR --projection Cr:d --projection Fe:d --projection O:p --output analysis/fatband"
+    },
+    {
+      "name": "dos",
+      "path": "scripts/plot_dos.py",
+      "usage": "python scripts/plot_dos.py --doscar DOSCAR --output figures/dos"
+    },
+    {
+      "name": "panel",
+      "path": "scripts/plot_band_dos.py",
+      "usage": "python scripts/plot_band_dos.py --eigenval EIGENVAL --doscar DOSCAR --output figures/band_dos"
+    }
+  ],
+  "input_contract": {
+    "required": [
+      "A local subcommand: prepare, characterize, plot, vasp-band, vaspkit-band, wannier-band, compare, fatband, fatband-panel, dos, or panel.",
+      "The local files required by the selected subcommand; missing or malformed files are errors rather than remote fallbacks."
+    ],
+    "commands": {
+      "prepare": {
+        "required": [
+          "PROCAR",
+          "VASP5/6 POSCAR",
+          "line-mode KPOINTS",
+          "completed band OUTCAR",
+          "exactly one of explicit Fermi energy or reference OUTCAR"
+        ],
+        "optional": [
+          "DOSCAR for PDOS tables",
+          "separate magnetic OUTCAR",
+          "near-reference analysis window"
+        ],
+        "outputs": [
+          "one wide band/projection CSV per spin",
+          "one wide total/projected DOS CSV per spin when DOSCAR is supplied",
+          "manifest.json",
+          "characterization.json",
+          "characterization.md"
+        ]
+      },
+      "characterize": {
+        "required": [
+          "fpilot.electronic-structure-dataset.v1 manifest or its directory"
+        ],
+        "optional": [
+          "magnetic OUTCAR",
+          "near-reference analysis window"
+        ]
+      },
+      "plot": {
+        "required": [
+          "processed dataset manifest",
+          "mode: band-dos, pdos, or fatband"
+        ],
+        "optional": [
+          "repeatable species/orbital selectors",
+          "total DOS",
+          "energy window",
+          "marker scale and threshold"
+        ],
+        "selector_examples": [
+          "Fe:d",
+          "O:p",
+          "Cr:d-components",
+          "O:p-components"
+        ]
+      },
+      "vasp-band": {
+        "required": [
+          "EIGENVAL"
+        ],
+        "optional": [
+          "OUTCAR for the last E-fermi",
+          "line-mode KPOINTS/KPATH.in",
+          "POSCAR for reciprocal path distance",
+          "--fermi",
+          "--path-selector",
+          "--spin",
+          "--data-prefix"
+        ],
+        "supported_records": [
+          "one energy plus occupation",
+          "two spin-channel energies plus occupations"
+        ]
+      },
+      "vaspkit-band": {
+        "required": [
+          "One or more whitespace numeric REFORMATTED_BAND_*.dat-style matrices"
+        ],
+        "optional": [
+          "high-symmetry labels",
+          "channel names",
+          "--fermi"
+        ],
+        "path_mapping": "A decrease or restart in the matrix x coordinate starts a segment; segment-local coordinates are made continuous for plotting."
+      },
+      "wannier-band": {
+        "required": [
+          "Matching *_band.dat and *_band.labelinfo.dat files, including the supported .1/.2 channel convention"
+        ],
+        "optional": [
+          "--directory",
+          "--seed",
+          "--fermi",
+          "explicit band/label files"
+        ]
+      },
+      "compare": {
+        "required": [
+          "A DFT source (VASPKIT matrices or EIGENVAL inputs)",
+          "A Wannier90 band directory or explicit files"
+        ],
+        "constraint": "DFT and Wannier90 sources must have the same number and ordering of path segments."
+      },
+      "fatband": {
+        "required": [
+          "PROCAR or a generic x/E/weight table"
+        ],
+        "optional": [
+          "KPOINTS and POSCAR",
+          "1-based ion selectors",
+          "PROCAR orbital/group selectors",
+          "spin and Fermi settings"
+        ]
+      },
+      "fatband-panel": {
+        "required": [
+          "PROCAR",
+          "VASP5/6 POSCAR",
+          "line-mode KPOINTS",
+          "completed band OUTCAR with LORBIT >= 10",
+          "exactly one of explicit Fermi or reference OUTCAR",
+          "one or more SPECIES:ORBITAL projections"
+        ],
+        "checks": [
+          "terminal General timing and fatal markers",
+          "OUTCAR ISPIN against PROCAR spin blocks",
+          "POSCAR atom count against PROCAR ions",
+          "KPOINTS endpoints against the PROCAR path"
+        ],
+        "supported_records": [
+          "explicit spin component headers",
+          "headerless concatenated collinear spin blocks",
+          "fixed-width concatenated negative k-point coordinates",
+          "d-components preset expanding to five projections",
+          "p-components preset expanding to three projections",
+          "optional same-axis component overlays",
+          "dx2-y2/x2-y2 spelling aliases"
+        ]
+      },
+      "dos": {
+        "required": [
+          "DOSCAR or a generic numeric DOS table"
+        ],
+        "optional": [
+          "ion/orbital PDOS selectors",
+          "--fermi",
+          "spin-down mirroring",
+          "horizontal orientation"
+        ]
+      },
+      "panel": {
+        "required": [
+          "EIGENVAL",
+          "DOSCAR"
+        ],
+        "optional": [
+          "OUTCAR",
+          "KPOINTS",
+          "POSCAR",
+          "band/DOS Fermi references",
+          "PDOS selectors"
+        ]
+      }
+    },
+    "units_and_conventions": {
+      "energy": "eV",
+      "reciprocal_path": "Angstrom^-1 when POSCAR plus line-mode KPOINTS are supplied",
+      "dos": "Input DOS units, normally states/eV",
+      "projection_weight": "Dimensionless PROCAR/PBAND projection weight",
+      "energy_reference": "EIGENVAL uses explicit --fermi or the last OUTCAR E-fermi; VASPKIT matrices are already referenced unless --fermi is supplied; Wannier90 uses --fermi."
+    },
+    "local_scope": "All inputs are read from caller-selected local paths and all outputs are written to caller-selected local paths. No SSH, scheduler, VASP, Wannier90, or external service is invoked."
+  },
+  "output_contract": {
+    "artifacts": {
+      "figures": "Each plotting command accepts a comma-separated subset of PNG, LZW-compressed TIFF, PDF, and SVG and writes the requested suffixes under the caller-selected output stem.",
+      "vasp_band_data": "vasp-band --data-prefix optionally writes one CSV per selected spin channel and a JSON summary with input hashes, path metadata, and occupation-based edge metrics.",
+      "processed_dataset": "prepare writes reusable, spin-resolved wide CSV tables. Band rows are keyed by k point and band and include energy plus every species/orbital weight; PDOS rows include energy, total DOS, and every species/orbital contribution. A manifest records files, input hashes, path geometry, energy reference, available selectors and scientific boundaries.",
+      "characterization": "characterization.json/md report sampled-path band edges and gap indicators, bands crossing the energy reference, near-reference orbital character, DOS at and integrated around the reference, and cell versus PAW-projected magnetic moments.",
+      "selective_figures": "plot reads only the processed manifest/tables. band-dos produces one row per spin with band and DOS axes sharing energy; pdos produces a standalone mirrored-spin PDOS; fatband reuses selected weight columns without reparsing PROCAR.",
+      "fatband_panel_bundle": "The compatibility fatband-panel workflow remains available and writes figures, selected-window source CSV, provenance/audit JSON, and backend-measured alignment geometry.",
+      "stdout": "Successful runs print generated local paths; expected parse/contract errors print ERROR: <message> to stderr."
+    },
+    "optional_machine_readable": [
+      "CSV",
+      "JSON"
+    ],
+    "failure_behavior": {
+      "expected_error_exit_code": 2,
+      "conditions": [
+        "missing or unreadable input",
+        "unfinished/fatal band OUTCAR",
+        "LORBIT below 10",
+        "ISPIN/species/path mismatch",
+        "missing or ambiguous Fermi reference",
+        "unsupported or ambiguous DOSCAR PDOS layout",
+        "inconsistent numeric table",
+        "incompatible DFT/Wannier path segment structure"
+      ]
+    },
+    "scientific_boundaries": {
+      "band_gap": "Occupation-based VBM/CBM, indirect gap, and minimum direct gap are numerical metrics for the selected EIGENVAL k-path; they are not automatically a rigorous global band gap when the true extrema are outside that path.",
+      "path_mapping": "Comparison rescales Wannier x coordinates segment by segment after checking segment count and order. This is geometric plotting alignment, not proof that unrelated crystallographic paths or coordinate systems are equivalent.",
+      "procar": "Fatband consumes the first scalar charge-projection table after each band. Headerless concatenated collinear spin blocks are supported. Noncollinear vector magnetization tables are ignored; weights remain dependent on VASP projection settings, LORBIT, and PAW spheres.",
+      "pdos": "Only unambiguous common collinear grouped or orbital-resolved DOSCAR layouts are accepted. Ambiguous column counts fail rather than guessing orbital labels.",
+      "interpretation": "Plots and parsed values are analysis artifacts, not evidence of convergence, a unique orbital population, or a physical phase transition without the caller's independent calculation and convergence checks."
+    },
+    "side_effects": "No remote writes, scheduler submissions, external services, or scientific-code execution are performed; local figure/CSV/JSON writes are the only declared writes."
+  },
+  "dependencies": {
+    "python": [
+      ">=3.9"
+    ],
+    "packages": [
+      {
+        "name": "numpy",
+        "version": ">=1.24",
+        "required": true
+      },
+      {
+        "name": "matplotlib",
+        "version": ">=3.7",
+        "required": true
+      }
+    ],
+    "executables": [],
+    "external_services": []
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "authorization_policy": {
+    "route": "none",
+    "required_for": [],
+    "notes": "The extension is local-only. It does not authorize SSH, PBS/Slurm operations, scheduler submission, remote reads/writes, or VASP/Wannier90 execution."
+  },
+  "tests": {
+    "paths": [
+      "tests"
+    ],
+    "command_from_extension_root": "python tests/run_tests.py",
+    "dry_run": false,
+    "status_note": "Current host receipt on 2026-08-31: 14 parser/workflow/CLI tests passed, followed by a real 180-k-point, 72-band, 14-ion CrFeO prepare-characterize-plot forward run with 48 band-weight and 48 PDOS selectors per spin. Receipts: runs/crfeo-ferri-v1/analysis/s8_electronic_structure_characterization/."
+  },
+  "source_provenance": {
+    "source_path": "source/original_dft_wannier_compare.py",
+    "source_sha256": "88cb2f112dc12d66c5de8c2e973e49d1eef9edb1f699d7ceb008c9159dd88da5",
+    "notes": "Portable packaged source verification. Historical upstream paths/hashes are preserved in upstream_source_provenance; the packaged runtime may include the documented subsequent changes."
+  },
+  "module_type": "postprocessor",
+  "requires": [
+    "vasp.electronic-structure-outputs"
+  ],
+  "provides": [
+    "electronic-structure.processed-dataset",
+    "electronic-structure.characterization"
+  ],
+  "upstream_source_provenance": {
+    "source_path": "archived-development-source/original_dft_wannier_compare.py",
+    "source_sha256": "88cb2f112dc12d66c5de8c2e973e49d1eef9edb1f699d7ceb008c9159dd88da5",
+    "additional_sources": [
+      {
+        "source_path": "archived-development-source/original_vasp_soc_band.py",
+        "source_sha256": "5d5a57537f1ac08a86c7d4878c36993352d3079a438441d55bb22ea7c01e8788"
+      },
+      {
+        "source_path": "archived-development-source/original_wannier_band.py",
+        "source_sha256": "1c76043782280a5ea0931d4bbc62750fe939209a3f539228ba524a6f67ce341d"
+      }
+    ],
+    "migration_metadata": {
+      "source_package_root": "archived-development-source/band-dos-analysis",
+      "preserved_source_copies": [
+        "source/original_dft_wannier_compare.py",
+        "source/original_vasp_soc_band.py",
+        "source/original_wannier_band.py"
+      ],
+      "runtime_tree": "The migrated src/ and scripts/ runtime files were extended locally into a tested workflow while the three original sources remain preserved byte-for-byte.",
+      "current_evidence": "The current host test and real-data QA receipt is stored outside the immutable extension tree under runs/crfeo-ferri-v1/analysis/s8_electronic_structure_characterization/."
+    },
+    "notes": "The three original source files are preserved byte-for-byte as provenance copies and are not entrypoints. Version 0.3.0 renames the extension to electronic-structure-characterization and adds a reusable processed-data workflow while retaining every version 0.2.2 plotting command through the compatibility entrypoint."
+  }
+}

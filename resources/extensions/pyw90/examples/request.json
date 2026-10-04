@@ -1,0 +1,10 @@
+{
+  "schema": "fpilot.pyw90-request.v1",
+  "input_dir": "../tests/fixtures",
+  "command": ["eig", "dist", "--path", ".", "-i", "wannier90.eig", "--efermi", "0"],
+  "expected_inputs": ["wannier90.eig"],
+  "expected_outputs": [],
+  "expected_output_base": "input_dir",
+  "output_dir": "pyw90_results",
+  "executable": "pyw90"
+}

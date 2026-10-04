@@ -1,0 +1,63 @@
+{
+  "schema": "fpilot.pyw90-window-scan-request.v1",
+  "source": {
+    "spin": "spin_down",
+    "seedname": "wannier90.2",
+    "template_win": "inputs/wannier90.2.win",
+    "eig": "prepared/wannier90.2.eig",
+    "dft_band": "prepared/bnd_down.dat",
+    "fermi_eV": 5.0182,
+    "expected_num_wann": 54
+  },
+  "target": {
+    "mode": "auto_projector",
+    "projectability": {
+      "source": "amn",
+      "path": "prepared/wannier90.2.amn"
+    },
+    "cumulative_weight_coverage": 0.99,
+    "margin_eV": 0.1
+  },
+  "search": {
+    "initial": {},
+    "offsets_eV": [-0.5, 0.0, 0.5],
+    "eps_eV": 0.004,
+    "gap_candidates": 1,
+    "allow_deep_gap_fallback": false,
+    "max_outer_excess_states": 3,
+    "min_disentanglement_headroom": 6,
+    "frozen_projectability_coverages": [0.4, 0.5, 0.6],
+    "max_candidates": 24
+  },
+  "comparison": {
+    "dft_band_offset": "auto",
+    "max_excess_jump_eV": 1.5
+  },
+  "refinement": {
+    "max_rounds": 2,
+    "step_eV": [0.5, 0.25],
+    "candidates_per_round": 8
+  },
+  "review": {
+    "quality": "not_reviewed",
+    "spin": "spin_down",
+    "note": null
+  },
+  "execution": {
+    "argv": ["wannier90.x", "{seedname}"],
+    "max_workers": 2,
+    "timeout_seconds": 3600,
+    "shared_inputs": [
+      "prepared/wannier90.2.amn",
+      "prepared/wannier90.2.mmn",
+      "prepared/wannier90.2.eig"
+    ],
+    "shared_input_mode": "copy",
+    "result_files": {
+      "band": "{seedname}_band.dat",
+      "labelinfo": "{seedname}_band.labelinfo.dat",
+      "wout": "{seedname}.wout"
+    }
+  },
+  "output_dir": "window_scan/spin_down"
+}

@@ -1,0 +1,38 @@
+export async function readJson(response: Response): Promise<any> {
+  const text = await response.text();
+  let data: any = null;
+  if (text.trim()) {
+    try { data = JSON.parse(text); }
+    catch { throw new Error('服务返回了无法读取的内容。请确认本机 API 正在运行，然后重试。'); }
+  }
+  if (!response.ok) {
+    const detail = data?.detail;
+    throw new Error(typeof detail === 'string' && detail.trim() ? detail : `请求失败（HTTP ${response.status}）。请检查服务状态后重试。`);
+  }
+  if (data === null) throw new Error('服务返回空响应。请确认本机 API 正在运行，然后重试。');
+  return data;
+}
+
+export async function requestJson(path: string, body?: unknown, method?: string): Promise<any> {
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: method || (body === undefined ? 'GET' : 'POST'),
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('无法连接本机 API。请检查服务是否运行；恢复后可在当前页面重试，已填写内容仍保留。');
+  }
+  try { return await readJson(response); }
+  finally {
+    if (typeof window !== 'undefined' && /\/(submit|refresh|resolve-legacy)$/.test(path))
+      window.dispatchEvent(new Event('fpilot:binding-changed'));
+  }
+}
+
+export function errorMessage(error: unknown): string {
+  if (error instanceof TypeError || (error instanceof Error && /failed to fetch|networkerror|load failed/i.test(error.message)))
+    return '无法连接本机 API。请检查服务是否运行；恢复后在当前页面重试。';
+  return error instanceof Error ? error.message : '请求未完成。请检查服务状态后重试。';
+}

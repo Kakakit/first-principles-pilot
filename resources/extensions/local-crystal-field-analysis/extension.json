@@ -1,0 +1,159 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "local-crystal-field-analysis",
+  "version": "0.1.0",
+  "status": "ready",
+  "domain": "wannier90-analysis",
+  "description": "Extract local transition-metal d Hamiltonians from Wannier90 hr.dat files, rotate them into a bond-defined coordination frame, and compare fixed coarse/dense models.",
+  "entrypoints": [
+    {
+      "name": "calc-local-crystal-field",
+      "path": "scripts/calc_local_crystal_field.py",
+      "usage": "python scripts/calc_local_crystal_field.py HR_DAT --poscar POSCAR --sites SPECIES_PROJECTIONS [--coord COORDINATION] [--global-frame] [--mp-grid N1 N2 N3 --occ N] [--spin LABEL]"
+    },
+    {
+      "name": "compare-dense-coarse",
+      "path": "scripts/compare_dense_coarse.py",
+      "usage": "python scripts/compare_dense_coarse.py --module scripts/calc_local_crystal_field.py --coarse COARSE_DIR --dense DENSE_DIR --output REPORT_JSON"
+    }
+  ],
+  "input_contract": {
+    "required": [
+      "Wannier90 seedname_hr.dat for one spin channel",
+      "The POSCAR used for the Wannier model",
+      "Projection/species order supplied through --sites"
+    ],
+    "configuration": {
+      "calc_local_crystal_field": {
+        "hr": "Wannier90 seedname_hr.dat; R=(0,0,0) is divided by the hr.dat degeneracy before local analysis",
+        "poscar": "POSCAR with species/count lines and Direct or Cartesian coordinates",
+        "sites": "Comma-separated species:l entries in exactly the POSCAR species-row order; l=2 maps each atom to 5 d WFs and l=1 maps each atom to 3 p WFs",
+        "coord": "Comma-separated species:coordination entries; 6 selects the octahedral t2g/eg partition and any other value selects the tetrahedral e/t2 partition",
+        "mp_grid_occ": "Optional integer mp_grid and occupied-band count; both are required together to calculate the Wannier-basis density matrix",
+        "global_frame": "Optional switch disabling bond-direction fitting and using the global Cartesian axes",
+        "spin": "Optional report-only label"
+      },
+      "compare_dense_coarse": {
+        "module": "Path to the migrated calc_local_crystal_field module",
+        "coarse": "Directory containing POSCAR, wannier90.1_hr.dat, and wannier90.2_hr.dat",
+        "dense": "Directory containing POSCAR, wannier90.1_hr.dat, and wannier90.2_hr.dat",
+        "output": "Local JSON report path; parent directory must already be writable"
+      }
+    },
+    "units_and_conventions": {
+      "numpy": "Required runtime dependency; the source does not pin a NumPy version. It uses NumPy arrays, linalg.svd/eigh, einsum, exp, trace, norm, ptp, and random.default_rng in the test; migration validation used NumPy 2.0.2.",
+      "hr_dat": "Hamiltonian real and imaginary components are interpreted in eV; R coordinates are integer lattice translations and degeneracies are dimensionless.",
+      "poscar": "Lattice vectors are converted to Cartesian Angstrom using the POSCAR scale. Direct coordinates are multiplied by the lattice; Cartesian coordinates are multiplied by the POSCAR scale as implemented by the source.",
+      "projection_order": "Wannier90 l=2 order is [dz2, dxz, dyz, dx2-y2, dxy]; l=1 order is [pz, px, py]. This differs from the VASP OUTCAR d-occupation order.",
+      "coordinates": "Bond vectors are normalized Cartesian Angstrom vectors. The fitted rotation q has local x,y,z axes as columns in global Cartesian coordinates; d_rotation returns a dimensionless 5x5 orthogonal transformation. Fit RMSD is dimensionless.",
+      "local_field": "Reported energy splittings, eigenvalues, mixing norms, and density-matrix-derived quantities are in eV where applicable; occupation numbers and RMSD are dimensionless."
+    },
+    "assumptions": [
+      "The hr.dat WF ordering follows the .win projections expanded by POSCAR species and atom order.",
+      "Each analyzed transition-metal site has the requested number of nearby oxygen neighbors within the 3x3x3 translation search.",
+      "Each spin channel is analyzed independently; compare_dense_coarse expects spin 1 and spin 2 hr.dat files in each model directory."
+    ]
+  },
+  "output_contract": {
+    "artifacts": [
+      {
+        "entrypoint": "calc-local-crystal-field",
+        "path": "stdout only",
+        "format": "Human-readable UTF-8 text; no JSON artifact is emitted",
+        "content": "Local-frame bond lengths and fit RMSD, subspace centroids and splitting, subspace eigenvalue spreads, full 5x5 eigenvalues and weights, plus optional natural-orbital occupations and subspace polarization"
+      },
+      {
+        "entrypoint": "compare-dense-coarse",
+        "path": "--output",
+        "format": "Indented UTF-8 JSON",
+        "schema": "Top-level coarse_directory, dense_directory, coarse, dense, and dense_minus_coarse; each site contains local_frame_rmsd and spin1/spin2/charge metrics with eV-suffixed eigenvalue/splitting keys",
+        "stdout": "Prints the output path only"
+      }
+    ],
+    "stdout": [
+      "calc_local_crystal_field.py prints the report and diagnostics; numerical energies are labeled eV.",
+      "compare_dense_coarse.py prints the requested JSON output path after writing it."
+    ],
+    "failure_markers": [
+      "Non-zero process exit from argparse/SystemExit for missing or inconsistent inputs",
+      "RuntimeError when the hr.dat R-block count is inconsistent",
+      "FileNotFoundError/OSError for missing local input or unwritable local output"
+    ]
+  },
+  "dependencies": {
+    "python": [
+      ">=3.9"
+    ],
+    "packages": [
+      {
+        "name": "numpy",
+        "version": "not pinned by source; tested with 2.0.2",
+        "required": true
+      }
+    ],
+    "executables": [],
+    "files": []
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "authorization_policy": {
+    "route": "none",
+    "required_for": [],
+    "notes": "No remote read/write, SSH, Wannier90 execution, scheduler submission, job deletion, or other remote/scheduler side effect is performed."
+  },
+  "tests": {
+    "paths": [
+      "tests"
+    ],
+    "command_from_extension_root": "python tests/test_calc_local_crystal_field.py",
+    "dry_run": false
+  },
+  "source_provenance": {
+    "source_path": "scripts/calc_local_crystal_field.py",
+    "source_sha256": "7a68d8e6f1a3c24751fdfd80c87de9850a5ab4469c1d92048b8852b7f48c9409",
+    "notes": "Portable packaged source verification. Historical upstream paths/hashes are preserved in upstream_source_provenance; the packaged runtime may include the documented subsequent changes."
+  },
+  "migration_metadata": {
+    "additional_source_provenance": [
+      {
+        "role": "comparison_entrypoint",
+        "source_path": "archived-development-source/compare_dense_coarse.py",
+        "source_sha256": "072dcded4e73ba7ae932286cc48be5a7b4f35da1803f2be31ca709f5fb30589f"
+      },
+      {
+        "role": "test_source",
+        "source_path": "archived-development-source/test_calc_local_crystal_field.py",
+        "source_sha256": "5cf4c1d74c448ed32b0fc8ffca9fb01919777ad6bb9144ef8520b40fe2062077"
+      }
+    ],
+    "fixed_compare_mapping": {
+      "Cr": {
+        "atom_index": 0,
+        "wf_start": 0,
+        "coordinate_number": 6
+      },
+      "Fe": {
+        "atom_index": 4,
+        "wf_start": 20,
+        "coordinate_number": 4
+      }
+    },
+    "scientific_boundary": "A local crystal-field eigenvalue or subspace centroid is not the same quantity as a PDOS global-axis nominal centroid."
+  },
+  "module_type": "postprocessor",
+  "requires": [
+    "structure.poscar",
+    "wannier90.hamiltonian-bundle",
+    "wannier90.projection-order"
+  ],
+  "provides": [
+    "wannier90.local-crystal-field-report"
+  ],
+  "upstream_source_provenance": {
+    "source_path": "archived-development-source/calc_local_crystal_field.py",
+    "source_sha256": "7a68d8e6f1a3c24751fdfd80c87de9850a5ab4469c1d92048b8852b7f48c9409",
+    "notes": "Primary provenance is the original calc_local_crystal_field.py. The migrated analysis source is retained without algorithmic changes."
+  }
+}

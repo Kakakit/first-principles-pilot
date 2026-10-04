@@ -1,0 +1,22 @@
+import {useEffect,useRef} from 'react';
+import type {Analysis} from './extensionModel';
+import {analysisLabel,runningAnalysis} from './extensionModel';
+import * as echarts from 'echarts/core';
+import {LineChart} from 'echarts/charts';
+import {GridComponent,TooltipComponent,LegendComponent,DataZoomComponent,TitleComponent} from 'echarts/components';
+import {CanvasRenderer} from 'echarts/renderers';
+echarts.use([LineChart,GridComponent,TooltipComponent,LegendComponent,DataZoomComponent,TitleComponent,CanvasRenderer]);
+function Curve({data}:{data:NonNullable<Analysis['result']>['curves'][number]}){
+ const host=useRef<HTMLDivElement>(null);
+ useEffect(()=>{if(!host.current)return;const chart=echarts.init(host.current);chart.setOption({title:{text:data.title},tooltip:{trigger:'axis'},legend:{bottom:0},grid:{left:72,right:28,top:30,bottom:80},xAxis:{type:'value',name:`${data.x_label} ${data.x_unit}`},yAxis:{type:'value',name:`${data.y_label} ${data.y_unit}`},dataZoom:[{type:'inside'}],series:data.series.map(s=>({name:s.label,type:'line',showSymbol:false,data:s.points}))});const resize=new ResizeObserver(()=>chart.resize());resize.observe(host.current);return()=>{resize.disconnect();chart.dispose();};},[data]);
+ return <div ref={host} className="extension-curve" role="img" aria-label={data.title}/>;
+}
+const cell=(value:unknown)=>value===null||value===undefined?'—':typeof value==='number'?String(Number(value.toPrecision(8))):typeof value==='object'?JSON.stringify(value):String(value);
+export default function ExtensionResult({record,onRefresh}:{record:Analysis;onRefresh?:()=>void}){
+ const file=(name:string)=>`/api/extension-host/analyses/${record.id}/files/${name.split('/').map(encodeURIComponent).join('/')}`;
+ return <article className="analysis-record"><div className="extension-heading"><div><h3>{record.manifest.name}</h3><p>{new Date(record.created_at).toLocaleString()} · {record.location==='local'?'本机':record.location==='ssh'?'SSH 直接读取':'调度分析'}{record.job_id&&` · job ID ${record.job_id}`}</p></div><span className={`analysis-state state-${record.state.toLowerCase()}`}>{analysisLabel(record.state)}</span></div>
+ {['UNKNOWN','FAILED'].includes(record.state)&&<div className="analysis-recovery"><strong>{record.state==='UNKNOWN'?'先核对原分析任务':'查看错误后另行修正配置'}</strong><p>{record.state==='UNKNOWN'?'保留原 analysis ID 与 job ID，核查现有回执，不自动重投。':'本次分析保留失败记录；来源计算不受影响。'}</p></div>}{record.error&&<p className="handoff-warning" role="status">{record.error}</p>}{record.check&&<p>适用性：{record.check.status==='APPLICABLE'?'已通过':'不适用'} · {record.check.reason}</p>}
+ {record.result&&<><p>{record.result.summary}</p>{record.result.warnings.map((s,i)=><p className="handoff-warning" key={i}>{s}</p>)}<p>科学验证：{record.scientific_validation==='NOT_PERFORMED'?'未进行':record.scientific_validation==='INSUFFICIENT'?'证据不足，需另行验证':record.scientific_validation}</p>{record.result.tables.map((table,i)=><div className="extension-table" key={i}><h4>{table.title}</h4><div className="atoms-scroll"><table><thead><tr>{table.columns.map(c=><th key={c.key}>{c.label}{c.unit&&` / ${c.unit}`}</th>)}</tr></thead><tbody>{table.rows.map((row,j)=><tr key={j}>{table.columns.map(c=><td key={c.key}>{cell(row[c.key])}</td>)}</tr>)}</tbody></table></div></div>)}{record.result.curves.map((curve,i)=><Curve key={i} data={curve}/>)}</>}
+ <div className="extension-downloads">{record.outputs.map(item=><div key={item.path}>{item.available&&item.media_type.startsWith('image/')&&<img src={file(item.path)} alt={item.label}/>} {item.available?<a className="button" href={file(item.path)} download>{item.label}</a>:<span>{item.label} · {(item.size_bytes/1024/1024).toFixed(1)} MiB，保留在服务器</span>}</div>)}<a className="text-button" href={file('analysis.json')} download>下载来源与运行记录</a>{record.result&&<a className="text-button" href={file('result.json')} download>结果 JSON</a>}{record.location==='local'&&record.state==='FAILED'&&<a className="text-button" href={file('stderr.log')} download>分析错误日志</a>}{record.location!=='local'&&(runningAnalysis(record.state)||['UNKNOWN','FAILED'].includes(record.state))&&onRefresh&&<button className="button" onClick={onRefresh}>核对原任务状态</button>}</div>
+ {record.remote_dir&&<p className="extension-remote-path">独立分析目录：<code>{record.remote_dir}</code></p>}<details className="extension-lineage"><summary>来源记录 · {record.sources.length} 个</summary>{record.sources.map(s=><p key={s.id}>{s.name} · {s.attempt_id?`attempt ${s.attempt_id}`:`结构身份 ${s.sha256?.slice(0,16)}`}</p>)}</details></article>;
+}

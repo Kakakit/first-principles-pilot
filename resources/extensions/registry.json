@@ -1,0 +1,41 @@
+{
+  "schema": "fpilot.extension-registry.v1",
+  "extensions": [
+    {
+      "name": "local-crystal-field-analysis",
+      "version": "0.1.0",
+      "status": "ready",
+      "hash": "6c08a812c93140216c9ee251ec835b8b681201efc3e21e3aced6d0d6b554453d"
+    },
+    {
+      "name": "lcalcpol-polarization-analysis",
+      "version": "0.3.0",
+      "status": "ready",
+      "hash": "bc8177c1f0ff032adc5b69ae09101c7eb6cd1f54058e84856c49939a29d5bf33"
+    },
+    {
+      "name": "crystal-structure-distortion-analysis",
+      "version": "0.2.0",
+      "status": "experimental",
+      "hash": "b780da5d6d11a8f772c34c5d23466e659896d847e5a2fb9480b26550fd5dbdcb"
+    },
+    {
+      "name": "electronic-structure-characterization",
+      "version": "0.3.0",
+      "status": "ready",
+      "hash": "cfea6ecc3440789f89e135e4688c3e3c94e910299a3eed025b3dc8c0ff76f621"
+    },
+    {
+      "name": "tb2j",
+      "version": "0.1.0",
+      "status": "experimental",
+      "hash": "20ed2fa771b1c89cca3686e24b4c8604b80f23b4b64a3def76dcde2e998b564b"
+    },
+    {
+      "name": "pyw90",
+      "version": "0.5.0",
+      "status": "experimental",
+      "hash": "20f8d880796ae10f9a51269c421563b92088d2e1017bc62847870e23c05364e9"
+    }
+  ]
+}

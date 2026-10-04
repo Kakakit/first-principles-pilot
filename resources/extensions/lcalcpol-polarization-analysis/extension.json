@@ -1,0 +1,117 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "lcalcpol-polarization-analysis",
+  "version": "0.3.0",
+  "status": "ready",
+  "domain": "vasp-polarization",
+  "description": "Parse LCALCPOL dipoles and compare matched-cell SOC minus noSOC raw polarizations before quantum reduction.",
+  "entrypoints": [
+    {
+      "name": "calc-lcalcpol",
+      "path": "scripts/calc_lcalcpol.py",
+      "usage": "python scripts/calc_lcalcpol.py"
+    },
+    {
+      "name": "compare-lcalcpol",
+      "path": "scripts/calc_lcalcpol.py",
+      "usage": "python scripts/calc_lcalcpol.py compare --nosoc-outcar <OUTCAR> --nosoc-poscar <POSCAR> --soc-outcar <OUTCAR> --soc-poscar <POSCAR>"
+    }
+  ],
+  "input_contract": {
+    "required": [
+      "POSCAR used by the completed VASP calculation",
+      "OUTCAR from a successful, converged LCALCPOL/PEAD calculation containing complete p[ion] and p[elc] records"
+    ],
+    "configuration": {
+      "working_directory": "Single mode reads POSCAR and OUTCAR from the current directory; compare mode requires explicit noSOC and SOC OUTCAR/POSCAR paths."
+    },
+    "units_and_conventions": {
+      "lattice": "POSCAR lattice vectors in Angstrom",
+      "volume": "POSCAR cell volume in Angstrom^3",
+      "dipoles": "p[ion], p[elc], and their sum in e Ang (e Angstrom)",
+      "polarization": "dipole/volume multiplied by 16.021766, reported in C/m^2 and uC/m^2",
+      "branch_reduction": "The dipole is solved in lattice coordinates and integer lattice quanta are subtracted componentwise."
+    },
+    "assumptions": [
+      "The OUTCAR is expected to be completed and contains complete p[ion] and p[elc] records; convergence is not inferred by this extension.",
+      "The single-structure result is a formal polarization branch, not by itself a spontaneous-polarization or switchability result.",
+      "Compare mode rejects mismatched POSCAR lattices and reports same-branch DeltaP as INSUFFICIENT without an adiabatic branch proof."
+    ]
+  },
+  "output_contract": {
+    "artifacts": [
+      {
+        "entrypoint": "calc-lcalcpol",
+        "path": "stdout only",
+        "format": "Human-readable UTF-8 text in single mode; canonical JSON in compare mode",
+        "content": "Single mode reports ionic/electronic/total dipoles, raw/formal/branch-representative polarization and magnitudes. Compare mode reports both endpoints, hashes, polarization quantum vectors, candidate DeltaP, precision, assumptions, and an INSUFFICIENT same-branch conclusion when no path evidence is present. In v0.3.0 candidate DeltaP is reduced after raw subtraction; the old independently reduced endpoint difference is diagnostic only. JSON includes schema_version, reduction coefficients and integers, and C/m2/uC/m2 differences and reduced magnitudes."
+      }
+    ],
+    "stdout": [
+      "Total dipole is labeled e Ang.",
+      "Raw polarization magnitude is labeled |P| in C/m^2.",
+      "Branch-reduced polarization magnitude is labeled |P_red| in C/m^2 and |P_red|*1e6 in uC/m^2.",
+      "The reduced magnitude is a formal-branch representative magnitude, not spontaneous polarization or a unique minimum.",
+      "Compare mode reports lattice mismatch as an error rather than comparing different cells."
+    ],
+    "failure_markers": [
+      "RuntimeError: Cannot find p[ion]",
+      "RuntimeError: Cannot find p[elc]",
+      "FileNotFoundError/OSError for a missing or unreadable POSCAR or OUTCAR",
+      "Non-zero process exit"
+    ]
+  },
+  "dependencies": {
+    "python": [
+      ">=3.9"
+    ],
+    "packages": [
+      {
+        "name": "numpy",
+        "version": "not pinned by source",
+        "required": true
+      },
+      {
+        "name": "pymatgen",
+        "version": "not pinned by source",
+        "required": true
+      }
+    ],
+    "executables": [],
+    "external_services": []
+  },
+  "side_effects": [
+    "local_read"
+  ],
+  "authorization_policy": {
+    "route": "none",
+    "required_for": [],
+    "notes": "No SSH, PBS, scheduler, remote service, remote read/write, or VASP execution is performed."
+  },
+  "tests": {
+    "paths": [
+      "tests"
+    ],
+    "command_from_extension_root": "python tests/test_calc_lcalcpol.py",
+    "dry_run": false
+  },
+  "source_provenance": {
+    "source_path": "scripts/calc_lcalcpol.py",
+    "source_sha256": "84ea7b03981adc635abcbf2578b4fa0f25cfc15a52b6deb45e563ac56b48d291",
+    "notes": "Portable packaged source verification. Historical upstream paths/hashes are preserved in upstream_source_provenance; the packaged runtime may include the documented subsequent changes."
+  },
+  "module_type": "postprocessor",
+  "requires": [
+    "structure.poscar",
+    "vasp.outcar",
+    "vasp.lcalcpol-completion"
+  ],
+  "provides": [
+    "polarization.formal-branch-report"
+  ],
+  "upstream_source_provenance": {
+    "source_path": "archived-development-source/calc_lcalcpol.py",
+    "source_sha256": "1c23649bfe53eb987723f894dbd5ab7cf994a851d5b39e1ac5dbb0936434c777",
+    "notes": "Migration copy preserves the source POSCAR/OUTCAR parsing, constants, conversion, and reduce_branch algorithm, adds scientific-notation/last-record parsing and an explicit conservative compare mode. The original source file in Downloads was not modified; its source hash remains the provenance reference. The single-endpoint branch algorithm remains unchanged; compare-mode changes are described below. v0.3.0 changes compare-mode order to difference-first reduction in the shared noSOC quantum basis, preserving single-endpoint reduce_branch and the original conversion constant."
+  }
+}

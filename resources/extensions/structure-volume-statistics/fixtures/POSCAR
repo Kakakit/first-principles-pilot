@@ -1,0 +1,11 @@
+Si test cell
+1.0
+0.0 2.715 2.715
+2.715 0.0 2.715
+2.715 2.715 0.0
+Si
+2
+Selective dynamics
+Direct
+0 0 0 T T T
+0.25 0.25 0.25 F T F

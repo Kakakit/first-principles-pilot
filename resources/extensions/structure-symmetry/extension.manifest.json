@@ -1,0 +1,65 @@
+{
+  "schema": "fpilot.extension.v2",
+  "id": "structure-symmetry",
+  "name": "空间对称性",
+  "version": "2.0.0",
+  "description": "比较三个几何容差下的普通空间群、Wyckoff 位与等价原子；不分析磁空间群。",
+  "entrypoint": "scripts/cli.py",
+  "contexts": [
+    "structure",
+    "attempt"
+  ],
+  "stages": [],
+  "sources": {
+    "min": 1,
+    "max": 1
+  },
+  "inputs": [
+    {
+      "role": "structure",
+      "title": "结构",
+      "names": [
+        "CONTCAR",
+        "POSCAR"
+      ],
+      "max_bytes": 10485760
+    }
+  ],
+  "evidence": [],
+  "execution": {
+    "locations": [
+      "local",
+      "ssh",
+      "scheduler"
+    ],
+    "timeout_seconds": 300
+  },
+  "dependencies": [
+    "pymatgen",
+    "spglib"
+  ],
+  "options_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "angle_tolerance_degree": {
+        "type": "number",
+        "title": "角度容差 / °",
+        "default": 5,
+        "exclusiveMinimum": 0,
+        "maximum": 30
+      }
+    },
+    "required": [
+      "angle_tolerance_degree"
+    ]
+  },
+  "ui_schema": {},
+  "outputs": [
+    "table",
+    "file"
+  ],
+  "fixtures": [
+    "fixtures/POSCAR"
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "fpilot.extension-sdk.v1",
+  "id": "structure-symmetry",
+  "name": "晶体空间对称性",
+  "version": "1.0.0",
+  "description": "只读比较 POSCAR/CONTCAR 在三个 symprec 容差下的普通空间群、等价原子与 Wyckoff 位。",
+  "adapter": "cli-v1",
+  "input_selectors": [
+    {
+      "id": "structure",
+      "artifact_names": [
+        "POSCAR",
+        "CONTCAR"
+      ],
+      "max_bytes": 10485760
+    }
+  ],
+  "applicability": {
+    "result_schema": "fpilot.extension-applicability.v1"
+  },
+  "outputs": {
+    "schema": "fpilot.structure-symmetry.v1",
+    "files": [
+      "symmetry.json"
+    ]
+  },
+  "dependencies": {
+    "python_modules": [
+      "pymatgen",
+      "spglib"
+    ]
+  },
+  "runtime": {
+    "interpreter": "registered-python",
+    "timeout_seconds": 120
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "fixtures": [
+    "fixtures/Si.POSCAR"
+  ],
+  "entrypoint": "scripts/symmetry.py"
+}

@@ -1,0 +1,80 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "tb2j",
+  "version": "0.1.0",
+  "status": "experimental",
+  "domain": "wannier90-postprocessing",
+  "description": "Check Wannier90 Hamiltonian files and run TB2J's wann2J.py for exchange post-processing.",
+  "entrypoints": [
+    {
+      "name": "tb2j",
+      "path": "scripts/tb2j.py",
+      "usage": "python3 scripts/tb2j.py {doctor|check|run} ..."
+    }
+  ],
+  "input_contract": {
+    "required": [
+      "input_dir containing POSCAR and the selected Wannier90 Hamiltonian files",
+      "finite efermi_ev in eV",
+      "positive three-integer kmesh",
+      "elements or 1-based index_magnetic_atoms",
+      "for each prefix: _tb.dat or _hr.dat plus _centres.xyz"
+    ],
+    "configuration": {
+      "mode": "spinor or collinear",
+      "prefix": "spinor prefix; collinear uses prefix_up and prefix_down",
+      "win": "optional prefix.win; only num_wann and spinors are checked",
+      "output_dir": "local output directory, default TB2J_results under input_dir"
+    }
+  },
+  "output_contract": {
+    "artifacts": [
+      "tb2j_run.json containing argv, cwd, stdout, stderr, returncode, and exchange.out status",
+      "tb2j_stdout.txt",
+      "tb2j_stderr.txt",
+      "exchange.out produced by wann2J.py"
+    ],
+    "stdout": "doctor, check, and run print one JSON object",
+    "success": "run succeeds only when wann2J.py returns zero and output_dir/exchange.out is non-empty",
+    "interpretation": "The extension does not decide the sign or physical meaning of J/DMI values."
+  },
+  "dependencies": {
+    "python": ">=3.9",
+    "packages": [],
+    "executables": ["wann2J.py supplied by the user or site environment"],
+    "external_services": []
+  },
+  "side_effects": ["local_read", "local_write"],
+  "authorization_policy": {
+    "route": "none",
+    "required_for": [],
+    "notes": "Only caller-selected local input/output paths are used; no SSH, scheduler, or remote operation is performed."
+  },
+  "tests": {
+    "paths": ["tests/test_tb2j.py", "tests/fixtures"],
+    "command_from_extension_root": "python3 -m unittest discover -s tests -p 'test_*.py'",
+    "dry_run": false
+  },
+  "source_provenance": {
+    "source_path": "scripts/tb2j.py",
+    "source_sha256": "b1066208544e8b4b91d0932387455678ac7daa3eb483fa1a48947dc246fe8b42",
+    "notes": "The wrapper delegates to the user-provided TB2J executable. Official parameter names are recorded in README.md and are not copied from the manual."
+  },
+  "references": ["references/tb2j-wannier90.md"],
+  "module_type": "postprocessor",
+  "requires": [
+    "structure.poscar",
+    "wannier90.hamiltonian-bundle",
+    "electronic.fermi-energy",
+    "sampling.kmesh",
+    "magnetic.selection"
+  ],
+  "provides": [
+    "magnetic.exchange",
+    "tb2j.report"
+  ],
+  "command": {
+    "path": "scripts/tb2j.py",
+    "usage": "python3 scripts/tb2j.py check --request request.json"
+  }
+}

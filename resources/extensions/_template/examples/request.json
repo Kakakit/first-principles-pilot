@@ -1,0 +1,9 @@
+{
+  "schema": "replace-with-project-request.v1",
+  "input_dir": "case",
+  "command": ["inspect"],
+  "expected_inputs": ["INPUT_FILE"],
+  "expected_outputs": [],
+  "output_dir": "results",
+  "executable": "external-command"
+}

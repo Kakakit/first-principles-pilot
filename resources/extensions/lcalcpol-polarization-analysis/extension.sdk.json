@@ -1,0 +1,51 @@
+{
+  "schema": "fpilot.extension-sdk.v1",
+  "id": "lcalcpol-polarization-analysis",
+  "name": "LCALCPOL 极化分支",
+  "version": "1.0.0",
+  "description": "已打包旧扩展，使用受控宿主适配器运行。",
+  "adapter": "legacy-lcalcpol",
+  "input_selectors": [
+    {
+      "id": "structure",
+      "artifact_names": [
+        "POSCAR",
+        "CONTCAR"
+      ],
+      "max_bytes": 10485760
+    },
+    {
+      "id": "outcar",
+      "artifact_names": [
+        "OUTCAR"
+      ],
+      "max_bytes": 10485760
+    }
+  ],
+  "applicability": {
+    "result_schema": "fpilot.extension-applicability.v1"
+  },
+  "outputs": {
+    "schema": "fpilot.lcalcpol-stdout.v1",
+    "files": []
+  },
+  "dependencies": {
+    "python_modules": [
+      "numpy",
+      "pymatgen"
+    ]
+  },
+  "runtime": {
+    "interpreter": "registered-python",
+    "timeout_seconds": 300
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "fixtures": [
+    "tests/fixtures/POSCAR",
+    "tests/fixtures/OUTCAR"
+  ],
+  "entrypoint": "scripts/calc_lcalcpol.py"
+}

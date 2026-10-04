@@ -1,0 +1,74 @@
+{
+  "schema": "fpilot.theme.v1",
+  "id": "my-theme",
+  "name": "我的绿白主题",
+  "description": "修改颜色和中英文字体后导入工作台",
+  "base": "celadon",
+  "appearance": "light",
+  "colors": {
+    "background": "#f3f7f5",
+    "surface": "#ffffff",
+    "surfaceRaised": "#f5f9f7",
+    "sidebar": "#ffffff",
+    "sidebarText": "#254b41",
+    "sidebarMuted": "#63786f",
+    "text": "#263c34",
+    "mutedText": "#60756c",
+    "border": "#dce7e1",
+    "accent": "#19816b",
+    "accentText": "#ffffff",
+    "accentSoft": "#f2fcf7",
+    "success": "#24714e",
+    "successSoft": "#eaf7ee",
+    "warning": "#8b5b16",
+    "warningSoft": "#fff4df",
+    "danger": "#b5414a",
+    "dangerSoft": "#fcecef",
+    "canvas": "#f5f9f6",
+    "canvasGrid": "#d4e4da",
+    "canvasEdge": "#7a9e8e",
+    "codeBackground": "#eef4f0",
+    "codeText": "#304b3d",
+    "plotText": "#53685f",
+    "plotGrid": "#dce7e1"
+  },
+  "fonts": {
+    "chinese": [
+      "PingFang SC",
+      "Microsoft YaHei",
+      "Noto Sans CJK SC",
+      "sans-serif"
+    ],
+    "english": [
+      "Inter",
+      "-apple-system",
+      "BlinkMacSystemFont",
+      "Segoe UI",
+      "sans-serif"
+    ],
+    "headingChinese": [
+      "PingFang SC",
+      "Microsoft YaHei",
+      "Noto Sans CJK SC",
+      "sans-serif"
+    ],
+    "headingEnglish": [
+      "Inter",
+      "-apple-system",
+      "BlinkMacSystemFont",
+      "Segoe UI",
+      "sans-serif"
+    ],
+    "monospace": [
+      "SFMono-Regular",
+      "Menlo",
+      "Consolas",
+      "monospace"
+    ]
+  },
+  "metrics": {
+    "fontSize": 15,
+    "secondaryFontSize": 13,
+    "radius": 12
+  }
+}

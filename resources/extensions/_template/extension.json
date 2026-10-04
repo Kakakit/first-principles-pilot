@@ -1,0 +1,29 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "_template",
+  "version": "0.1.0",
+  "status": "template",
+  "domain": "replace-with-domain",
+  "description": "Copyable scaffold for a small external-project adapter; replace metadata and code before use.",
+  "entrypoints": [
+    {
+      "name": "extension",
+      "path": "scripts/extension.py",
+      "usage": "python3 scripts/extension.py {doctor|check|run} --request request.json"
+    }
+  ],
+  "input_contract": {"required": ["A project-specific request JSON", "Local files declared by that request"], "configuration": {}},
+  "output_contract": {"artifacts": ["A project-specific run receipt and logs"], "stdout": ["One JSON result"], "failure_markers": []},
+  "dependencies": {"python": [">=3.8"], "executables": ["user-supplied external project command"], "files": []},
+  "side_effects": ["local_read", "local_write"],
+  "authorization_policy": {"route": "none", "required_for": []},
+  "tests": {"paths": ["tests/test_extension.py", "tests/fixtures"], "dry_run": true},
+  "source_provenance": {"source_path": "scripts/extension.py", "source_sha256": "not-applicable", "notes": "Replace with the adapter source hash before formal validation."},
+  "module_type": "postprocessor",
+  "requires": ["replace.input-artifact"],
+  "provides": ["replace.analysis-artifact"],
+  "command": {
+    "path": "scripts/extension.py",
+    "usage": "python3 scripts/extension.py check --request request.json"
+  }
+}

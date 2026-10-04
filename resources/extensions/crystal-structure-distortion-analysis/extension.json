@@ -1,0 +1,118 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "crystal-structure-distortion-analysis",
+  "version": "0.2.0",
+  "status": "experimental",
+  "domain": "first-principles/structure-analysis",
+  "description": "Analyze local tetrahedral and octahedral coordination-polyhedron distortions from VASP POSCAR/CONTCAR structures.",
+  "entrypoints": [
+    {
+      "name": "crystal-distortion",
+      "path": "src/crystal_distortion.py",
+      "usage": "python src/crystal_distortion.py POSCAR [--config config/default_fecr2o4.json] [--output-prefix polyhedral_distortion] [--dry-run]"
+    }
+  ],
+  "input_contract": {
+    "required": [
+      "One VASP5/6 POSCAR or CONTCAR structure file with element symbols on the species line.",
+      "Coordinates in Direct or Cartesian mode; Selective dynamics is accepted and ignored."
+    ],
+    "configuration": {
+      "config_file": "Optional JSON config; without it the default FeO4/CrO6 configuration is used.",
+      "centers": "Each configured center species supplies a ligand species, coordination number, and geometry; only coordination 4/tetrahedron and 6/octahedron are supported.",
+      "search_radius_angstrom": "Positive ligand-image search radius in Angstrom.",
+      "shell_gap_warning_angstrom": "Positive nth/(n+1)th shell-gap warning threshold in Angstrom.",
+      "output_prefix": "Optional local output prefix; default is polyhedral_distortion.",
+      "dry_run": "Optional flag that validates POSCAR/config and prints the plan without writing files."
+    },
+    "units": {
+      "structure": "VASP lattice and Cartesian geometry are in Angstrom (A).",
+      "distance": "Bond and shell-gap distances are in Angstrom (A).",
+      "angle": "Angles and angular deviations are in degree; angle variance is degree^2.",
+      "dimensionless": "Delta-d, Baur D, coefficient of variation, and quadratic elongation are dimensionless.",
+      "q_metrics": "Q2, Q3, and QJT are in Angstrom (A)."
+    },
+    "assumptions": [
+      "The caller supplies and scientifically justifies chemical center/ligand species and coordination number; the extension does not infer oxidation state, bond valence, or coordination chemistry.",
+      "Periodic ligand images are sorted by center-ligand distance and the nearest configured coordination number is selected.",
+      "Site numbering is 1-based in POSCAR atom order.",
+      "Only tetrahedral coordination 4 and octahedral coordination 6 are implemented.",
+      "Dry-run performs no local output write and no remote or scheduler operation."
+    ]
+  },
+  "output_contract": {
+    "artifacts": [
+      "stdout summary for ordinary runs, or a JSON dry-run payload",
+      "<prefix>.csv",
+      "<prefix>.json",
+      "<prefix>.md"
+    ],
+    "stdout": "Ordinary runs report analyzed site count, warning count, and the three selected local output paths. Dry-run reports the resolved input/configuration plan as JSON and writes no files.",
+    "json_schema": "The JSON artifact has schema_version 1.0 and contains analysis/tool_version, provenance (absolute input path, input SHA-256, config path, resolved config), structure, warnings, site_results, and summary.",
+    "provenance": {
+      "json_fields": [
+        "provenance.input_file: absolute local input path",
+        "provenance.input_sha256: SHA-256 of the input structure",
+        "provenance.config_file: resolved config path when supplied",
+        "provenance.config: resolved configuration object"
+      ]
+    },
+    "units": {
+      "distance": "Angstrom (A)",
+      "volume": "Angstrom^3",
+      "angle": "degree",
+      "angle_variance": "degree^2",
+      "q_metrics": "Angstrom (A)",
+      "dimensionless": "Delta-d, Baur D, coefficient of variation, and quadratic elongation"
+    },
+    "failure_markers": [
+      "Exit status 2",
+      "stderr line beginning with ERROR:",
+      "Expected POSCAR/configuration/geometry failures do not produce a successful result payload."
+    ],
+    "side_effects": "Normal runs may overwrite same-name local output files selected by the caller; the extension does not touch remote files, invoke SSH/PBS, submit a scheduler job, or write outside that local prefix."
+  },
+  "dependencies": {
+    "python": ">=3.10",
+    "packages": [
+      "numpy>=1.24",
+      "scipy>=1.10"
+    ],
+    "executables": [],
+    "external_services": []
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "authorization_policy": {
+    "route": "none",
+    "required_for": [],
+    "notes": "No remote, SSH, PBS, scheduler, or external-service operation is performed. The experimental status requires explicit workflow approval before selection."
+  },
+  "tests": {
+    "paths": [
+      "tests/test_geometry.py",
+      "tests/test_cli.py"
+    ],
+    "command_from_extension_root": "python -m pytest -q tests",
+    "dry_run": false
+  },
+  "source_provenance": {
+    "source_path": "source/original_polyhedral_distortion.py",
+    "source_sha256": "8156f1f8921ed7f9f2184b5ed9f35e012d2a79aadc383c26974961ce6b0c4845",
+    "notes": "The preserved original source is packaged inside this extension. The runtime implementation comes from the migrated refactored source at src/crystal_distortion.py, while the geometry algorithm and bundle behavior remain consistent."
+  },
+  "module_type": "postprocessor",
+  "requires": [
+    "structure.poscar-or-contcar"
+  ],
+  "provides": [
+    "structure.coordination-distortion-report"
+  ],
+  "migration_metadata": {
+    "bundle_manifest": "The bundle custom manifest was not used directly because the host requires fpilot.extension.v1 and host registry locks.",
+    "geometry_boundary": "Q2/Q3 use sorted octahedral pair-average lengths for reproducible scalar output; they are not crystallographic directions. QJT is a scalar amplitude, and directional interpretation requires an externally defined local-axis convention.",
+    "pytest_receipt": "Any pytest receipt shipped in the source bundle is historical bundle evidence, not a real-time test of this host environment. The current .venv-figure environment lacks pytest, so this extension remains experimental."
+  }
+}

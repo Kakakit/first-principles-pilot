@@ -1,0 +1,60 @@
+{
+  "schema": "fpilot.extension.v2",
+  "id": "structure-volume-statistics",
+  "name": "结构体积与元素统计",
+  "version": "2.0.0",
+  "description": "统计当前几何的晶胞体积、原子数和元素数量，不判定计算收敛。",
+  "entrypoint": "scripts/cli.py",
+  "contexts": [
+    "structure",
+    "attempt"
+  ],
+  "stages": [],
+  "sources": {
+    "min": 1,
+    "max": 1
+  },
+  "inputs": [
+    {
+      "role": "structure",
+      "title": "结构",
+      "names": [
+        "CONTCAR",
+        "POSCAR"
+      ],
+      "max_bytes": 10485760
+    }
+  ],
+  "evidence": [],
+  "execution": {
+    "locations": [
+      "local",
+      "ssh",
+      "scheduler"
+    ],
+    "timeout_seconds": 300
+  },
+  "dependencies": [],
+  "options_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "include_elements": {
+        "type": "boolean",
+        "title": "显示元素明细",
+        "default": true
+      }
+    },
+    "required": [
+      "include_elements"
+    ]
+  },
+  "ui_schema": {},
+  "outputs": [
+    "table",
+    "file"
+  ],
+  "fixtures": [
+    "fixtures/POSCAR"
+  ]
+}

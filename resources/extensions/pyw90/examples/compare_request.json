@@ -1,0 +1,34 @@
+{
+  "schema": "fpilot.pyw90-compare-request.v1",
+  "dft": {
+    "spin_mode": "collinear-ispin2",
+    "fermi_eV": 5.0182,
+    "fermi_source": "inputs/scf/OUTCAR",
+    "kpoints": "inputs/band/KPOINTS",
+    "expected_bands": 72,
+    "bands": {"spin_up": "prepared/bnd_up.dat", "spin_down": "prepared/bnd_down.dat"}
+  },
+  "wannier": {
+    "spin_up": {
+      "label": "Spin up", "seedname": "wan.1", "expected_num_wann": 54,
+      "win": "inputs/spin_up/wan.1.win", "wout": "inputs/spin_up/wan.1.wout",
+      "checkpoint": "inputs/spin_up/wan.1.chk",
+      "band": "prepared/spin_up/wan.1_band.dat",
+      "labelinfo": "prepared/spin_up/wan.1_band.labelinfo.dat"
+    },
+    "spin_down": {
+      "label": "Spin down", "seedname": "wan.2", "expected_num_wann": 54,
+      "win": "inputs/spin_down/wan.2.win", "wout": "inputs/spin_down/wan.2.wout",
+      "checkpoint": "inputs/spin_down/wan.2.chk",
+      "band": "prepared/spin_down/wan.2_band.dat",
+      "labelinfo": "prepared/spin_down/wan.2_band.labelinfo.dat"
+    }
+  },
+  "comparison": {
+    "display_window_relative_eV": [-8.0, 5.0],
+    "metric_window_relative_eV": [-8.0, 5.0],
+    "dft_band_offset": "auto",
+    "allow_lineage_mismatch_for_diagnostic": false
+  },
+  "output_dir": "comparison"
+}

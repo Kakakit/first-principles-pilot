@@ -1,0 +1,180 @@
+{
+  "schema": "fpilot.extension.v1",
+  "name": "pyw90",
+  "version": "0.5.1",
+  "status": "experimental",
+  "domain": "wannier90-postprocessing",
+  "description": "Validate spin-resolved DFT-Wannier comparisons, run projector-targeted and gap-constrained per-spin energy-window searches with human-gated refinement, and retain a compatible low-level PyW90 adapter.",
+  "entrypoints": [
+    {
+      "name": "pyw90-compare",
+      "path": "scripts/pyw90_compare.py",
+      "usage": "python scripts/pyw90_compare.py {check|run} --request compare_request.json"
+    },
+    {
+      "name": "pyw90-window-scan",
+      "path": "scripts/pyw90_window_scan.py",
+      "usage": "python scripts/pyw90_window_scan.py {check|plan|run|score|refine|measure} --request request.json"
+    },
+    {
+      "name": "pyw90-low-level",
+      "path": "scripts/pyw90.py",
+      "usage": "python scripts/pyw90.py {doctor|check|run} --request request.json"
+    }
+  ],
+  "input_contract": {
+    "compare_schema": "fpilot.pyw90-compare-request.v1",
+    "compare_required": [
+      "Explicit collinear spin_up and spin_down DFT band files",
+      "Explicit Fermi energy plus the OUTCAR source that contains the same last E-fermi",
+      "VASP line-mode KPOINTS and one Wannier labelinfo per spin",
+      "Distinct seedname, expected_num_wann, win, wout, checkpoint declaration, band and labelinfo for each spin",
+      "Display and metric energy windows relative to the explicit Fermi reference",
+      "Caller-selected local output directory"
+    ],
+    "compare_checks": [
+      "spin and seedname identity",
+      "input existence, non-empty size and SHA-256",
+      "DFT and Wannier band/point counts",
+      "KPOINTS versus labelinfo normalized segment-label hash",
+      "win versus wout num_wann, num_bands and actual outer/frozen windows",
+      "local checkpoint hash or explicit unavailable reason",
+      "explicit override before a mismatched or partial lineage can be used diagnostically"
+    ],
+    "window_scan_schema": "fpilot.pyw90-window-scan-request.v1",
+    "window_scan_required": [
+      "One per-spin regular-grid seed .eig for PyW90-style state-count feasibility",
+      "One immutable seed .win template and explicit Fermi energy",
+      "One same-spin DFT line-path band reference used only for fit scoring",
+      "Expected num_wann, finite candidate/refinement limits, explicit local output directory",
+      "Automatic .amn or processed-PROCAR projector-weight target, or an explicit arbitrary energy target relative to E_F",
+      "Projector-support target, an independent frozen seed/candidate policy with explicit disentanglement headroom, and a scientific ranking subwindow",
+      "Optional explicit local Wannier90 argv and shared interface files for run",
+      "Manual review.quality=poor for the same spin before refine"
+    ],
+    "window_scan_checks": [
+      "outer lower edge lies at the nearest complete global .eig gap below the target unless deep-gap fallback is explicitly enabled",
+      "outer window contains the complete projector-support target, at least num_wann states at every .eig k point, and no more than the configured excess-state ceiling",
+      "frozen window is independent of the target, uses lower projector-weight coverage tiers or reviewed explicit candidates, and preserves minimum disentanglement headroom at every .eig k point",
+      "automatic target is the narrowest energy interval containing the requested cumulative projector weight and may cross E_F",
+      "production template is never edited and every candidate has a stable identity",
+      "shell, SSH, scheduler and PyW90 auto argv are rejected",
+      "primary ranking requires completed disentanglement/localization and matching candidate win/wout windows",
+      "primary RMSE/MAE/maximum error use a scientific subwindow inside projector support while a broader metric remains diagnostic",
+      "optional excess adjacent-band-jump gate flags cross-gap spikes that aggregate RMSE can hide",
+      "candidate primary metrics must share one DFT band offset and reference sample count or best-candidate selection is blocked",
+      "initial and refinement candidates, workers, timeout and rounds obey hard limits"
+    ],
+    "low_level_schema": "fpilot.pyw90-request.v1",
+    "low_level_configuration": {
+      "command": "argv whose first item is eig, pre, or cmp; auto is rejected",
+      "input_dir": "relative to the request file when not absolute",
+      "expected_inputs": "files relative to input_dir",
+      "expected_outputs": "files relative to expected_output_base",
+      "expected_output_base": "input_dir compatibility default or output_dir",
+      "output_dir": "relative to the request file when not absolute",
+      "executable": "plain command resolved through PATH or path resolved relative to the request file"
+    },
+    "window_measure_schema": "fpilot.window-band-metrics.v1",
+    "window_measure_required": [
+      "Exact-source curves.csv produced by the workbench comparison",
+      "Fixed DFT energy interval and explicit shared band offset; JSON metrics returned on stdout"
+    ]
+  },
+  "output_contract": {
+    "compare_artifacts": [
+      "preflight.json with resolved identities, hashes, shapes, path hash and lineage status",
+      "metrics.json with common order-preserving DFT band offset and energy-window-bounded overall/per-band MAE, RMSE and maximum difference",
+      "two-panel PNG, LZW TIFF, editable-text PDF and SVG with disconnected k-path segments drawn independently",
+      "backend-measured panel alignment layout JSON",
+      "run.json with outputs, warnings and scientific boundary"
+    ],
+    "compare_success": "run succeeds only after the complete contract passes; lineage mismatch/partial status requires a visible explicit diagnostic override",
+    "window_scan_artifacts": [
+      "window_scan_manifest.json with candidate identities, relative/absolute windows, .eig state counts, run status and provenance",
+      "one isolated candidate directory per window with an immutable generated seed .win and declared shared inputs",
+      "per-attempt stdout, stderr and run_status JSON for optional local execution",
+      "score.json with scientific-subwindow primary metrics, broader full-window diagnostics, shape-jump evidence, and a convergence/lineage/optional-shape-gated ranking",
+      "fit_overlay.png, fit_overlay.pdf and fit_overlay.svg in each scored candidate directory for human band-shape review",
+      "bounded refinement candidates linked to the current eligible best candidate and manual poor review"
+    ],
+    "window_scan_success": "A candidate enters the primary ranking only when the local artifacts exist, the wout is complete with disentanglement and localization convergence, and its actual windows match the generated candidate win.",
+    "low_level_artifacts": [
+      "pyw90_run.json with argv, cwd, return code, hashes, versions, environment and log paths",
+      "pyw90_stdout.txt and pyw90_stderr.txt"
+    ],
+    "interpretation": "Comparison metrics are bounded interface/model-fidelity diagnostics. They do not prove Wannier convergence and cannot be attributed to a current win when wout/checkpoint lineage differs."
+  },
+  "dependencies": {
+    "python": [
+      ">=3.9,<3.12"
+    ],
+    "executables": [
+      "pyw90 for low-level delegation",
+      "optional caller-selected local wannier90.x for window-scan run"
+    ],
+    "packages": [
+      "pyw90==1.0.7 for low-level delegation",
+      "numpy>=1.24",
+      "matplotlib>=3.7"
+    ],
+    "external_services": []
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "authorization_policy": {
+    "route": "none",
+    "required_for": [],
+    "notes": "Only caller-selected local paths are read or written. The window-scan mode may execute a finite explicit local Wannier90 argv with shell disabled; the extension does not install software, run VASP, submit jobs, edit production inputs, expose PyW90 auto, or manage a scheduler."
+  },
+  "tests": {
+    "paths": [
+      "tests/test_pyw90.py",
+      "tests/test_pyw90_window_scan.py",
+      "tests/fixtures"
+    ],
+    "command_from_extension_root": "python -m unittest discover -s tests -p 'test_*.py'",
+    "dry_run": false,
+    "status_note": "0.5.1 adds a separate measure JSON-file protocol for human-gated workbench rounds; fixed DFT sampling retains errors when a fitted band leaves the target interval. Existing standalone search is unchanged."
+  },
+  "source_provenance": {
+    "source_path": "scripts/pyw90.py",
+    "source_sha256": "9696f77e5026bd25b549c6eead4b5e2918244e7e46f00c70f354459dc4fad1f1",
+    "additional_sources": [
+      {
+        "source_path": "scripts/pyw90_compare.py",
+        "source_sha256": "c871661726f5c71248c874093678109dc31aa3b09171c3a626def36b18bf155a"
+      },
+      {
+        "source_path": "scripts/pyw90_window_scan.py",
+        "source_sha256": "b53fbe28407f251197d68fa6615760307ae67562ae21544537ba2b10524353ac"
+      }
+    ],
+    "notes": "The adapter scripts are authored locally around external PyW90 1.0.7. PyW90 GPL source is not bundled. Comparison and bounded search incorporate the 2026-09-01 Luna effort benchmark failure modes and the upstream state-count/evaluate principles without exposing upstream auto."
+  },
+  "references": [
+    "references/pyw90.md"
+  ],
+  "module_type": "postprocessor",
+  "requires": [
+    "vasp.spin-resolved-band-data",
+    "vasp.fermi-reference",
+    "sampling.line-mode-kpath",
+    "wannier90.checkpoint-lineage",
+    "wannier90.spin-resolved-band-data"
+  ],
+  "provides": [
+    "wannier90.window-analysis",
+    "wannier90.window-search-plan",
+    "wannier90.window-search-ranking",
+    "wannier90.band-comparison",
+    "wannier90.band-fidelity-metrics",
+    "wannier90.lineage-audit"
+  ],
+  "command": {
+    "path": "scripts/pyw90_compare.py",
+    "usage": "python scripts/pyw90_compare.py check --request compare_request.json"
+  }
+}

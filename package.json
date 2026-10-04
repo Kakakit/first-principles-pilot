@@ -1,0 +1,32 @@
+{
+  "name": "fpilot-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "start": "node scripts/start.mjs"
+  },
+  "dependencies": {
+    "@rjsf/core": "6.11.0",
+    "@rjsf/utils": "6.11.0",
+    "@rjsf/validator-ajv8": "6.11.0",
+    "@xyflow/react": "^12.10.0",
+    "3dmol": "2.5.3",
+    "echarts": "^6.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.0"
+  }
+}

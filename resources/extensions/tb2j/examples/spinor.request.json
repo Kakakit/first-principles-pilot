@@ -1,0 +1,17 @@
+{
+  "schema": "fpilot.tb2j-request.v1",
+  "input_dir": "/path/to/wannier",
+  "mode": "spinor",
+  "prefix": "wannier90",
+  "efermi_ev": 5.7185,
+  "kmesh": [4, 4, 4],
+  "elements": ["Cr", "Co"],
+  "groupby": "spin",
+  "emin_ev": -10.0,
+  "emax_ev": 12.0,
+  "nz": 100,
+  "nproc": 1,
+  "orb_decomposition": true,
+  "output_dir": "TB2J_results",
+  "executable": "wann2J.py"
+}

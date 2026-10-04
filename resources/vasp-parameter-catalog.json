@@ -1,0 +1,1121 @@
+{
+  "schema": "fpilot.vasp-tag-catalog.v1",
+  "source": "https://www.vasp.at/wiki/Category:INCAR_tag",
+  "retrieved": "2026-09-23",
+  "version_note": "VASP Wiki 分类快照；实际 tag 支持范围须结合目标 VASP 版本核对",
+  "definitions": [
+    {
+      "tag": "XC_FUNCTIONAL",
+      "label": "交换关联泛函（工作台选项）",
+      "type": "enum",
+      "choices": [
+        [
+          "PBE",
+          "PBE"
+        ],
+        [
+          "PBEsol",
+          "PBEsol"
+        ],
+        [
+          "LDA",
+          "LDA"
+        ]
+      ],
+      "help": "需与赝势选择一致；这是工作台的模型选择，不直接作为 INCAR tag 输出。",
+      "url": "https://vasp.at/wiki/GGA"
+    },
+    {
+      "tag": "ENCUT",
+      "label": "平面波截断能",
+      "unit": "eV",
+      "type": "number",
+      "positive": true,
+      "help": "与 POTCAR 和目标精度有关，需要收敛测试；此处不自动推荐数值。",
+      "url": "https://vasp.at/wiki/ENCUT"
+    },
+    {
+      "tag": "EDIFF",
+      "label": "电子自洽停止阈值",
+      "unit": "eV",
+      "type": "number",
+      "min": 0,
+      "help": "能量与本征值变化的停止条件；0 表示运行到 NELM 步，不是更严格的收敛判据。",
+      "url": "https://vasp.at/wiki/EDIFF"
+    },
+    {
+      "tag": "PREC",
+      "label": "精度模式",
+      "type": "enum",
+      "choices": [
+        [
+          "Normal",
+          "Normal · 常规网格"
+        ],
+        [
+          "Accurate",
+          "Accurate · 更精细网格"
+        ]
+      ],
+      "help": "只列当前工作台支持的模式；不替代 ENCUT 和网格收敛测试。",
+      "url": "https://vasp.at/wiki/PREC"
+    },
+    {
+      "tag": "ALGO",
+      "label": "电子优化算法",
+      "type": "enum",
+      "choices": [
+        [
+          "Normal",
+          "Normal · Davidson"
+        ],
+        [
+          "Fast",
+          "Fast · Davidson / RMM-DIIS"
+        ],
+        [
+          "VeryFast",
+          "VeryFast · RMM-DIIS"
+        ],
+        [
+          "All",
+          "All · 全带同时优化"
+        ]
+      ],
+      "help": "普通半局域 DFT 已列 Normal、Fast、VeryFast、All；实际算法兼容性仍需核对。",
+      "url": "https://vasp.at/wiki/ALGO"
+    },
+    {
+      "tag": "ISMEAR",
+      "label": "占据方法",
+      "type": "enum",
+      "choices": [
+        [
+          "0",
+          "0 · Gaussian"
+        ],
+        [
+          "-1",
+          "−1 · Fermi–Dirac"
+        ],
+        [
+          "1",
+          "1 · Methfessel–Paxton 一阶"
+        ],
+        [
+          "2",
+          "2 · Methfessel–Paxton 二阶"
+        ],
+        [
+          "-5",
+          "−5 · 四面体 + Blöchl 修正"
+        ]
+      ],
+      "help": "方法应依据体系与任务选择；四面体法要求兼容的 k 点网格，不能用于单纯能带路径积分。",
+      "url": "https://vasp.at/wiki/ISMEAR"
+    },
+    {
+      "tag": "SIGMA",
+      "label": "展宽",
+      "unit": "eV",
+      "type": "number",
+      "positive": true,
+      "help": "展宽方法的宽度参数；ISMEAR=−5 时不作为展宽使用。",
+      "url": "https://vasp.at/wiki/SIGMA"
+    },
+    {
+      "tag": "NELM",
+      "label": "电子步数上限",
+      "type": "integer",
+      "min": 1,
+      "help": "达到上限不代表自洽收敛。",
+      "url": "https://vasp.at/wiki/NELM"
+    },
+    {
+      "tag": "ISPIN",
+      "label": "自旋模型",
+      "type": "enum",
+      "choices": [
+        [
+          "1",
+          "1 · 非自旋极化"
+        ],
+        [
+          "2",
+          "2 · 共线自旋极化"
+        ]
+      ],
+      "help": "共线磁性选 2；非共线/SOC 使用 vasp_ncl，ISPIN=1，逐原子填写三分量 MAGMOM。",
+      "url": "https://vasp.at/wiki/ISPIN"
+    },
+    {
+      "tag": "NSW",
+      "label": "离子步数上限",
+      "type": "integer",
+      "min": 0,
+      "help": "0 表示不执行离子步；优化需用户明确设置正整数。",
+      "url": "https://vasp.at/wiki/NSW"
+    },
+    {
+      "tag": "IBRION",
+      "label": "离子优化算法",
+      "type": "enum",
+      "choices": [
+        [
+          "-1",
+          "−1 · 不更新离子"
+        ],
+        [
+          "1",
+          "1 · RMM-DIIS / 准牛顿"
+        ],
+        [
+          "2",
+          "2 · 共轭梯度"
+        ],
+        [
+          "3",
+          "3 · 阻尼动力学优化"
+        ]
+      ],
+      "help": "当前只列静态与几何优化模式；分子动力学和声子另设任务类型。",
+      "url": "https://vasp.at/wiki/IBRION"
+    },
+    {
+      "tag": "ISIF",
+      "label": "优化自由度",
+      "type": "enum",
+      "choices": [
+        [
+          "2",
+          "2 · 原子位置，固定晶胞"
+        ],
+        [
+          "3",
+          "3 · 原子位置、晶胞形状和体积"
+        ],
+        [
+          "4",
+          "4 · 原子位置和晶胞形状，固定体积"
+        ]
+      ],
+      "help": "晶胞变化需要额外评估应力与基组收敛；不根据材料标签自动选择。",
+      "url": "https://vasp.at/wiki/ISIF"
+    },
+    {
+      "tag": "EDIFFG",
+      "label": "离子停止条件",
+      "type": "ediffg",
+      "help": "负值：所有原子力的模低于阈值；正值：相邻离子步总能变化；0：只按 NSW 步数停止。",
+      "url": "https://vasp.at/wiki/EDIFFG"
+    },
+    {
+      "tag": "LDAU",
+      "label": "DFT+U",
+      "type": "enum",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭"
+        ]
+      ],
+      "help": "启用后按元素明确轨道、U、J；不猜测材料对应值。",
+      "url": "https://vasp.at/wiki/LDAU"
+    },
+    {
+      "tag": "LDAUTYPE",
+      "label": "DFT+U 方法",
+      "type": "enum",
+      "choices": [
+        [
+          "1",
+          "1 · Liechtenstein（U 与 J 分别作用）"
+        ],
+        [
+          "2",
+          "2 · Dudarev（U−J）"
+        ]
+      ],
+      "help": "这里只支持方法 1、2；方法 3 是线性响应，不作为普通 +U 模板。",
+      "url": "https://vasp.at/wiki/LDAUTYPE"
+    },
+    {
+      "tag": "LMAXMIX",
+      "label": "混合角动量上限",
+      "type": "integer",
+      "min": 0,
+      "help": "DFT+U 电荷文件需关注 d / f 通道（常涉及 4 / 6）；依赖阶段审查兼容性。",
+      "url": "https://vasp.at/wiki/LMAXMIX"
+    },
+    {
+      "tag": "ISTART",
+      "label": "波函数重启方式",
+      "type": "enum",
+      "help": "当前仅支持 0；其他值需要真实 WAVECAR 及兼容性合同。",
+      "url": "https://vasp.at/wiki/ISTART",
+      "choices": [
+        [
+          "0",
+          "0 · 干净启动"
+        ],
+        [
+          "1",
+          "1 · WAVECAR"
+        ],
+        [
+          "2",
+          "2 · WAVECAR"
+        ],
+        [
+          "3",
+          "3 · 延续动力学"
+        ]
+      ]
+    },
+    {
+      "tag": "ICHARG",
+      "label": "初始电荷方式",
+      "type": "enum",
+      "help": "普通 SCF/优化为 2；读取已核对 CHGCAR 续算为 1（在提交页选择来源并预览最终 INCAR）；能带/DOS 固定电荷为 11。",
+      "url": "https://vasp.at/wiki/ICHARG",
+      "choices": [
+        [
+          "1",
+          "1 · 读取 CHGCAR 续算（提交页选择来源）"
+        ],
+        [
+          "2",
+          "2 · 原子电荷"
+        ],
+        [
+          "11",
+          "11 · 固定 CHGCAR"
+        ]
+      ]
+    },
+    {
+      "tag": "LWAVE",
+      "label": "写出 WAVECAR",
+      "type": "enum",
+      "help": "写出波函数不代表重启兼容。",
+      "url": "https://vasp.at/wiki/LWAVE",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭"
+        ]
+      ]
+    },
+    {
+      "tag": "LCHARG",
+      "label": "写出 CHGCAR",
+      "type": "enum",
+      "help": "SCF 有能带或 DOS 下游时必须开启。",
+      "url": "https://vasp.at/wiki/LCHARG",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭"
+        ]
+      ]
+    },
+    {
+      "tag": "ISYM",
+      "label": "对称性模式",
+      "type": "enum",
+      "help": "需按实际磁态和计算模型选择。",
+      "url": "https://vasp.at/wiki/ISYM",
+      "choices": [
+        [
+          "-1",
+          "−1"
+        ],
+        [
+          "0",
+          "0"
+        ],
+        [
+          "1",
+          "1"
+        ],
+        [
+          "2",
+          "2"
+        ],
+        [
+          "3",
+          "3"
+        ]
+      ]
+    },
+    {
+      "tag": "NBANDS",
+      "label": "能带数",
+      "type": "integer",
+      "help": "应按电子数和目标空带窗口选择。",
+      "url": "https://vasp.at/wiki/NBANDS",
+      "min": 1
+    },
+    {
+      "tag": "NEDOS",
+      "label": "DOS 能量点数",
+      "type": "integer",
+      "help": "DOS 采样点数。",
+      "url": "https://vasp.at/wiki/NEDOS",
+      "min": 2,
+      "applies_to": [
+        "dos"
+      ]
+    },
+    {
+      "tag": "EMIN",
+      "label": "DOS 能量下限",
+      "type": "number",
+      "help": "须与 EMAX 同时设置且 EMIN < EMAX。",
+      "url": "https://vasp.at/wiki/EMIN",
+      "unit": "eV",
+      "applies_to": [
+        "dos"
+      ]
+    },
+    {
+      "tag": "EMAX",
+      "label": "DOS 能量上限",
+      "type": "number",
+      "help": "须与 EMIN 同时设置且 EMIN < EMAX。",
+      "url": "https://vasp.at/wiki/EMAX",
+      "unit": "eV",
+      "applies_to": [
+        "dos"
+      ]
+    },
+    {
+      "tag": "LREAL",
+      "label": "实空间投影",
+      "type": "enum",
+      "help": "可能影响精度，需按体系验证。",
+      "url": "https://vasp.at/wiki/LREAL",
+      "choices": [
+        [
+          "Auto",
+          "Auto"
+        ],
+        [
+          ".FALSE.",
+          "关闭"
+        ],
+        [
+          ".TRUE.",
+          "开启"
+        ]
+      ]
+    },
+    {
+      "tag": "LASPH",
+      "label": "非球形梯度修正",
+      "type": "enum",
+      "help": "按方法与赝势核对。",
+      "url": "https://vasp.at/wiki/LASPH",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭"
+        ]
+      ]
+    },
+    {
+      "tag": "NCORE",
+      "label": "轨道并行核数",
+      "type": "integer",
+      "help": "准备任务时检查 MPI 核数整除。",
+      "url": "https://vasp.at/wiki/NCORE",
+      "min": 1
+    },
+    {
+      "tag": "KPAR",
+      "label": "k 点并行组数",
+      "type": "integer",
+      "help": "准备任务时检查 MPI 核数整除。",
+      "url": "https://vasp.at/wiki/KPAR",
+      "min": 1
+    },
+    {
+      "tag": "LORBIT", "label": "轨道投影输出", "type": "enum",
+      "choices": [["10", "10 · 按 l 分解"], ["11", "11 · 按 lm 分解（PDOS/fatband 默认）"]],
+      "help": "DOS/能带节点默认 11，可显式覆盖；生成 DOSCAR 与含轨道分解的 PROCAR。投影权重有 PAW 投影范围限制。",
+      "url": "https://vasp.at/wiki/LORBIT"
+    },
+    {
+      "tag": "LSORBIT", "label": "自旋轨道耦合", "type": "enum",
+      "choices": [["true", "开启 SOC"], ["false", "关闭 SOC"]],
+      "help": "开启后自动使用非共线框架，必须选择 vasp_ncl；SAXIS 定义自旋量子化轴。",
+      "url": "https://vasp.at/wiki/LSORBIT"
+    },
+    {
+      "tag": "LNONCOLLINEAR", "label": "非共线磁性", "type": "enum",
+      "choices": [["true", "开启"], ["false", "关闭"]],
+      "help": "即使不计算 SOC，也需 vasp_ncl 与每原子三分量 MAGMOM。LSORBIT=true 时自动开启。",
+      "url": "https://vasp.at/wiki/LNONCOLLINEAR"
+    },
+    {
+      "tag": "SAXIS", "label": "自旋量子化轴", "type": "vector3",
+      "help": "三个有限数且非零，例如 0 0 1；SOC 时 MAGMOM 分量处于该自旋坐标系。",
+      "url": "https://vasp.at/wiki/SAXIS"
+    },
+    {
+      "tag": "GGA_COMPAT", "label": "GGA 非共线兼容近似", "type": "enum",
+      "choices": [["true", "开启"], ["false", "关闭（SOC 常用）"]],
+      "help": "VASP 建议非共线 GGA 可设为 false 以提高数值精度；不自动替用户改变物理设置。",
+      "url": "https://vasp.at/wiki/GGA_COMPAT"
+    },
+    {
+      "tag": "LORBMOM", "label": "输出轨道磁矩", "type": "enum",
+      "choices": [["true", "开启"], ["false", "关闭"]],
+      "help": "SOC 分析轨道磁矩时开启；需核对 OUTCAR 的具体输出。",
+      "url": "https://vasp.at/wiki/LORBMOM"
+    },
+    {
+      "tag": "AMIX", "label": "电荷混合幅度", "type": "number", "min": 0,
+      "help": "电子收敛调节项；依体系选择，不提供通用物理默认值。", "url": "https://vasp.at/wiki/AMIX"
+    },
+    {
+      "tag": "BMIX", "label": "电荷 Kerker 混合", "type": "number", "min": 0,
+      "help": "电子收敛调节项；需结合混合谱评估。", "url": "https://vasp.at/wiki/BMIX"
+    },
+    {
+      "tag": "AMIX_MAG", "label": "磁化混合幅度", "type": "number", "min": 0,
+      "help": "磁性/非共线收敛调节项。", "url": "https://vasp.at/wiki/AMIX_MAG"
+    },
+    {
+      "tag": "BMIX_MAG", "label": "磁化 Kerker 混合", "type": "number", "min": 0,
+      "help": "磁性/非共线收敛调节项。", "url": "https://vasp.at/wiki/BMIX_MAG"
+    }
+  ],
+  "known_tags": [
+    "ADDGRID",
+    "AEXX",
+    "AGGAC",
+    "AGGAX",
+    "ALDAC",
+    "ALDAX",
+    "ALGO",
+    "ALPHA_VDW",
+    "AMGGAC",
+    "AMGGAX",
+    "AMIN",
+    "AMIX",
+    "AMIX_MAG",
+    "ANDERSEN_PROB",
+    "ANTIRES",
+    "APACO",
+    "BANDGAP",
+    "BEXT",
+    "BEXX",
+    "BMIX",
+    "BMIX_MAG",
+    "BPARAM",
+    "BSEELECTRON",
+    "BSEHOLE",
+    "BSEPREC",
+    "CHECKPOINT_FD",
+    "CH_AMPLIFICATION",
+    "CH_LSPEC",
+    "CH_NEDOS",
+    "CH_SIGMA",
+    "CLL",
+    "CLN",
+    "CLNT",
+    "CLZ",
+    "CMBJ",
+    "CMBJA",
+    "CMBJB",
+    "CMBJE",
+    "CPARAM",
+    "CSHIFT",
+    "CUTOFF_MU",
+    "CUTOFF_SIGMA",
+    "CUTOFF_TYPE",
+    "DEG_THRESHOLD",
+    "DEPER",
+    "DFTD4_MODEL",
+    "DFTD4_XC",
+    "DIMER_DIST",
+    "DIPOL",
+    "DQ",
+    "EBREAK",
+    "EDIFF",
+    "EDIFFG",
+    "EFERMI",
+    "EFERMI_NEDOS",
+    "EFIELD",
+    "EFIELD_PEAD",
+    "EFOR",
+    "EINT",
+    "ELPH_DECOMPOSE",
+    "ELPH_DRIVER",
+    "ELPH_FERMI_NEDOS",
+    "ELPH_IGNORE_IMAG_PHONONS",
+    "ELPH_ISMEAR",
+    "ELPH_KSPACING",
+    "ELPH_LR",
+    "ELPH_MODE",
+    "ELPH_NBANDS",
+    "ELPH_NBANDS_SUM",
+    "ELPH_POT_FFT_MESH",
+    "ELPH_POT_GENERATE",
+    "ELPH_POT_LATTICE",
+    "ELPH_PREPARE",
+    "ELPH_RUN",
+    "ELPH_SCATTERING_APPROX",
+    "ELPH_SELFEN_BAND_START",
+    "ELPH_SELFEN_BAND_START_KP",
+    "ELPH_SELFEN_BAND_STOP",
+    "ELPH_SELFEN_BAND_STOP_KP",
+    "ELPH_SELFEN_BROAD_TOL",
+    "ELPH_SELFEN_CARRIER_DEN",
+    "ELPH_SELFEN_CARRIER_DEN_RANGE",
+    "ELPH_SELFEN_CARRIER_PER_CELL",
+    "ELPH_SELFEN_DELTA",
+    "ELPH_SELFEN_DW",
+    "ELPH_SELFEN_ENERGY_WINDOW",
+    "ELPH_SELFEN_FAN",
+    "ELPH_SELFEN_GAPS",
+    "ELPH_SELFEN_G_SKIP",
+    "ELPH_SELFEN_IKPT",
+    "ELPH_SELFEN_IMAG_SKIP",
+    "ELPH_SELFEN_KPTS",
+    "ELPH_SELFEN_MU",
+    "ELPH_SELFEN_MU_RANGE",
+    "ELPH_SELFEN_NW",
+    "ELPH_SELFEN_STATIC",
+    "ELPH_SELFEN_TEMPS",
+    "ELPH_SELFEN_TEMPS_RANGE",
+    "ELPH_SELFEN_WRANGE",
+    "ELPH_TRANSPORT",
+    "ELPH_TRANSPORT_DFERMI_TOL",
+    "ELPH_TRANSPORT_DRIVER",
+    "ELPH_TRANSPORT_EMAX",
+    "ELPH_TRANSPORT_EMAX_PLOT",
+    "ELPH_TRANSPORT_EMIN",
+    "ELPH_TRANSPORT_EMIN_PLOT",
+    "ELPH_TRANSPORT_NEDOS_PLOT",
+    "ELPH_USEBLAS",
+    "ELPH_USERECIP",
+    "ELPH_WF_CACHE_MB",
+    "ELPH_WF_CACHE_PREFILL",
+    "ELPH_WF_COMM_OPT",
+    "ELPH_WF_REDISTRIBUTE",
+    "ELPH_WRITE_HDF5VEL",
+    "ELPH_WRITE_TEXTVEL",
+    "EMAX",
+    "EMIN",
+    "ENAUG",
+    "ENCUT",
+    "ENCUTFOCK",
+    "ENCUTGW",
+    "ENCUTGWSOFT",
+    "ENCUTLR",
+    "ENINI",
+    "EPSILON",
+    "ESTOP",
+    "EVENONLY",
+    "EVENONLYGW",
+    "EWALD_CUTOFF",
+    "FBIAS_A",
+    "FBIAS_D",
+    "FBIAS_R0",
+    "FERDO",
+    "FERWE",
+    "FINDIFF",
+    "FMP_ACTIVE",
+    "FMP_DIRECTION",
+    "FMP_PERIOD",
+    "FMP_SNUMBER",
+    "FMP_SWAPNUM",
+    "FOCKCORR",
+    "GAMMA_VDW",
+    "GGA",
+    "GGA_COMPAT",
+    "HFALPHA",
+    "HFLMAX",
+    "HFRCUT",
+    "HFSCREEN",
+    "HILLS_BIN",
+    "HILLS_H",
+    "HILLS_W",
+    "HITOLER",
+    "IALGO",
+    "IALL_IN_ONE",
+    "IBAND",
+    "IBRION",
+    "IBSE",
+    "ICHARG",
+    "ICHIBARE",
+    "ICORELEVEL",
+    "IDIPOL",
+    "IEPSILON",
+    "IFC_ASR",
+    "IFC_LR",
+    "IGPAR",
+    "IMAGES",
+    "IMAGE_1",
+    "IMIX",
+    "INCREM",
+    "INIMIX",
+    "INIWAV",
+    "INMRPRINT",
+    "INTERACTIVE",
+    "IPEAD",
+    "IRC_DELTA0",
+    "IRC_DIRECTION",
+    "IRC_MAXSTEP",
+    "IRC_MINSTEP",
+    "IRC_STOP",
+    "IRC_VNORM0",
+    "ISEARCH",
+    "ISIF",
+    "ISMEAR",
+    "ISPIN",
+    "ISTART",
+    "ISYM",
+    "IVDW",
+    "IVDW_NL",
+    "IWAVPR",
+    "I_CONSTRAINED_M",
+    "KBLOCK",
+    "KGAMMA",
+    "KPAR",
+    "KPOINTS_OPT_MODE",
+    "KPOINTS_OPT_NKBATCH",
+    "KPOINT_BSE",
+    "KPUSE",
+    "KSPACING",
+    "KSPACING_OPT",
+    "K_MULTIPLY",
+    "LADDER",
+    "LAECHG",
+    "LALL_IN_ONE",
+    "LAMBDA",
+    "LANCZOSTHR",
+    "LANGEVIN_GAMMA",
+    "LANGEVIN_GAMMA_L",
+    "LASPH",
+    "LASYNC",
+    "LATTICE_CONSTRAINTS",
+    "LBERRY",
+    "LBLUEOUT",
+    "LBONE",
+    "LCALCEPS",
+    "LCALCPOL",
+    "LCHARG",
+    "LCHARGH5",
+    "LCHIMAG",
+    "LCORR",
+    "LDAU",
+    "LDAUJ",
+    "LDAUL",
+    "LDAUPRINT",
+    "LDAUTYPE",
+    "LDAUU",
+    "LDIAG",
+    "LDIPOL",
+    "LDISENTANGLED",
+    "LDMATRIX",
+    "LDOWNSAMPLE",
+    "LEFG",
+    "LELF",
+    "LEPSILON",
+    "LFINITE_TEMPERATURE",
+    "LFOCKACE",
+    "LFOCKAEDFT",
+    "LFOCKSTD",
+    "LFXC",
+    "LH5",
+    "LHARTREE",
+    "LHFCALC",
+    "LHYPERFINE",
+    "LIBMBD_ALPHA",
+    "LIBMBD_C6AU",
+    "LIBMBD_K_GRID",
+    "LIBMBD_K_GRID_SHIFT",
+    "LIBMBD_MBD_A",
+    "LIBMBD_MBD_BETA",
+    "LIBMBD_METHOD",
+    "LIBMBD_N_OMEGA_GRID",
+    "LIBMBD_PARALLEL_MODE",
+    "LIBMBD_R0AU",
+    "LIBMBD_TS_D",
+    "LIBMBD_TS_SR",
+    "LIBMBD_VDW_PARAMS_KIND",
+    "LIBMBD_XC",
+    "LIBXC1",
+    "LIBXC2",
+    "LKPOINTS_OPT",
+    "LKPOINTS_WAN",
+    "LKPROJ",
+    "LLRAUG",
+    "LMAXFOCK",
+    "LMAXFOCKAE",
+    "LMAXMIX",
+    "LMAXPAW",
+    "LMAXTAU",
+    "LMIXTAU",
+    "LMODELHF",
+    "LMONO",
+    "LMP2LT",
+    "LNABLA",
+    "LNICSALL",
+    "LNMRCAR",
+    "LNMRLEG",
+    "LNMRSHIELD",
+    "LNMR_SYM_RED",
+    "LNOAUGXC",
+    "LNONCOLLINEAR",
+    "LOCPROJ",
+    "LOPTICS",
+    "LORBIT",
+    "LORBMOM",
+    "LPARD",
+    "LPARDH5",
+    "LPEAD",
+    "LPHON_DISPERSION",
+    "LPHON_POLAR",
+    "LPHON_READ_FORCE_CONSTANTS",
+    "LPLANE",
+    "LPOSNICS",
+    "LREAL",
+    "LRHFCALC",
+    "LRPA",
+    "LRPAFORCE",
+    "LSCAAWARE",
+    "LSCALAPACK",
+    "LSCALER0",
+    "LSCALU",
+    "LSCDM",
+    "LSCK",
+    "LSCRPA",
+    "LSCSGRAD",
+    "LSELFENERGY",
+    "LSEPB",
+    "LSEPK",
+    "LSFBXC",
+    "LSINGLES",
+    "LSMP2LT",
+    "LSORBIT",
+    "LSOSHIFT",
+    "LSPECTRAL",
+    "LSPECTRALGW",
+    "LSPIN_VDW",
+    "LSPIRAL",
+    "LSUBROT",
+    "LSYNCH5",
+    "LTAU",
+    "LTBOUNDLIBXC",
+    "LTEMPER",
+    "LTHOMAS",
+    "LTRIPLET",
+    "LTSSURF",
+    "LTWO_CENTRE",
+    "LUSENCCL",
+    "LUSE_VDW",
+    "LVACPOTAV",
+    "LVDWEXPANSION",
+    "LVDWSCS",
+    "LVDW_EWALD",
+    "LVDW_ONECELL",
+    "LVGVAPPL",
+    "LVGVCALC",
+    "LVHAR",
+    "LVTOT",
+    "LWANNIER90",
+    "LWANNIER90_RUN",
+    "LWAVE",
+    "LWAVEH5",
+    "LWEIGHTED",
+    "LWRITE_MMN_AMN",
+    "LWRITE_SPN",
+    "LWRITE_UNK",
+    "LWRITE_WANPROJ",
+    "LWRT_AUGMENTED_DENSITY",
+    "LZEROZ",
+    "LZORA",
+    "MAGMOM",
+    "MAXDIS",
+    "MAXMEM",
+    "MAXMIX",
+    "MDALGO",
+    "METAGGA",
+    "MINROT",
+    "MIXPRE",
+    "ML_AFILT2",
+    "ML_CALGO",
+    "ML_CDOUB",
+    "ML_CSIG",
+    "ML_CSLOPE",
+    "ML_CTIFOR",
+    "ML_CX",
+    "ML_DESC_TYPE",
+    "ML_EATOM_REF",
+    "ML_EMPPOT_RCUT",
+    "ML_EPS_LOW",
+    "ML_EPS_REG",
+    "ML_ESTBLOCK",
+    "ML_GRACE_MODEL",
+    "ML_IAFILT2",
+    "ML_IALGO_LINREG",
+    "ML_ICOUPLE",
+    "ML_ICRITERIA",
+    "ML_IREG",
+    "ML_ISCALE_TOTEN",
+    "ML_ISTART",
+    "ML_IWEIGHT",
+    "ML_LAFILT2",
+    "ML_LBASIS_DISCARD",
+    "ML_LCOUPLE",
+    "ML_LEATOM",
+    "ML_LEMPPOT",
+    "ML_LERR",
+    "ML_LFAST",
+    "ML_LHEAT",
+    "ML_LIB",
+    "ML_LMAX2",
+    "ML_LMLFF",
+    "ML_LSPARSDES",
+    "ML_LUSE_NAMES",
+    "ML_MB",
+    "ML_MB_MIN",
+    "ML_MCONF",
+    "ML_MCONF_NEW",
+    "ML_MHIS",
+    "ML_MODE",
+    "ML_MOPOT_DM",
+    "ML_MOPOT_IJM",
+    "ML_MOPOT_NM",
+    "ML_MOPOT_RKM",
+    "ML_MOPOT_RM",
+    "ML_MRB1",
+    "ML_MRB2",
+    "ML_NATOM_COUPLED",
+    "ML_NCSHMEM",
+    "ML_NHYP",
+    "ML_NMDINT",
+    "ML_NRANK_SPARSDES",
+    "ML_OUTBLOCK",
+    "ML_OUTPUT_MODE",
+    "ML_RCOUPLE",
+    "ML_RCUT1",
+    "ML_RCUT2",
+    "ML_RDES_SPARSDES",
+    "ML_SCLC_CTIFOR",
+    "ML_SIGV0",
+    "ML_SIGW0",
+    "ML_SION1",
+    "ML_SION2",
+    "ML_SRPOT_B0",
+    "ML_SRPOT_N0",
+    "ML_SRPOT_S0",
+    "ML_TYPE",
+    "ML_W1",
+    "ML_WTIFOR",
+    "ML_WTOTEN",
+    "ML_WTSIF",
+    "MSDGW_F",
+    "M_CONSTR",
+    "NATURALO",
+    "NBANDS",
+    "NBANDSEXACT",
+    "NBANDSGW",
+    "NBANDSO",
+    "NBANDSV",
+    "NBANDS_WAVE",
+    "NBLK",
+    "NBLOCK",
+    "NBLOCK_FOCK",
+    "NBMOD",
+    "NBSEBLOCKO",
+    "NBSEBLOCKV",
+    "NBSEEIG",
+    "NCORE",
+    "NCORE_IN_IMAGE1",
+    "NCRPA_BANDS",
+    "NEDOS",
+    "NELECT",
+    "NELM",
+    "NELMDL",
+    "NELMGW",
+    "NELMIN",
+    "NFREE",
+    "NGX",
+    "NGXF",
+    "NGY",
+    "NGYF",
+    "NGYROMAG",
+    "NGZ",
+    "NGZF",
+    "NHC_NCHAINS",
+    "NHC_NRESPA",
+    "NHC_NS",
+    "NICS",
+    "NKRED",
+    "NKREDX",
+    "NKREDY",
+    "NKREDZ",
+    "NLSPLINE",
+    "NMAXFOCKAE",
+    "NOMEGA",
+    "NOMEGAPAR",
+    "NOMEGAR",
+    "NOMEGA_DUMP",
+    "NPACO",
+    "NPAR",
+    "NPPSTR",
+    "NRMM",
+    "NSIM",
+    "NSTORB",
+    "NSUBSYS",
+    "NSW",
+    "NTARGET_STATES",
+    "NTAUPAR",
+    "NTEMPER",
+    "NUCIND",
+    "NUM_WANN",
+    "NUPDOWN",
+    "NWRITE",
+    "ODDONLY",
+    "ODDONLYGW",
+    "OFIELD_A",
+    "OFIELD_KAPPA",
+    "OFIELD_Q6_FAR",
+    "OFIELD_Q6_NEAR",
+    "OMEGAMAX",
+    "OMEGAMIN",
+    "OMEGATL",
+    "PARAM1",
+    "PARAM2",
+    "PFLAT",
+    "PHON_BORN_CHARGES",
+    "PHON_DIELECTRIC",
+    "PHON_DOS",
+    "PHON_G_CUTOFF",
+    "PHON_LBOSE",
+    "PHON_LMC",
+    "PHON_NEDOS",
+    "PHON_NSTRUCT",
+    "PHON_NWRITE",
+    "PHON_SIGMA",
+    "PHON_TLIST",
+    "PLEVEL",
+    "PMASS",
+    "POMASS",
+    "POSNICS",
+    "POTIM",
+    "PREC",
+    "PRECFOCK",
+    "PROUTINE",
+    "PSTRESS",
+    "PSUBSYS",
+    "PTHRESHOLD",
+    "QMAXFOCKAE",
+    "QSPIRAL",
+    "QUAD_EFG",
+    "RANDOM_GENERATOR",
+    "RANDOM_SEED",
+    "ROPT",
+    "RSMBJ",
+    "RWIGS",
+    "SAXIS",
+    "SCALEE",
+    "SCISSOR",
+    "SCSRAD",
+    "SDFTD3_DAMPING",
+    "SDFTD3_XC",
+    "SHAKEMAXITER",
+    "SHAKETOL",
+    "SHAKETOLSOFT",
+    "SIGMA",
+    "SMASS",
+    "SMBJ",
+    "SMEARINGS",
+    "SPRING",
+    "SPRING_K",
+    "SPRING_R0",
+    "SPRING_V0",
+    "STEP_MAX",
+    "STEP_SIZE",
+    "STOP_ON",
+    "SYMPREC",
+    "SYSTEM",
+    "TEBEG",
+    "TEEND",
+    "TILAMBDA",
+    "TIME",
+    "TRANSPORT_NEDOS",
+    "TRANSPORT_RELAXATION_TIME",
+    "TSUBSYS",
+    "VACPOTFLAT",
+    "VALUE_MAX",
+    "VALUE_MIN",
+    "VCA",
+    "VCAIMAGES",
+    "VCUTOFF",
+    "VDW_A1",
+    "VDW_A2",
+    "VDW_ALPHA",
+    "VDW_BETA",
+    "VDW_C6",
+    "VDW_C6AU",
+    "VDW_CNRADIUS",
+    "VDW_D",
+    "VDW_R0",
+    "VDW_R0AU",
+    "VDW_RADIUS",
+    "VDW_S6",
+    "VDW_S8",
+    "VDW_S9",
+    "VDW_SR",
+    "VDW_SR8",
+    "VELOCITY",
+    "VOSKOWN",
+    "WANNIER90_WIN",
+    "WC",
+    "WEIMIN",
+    "WRT_DENSITY",
+    "WRT_NMRCUR",
+    "WRT_POTENTIAL",
+    "XC",
+    "XC_C",
+    "ZAB_VDW"
+  ],
+  "managed_tags": [
+    "GGA",
+    "MAGMOM",
+    "LDAUL",
+    "LDAUU",
+    "LDAUJ"
+  ],
+  "contract_locked_tags": [
+    "IMAGES",
+    "KSPACING",
+    "LHFCALC",
+    "METAGGA",
+    "XC"
+  ],
+  "target_vasp_version": "未核对；以所选服务器实际 VASP 版本和 OUTCAR 为准",
+  "normalization": "MediaWiki 页面标题中的空格对应 INCAR tag 下划线；仅收录规范大写标识符"
+}

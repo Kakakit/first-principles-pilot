@@ -1,0 +1,254 @@
+{
+  "schema": "fpilot.reference-registry.v1",
+  "registry_version": "2026-08-28",
+  "policy": {
+    "default_access": "summary-only",
+    "route_network": "disabled",
+    "redistribution": "link-only-or-authored-summary",
+    "upstream_full_text": "not-bundled"
+  },
+  "sources": [
+    {
+      "id": "vasp-wiki-input-contracts",
+      "name": "VASP Wiki input contracts",
+      "kind": "official-documentation",
+      "upstream": "https://vasp.at/wiki/",
+      "revision": {
+        "type": "mediawiki-oldid",
+        "pages": {
+          "Input": "15029",
+          "KPOINTS": "35974",
+          "KSPACING": "35382",
+          "POTCAR": "33125",
+          "Preparing_a_POTCAR": "25377",
+          "MAGMOM": "36612",
+          "LSORBIT": "27887",
+          "LNONCOLLINEAR": "36602"
+        }
+      },
+      "version": "VASP Wiki revisions pinned per page",
+      "license": {
+        "name": "GNU Free Documentation License 1.2",
+        "spdx": "GFDL-1.2-only",
+        "verified": true,
+        "url": "https://vasp.at/wiki/Accessibility"
+      },
+      "redistribution": "link-only",
+      "scope": "authored input-consistency summaries and links only; never VASP code, binaries, or POTCAR files",
+      "urls": [
+        "https://vasp.at/wiki/Input?oldid=15029",
+        "https://vasp.at/wiki/KPOINTS?oldid=35974",
+        "https://vasp.at/wiki/KSPACING?oldid=35382",
+        "https://vasp.at/wiki/POTCAR?oldid=33125",
+        "https://vasp.at/wiki/Preparing_a_POTCAR?oldid=25377",
+        "https://vasp.at/wiki/MAGMOM?oldid=36612",
+        "https://vasp.at/wiki/LSORBIT?oldid=27887",
+        "https://vasp.at/wiki/LNONCOLLINEAR?oldid=36602"
+      ],
+      "refresh": {
+        "checks": [
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=Input",
+            "expected": "15029"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=KPOINTS",
+            "expected": "35974"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=KSPACING",
+            "expected": "35382"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=POTCAR",
+            "expected": "33125"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=Preparing_a_POTCAR",
+            "expected": "25377"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=MAGMOM",
+            "expected": "36612"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=LSORBIT",
+            "expected": "27887"
+          },
+          {
+            "strategy": "mediawiki-revision",
+            "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=LNONCOLLINEAR",
+            "expected": "36602"
+          }
+        ]
+      }
+    },
+    {
+      "id": "vasp-wiki-wannier-interface",
+      "name": "VASP Wiki Wannier interface",
+      "kind": "official-documentation",
+      "upstream": "https://vasp.at/wiki/",
+      "revision": {
+        "type": "mediawiki-oldid",
+        "pages": {
+          "Constructing_Wannier_orbitals": "32856",
+          "LWANNIER90": "30237",
+          "WANNIER90_WIN": "22341",
+          "LWRITE_MMN_AMN": "18095",
+          "NUM_WANN": "30236"
+        }
+      },
+      "version": "VASP Wiki revisions pinned per page",
+      "license": {
+        "name": "GNU Free Documentation License 1.2",
+        "spdx": "GFDL-1.2-only",
+        "verified": true,
+        "url": "https://vasp.at/wiki/Accessibility"
+      },
+      "redistribution": "link-only",
+      "scope": "wiki summaries and links only; never VASP code, binaries, or POTCAR files",
+      "urls": [
+        "https://vasp.at/wiki/Constructing_Wannier_orbitals?oldid=32856",
+        "https://vasp.at/wiki/LWANNIER90?oldid=30237",
+        "https://vasp.at/wiki/WANNIER90_WIN?oldid=22341",
+        "https://vasp.at/wiki/LWRITE_MMN_AMN?oldid=18095",
+        "https://vasp.at/wiki/NUM_WANN?oldid=30236"
+      ],
+      "refresh": {
+        "checks": [
+          {"strategy": "mediawiki-revision", "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=Constructing_Wannier_orbitals", "expected": "32856"},
+          {"strategy": "mediawiki-revision", "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=LWANNIER90", "expected": "30237"},
+          {"strategy": "mediawiki-revision", "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=WANNIER90_WIN", "expected": "22341"},
+          {"strategy": "mediawiki-revision", "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=LWRITE_MMN_AMN", "expected": "18095"},
+          {"strategy": "mediawiki-revision", "url": "https://vasp.at/wiki/api.php?action=query&prop=revisions&rvprop=ids&format=json&titles=NUM_WANN", "expected": "30236"}
+        ]
+      }
+    },
+    {
+      "id": "vaspkit-official-docs",
+      "name": "VASPKIT official documentation",
+      "kind": "official-documentation",
+      "upstream": "https://github.com/vaspkit/vaspkit.github.io",
+      "revision": {
+        "type": "git-commit",
+        "branch": "master",
+        "commit": "383a7103505b5b9436dedbf04df42ebb6e248638"
+      },
+      "version": "documentation 1.5.0; binary releases are tracked separately upstream",
+      "license": {
+        "name": "VASPKIT academic/scientific/educational noncommercial terms",
+        "spdx": "NOASSERTION",
+        "verified": true,
+        "url": "https://github.com/vaspkit/vaspkit.github.io/blob/383a7103505b5b9436dedbf04df42ebb6e248638/installation.html"
+      },
+      "redistribution": "link-only",
+      "scope": "input recipes and documentation links; do not bundle the VASPKIT program",
+      "urls": [
+        "https://vaspkit.com/",
+        "https://vaspkit.com/tutorials.html",
+        "https://vaspkit.com/installation.html"
+      ],
+      "refresh": {
+        "checks": [
+          {"strategy": "github-commit", "url": "https://api.github.com/repos/vaspkit/vaspkit.github.io/commits/master", "expected": "383a7103505b5b9436dedbf04df42ebb6e248638"}
+        ]
+      }
+    },
+    {
+      "id": "vaspkit-nature-protocols-examples",
+      "name": "VASPKIT Nature Protocols examples",
+      "kind": "public-examples",
+      "upstream": "https://github.com/vaspkit/VASPKIT_NatureProtocols",
+      "revision": {
+        "type": "git-commit",
+        "branch": "main",
+        "commit": "540333475cc602b0d32263bff32e00198bc6c02b"
+      },
+      "version": "main at pinned commit",
+      "license": {
+        "name": "MIT",
+        "spdx": "MIT",
+        "verified": true,
+        "url": "https://github.com/vaspkit/VASPKIT_NatureProtocols/blob/540333475cc602b0d32263bff32e00198bc6c02b/LICENSE"
+      },
+      "redistribution": "summary-only",
+      "scope": "small recipe summaries and links; source examples remain upstream",
+      "urls": [
+        "https://github.com/vaspkit/VASPKIT_NatureProtocols"
+      ],
+      "refresh": {
+        "checks": [
+          {"strategy": "github-commit", "url": "https://api.github.com/repos/vaspkit/VASPKIT_NatureProtocols/commits/main", "expected": "540333475cc602b0d32263bff32e00198bc6c02b"}
+        ]
+      }
+    },
+    {
+      "id": "wannier90-user-guide",
+      "name": "Wannier90 user guide",
+      "kind": "official-documentation",
+      "upstream": "https://github.com/wannier-developers/wannier90",
+      "revision": {
+        "type": "git-commit",
+        "branch": "develop",
+        "commit": "521b6056d067b83a5154d55c29bb58896c6d25cd",
+        "stable_tag": "v4.0.1",
+        "stable_commit": "46c3b5de2e3b2d4e4e5972395f1440efdbe08304"
+      },
+      "version": "develop docs pinned; stable release v4.0.1",
+      "license": {
+        "name": "GNU Lesser General Public License 2.1 or later",
+        "spdx": "LGPL-2.1-or-later",
+        "verified": true,
+        "url": "https://github.com/wannier-developers/wannier90/blob/521b6056d067b83a5154d55c29bb58896c6d25cd/LICENSE"
+      },
+      "redistribution": "summary-only",
+      "scope": "user-guide tag and workflow summaries; do not copy the guide wholesale",
+      "urls": [
+        "https://github.com/wannier-developers/wannier90/tree/develop/docs/docs/user_guide/wannier90"
+      ],
+      "refresh": {
+        "checks": [
+          {"strategy": "github-commit", "url": "https://api.github.com/repos/wannier-developers/wannier90/commits/develop", "expected": "521b6056d067b83a5154d55c29bb58896c6d25cd"}
+        ]
+      }
+    },
+    {
+      "id": "atomate2-architecture",
+      "name": "atomate2 architecture documentation",
+      "kind": "architecture-reference",
+      "upstream": "https://github.com/materialsproject/atomate2",
+      "revision": {
+        "type": "git-commit",
+        "branch": "main",
+        "commit": "967af804bd631c37538c1444293b606f1cb649ec",
+        "stable_tag": "v0.1.5",
+        "stable_commit": "0b61cf6365c8cfb5e74792f48d20b37dbb2916a6"
+      },
+      "version": "main pinned; stable release v0.1.5",
+      "license": {
+        "name": "modified BSD",
+        "spdx": "NOASSERTION",
+        "verified": true,
+        "url": "https://github.com/materialsproject/atomate2/blob/967af804bd631c37538c1444293b606f1cb649ec/docs/about/license.md"
+      },
+      "redistribution": "summary-only",
+      "scope": "architecture vocabulary only (Job, Flow, Maker, task document); not a runtime dependency",
+      "urls": [
+        "https://github.com/materialsproject/atomate2/blob/main/docs/user/key_concepts_overview.md",
+        "https://github.com/materialsproject/atomate2/blob/main/docs/about/license.md"
+      ],
+      "refresh": {
+        "checks": [
+          {"strategy": "github-commit", "url": "https://api.github.com/repos/materialsproject/atomate2/commits/main", "expected": "967af804bd631c37538c1444293b606f1cb649ec"}
+        ]
+      }
+    }
+  ]
+}

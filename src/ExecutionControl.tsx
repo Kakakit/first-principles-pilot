@@ -1,0 +1,10 @@
+import {useEffect,useState} from 'react';
+type Limits={max_inflight_total:number;max_inflight_per_host:number;max_cores_per_host:number|null};
+type Status={healthy:boolean;running:boolean;pid?:number;heartbeat_age_seconds?:number;last_cycle?:{checked:number;errors:unknown[]}};
+export default function ExecutionControl(){
+ const [limits,setLimits]=useState<Limits|null>(null),[worker,setWorker]=useState<Status|null>(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+ const load=async()=>{const r=await fetch('/api/execution-control');if(!r.ok)throw new Error('无法读取 worker 状态');const d=await r.json();setLimits(d.settings);setWorker(d.worker);};
+ useEffect(()=>{void load().catch(e=>setMessage(e.message));},[]);
+ const save=async()=>{setBusy(true);try{const r=await fetch('/api/execution-control',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(limits)});const d=await r.json();if(!r.ok)throw new Error(d.detail);setLimits(d);setMessage('额度已保存；已有任务不取消，后续提交受新额度限制。');}catch(e){setMessage((e as Error).message);}finally{setBusy(false);}};
+ return <details><summary>持久监控与在途额度</summary><p>普通 worker：{worker?.healthy?'正在运行':worker?.running?'心跳已过期，请检查启动器':'未运行'} · PID {worker?.pid||'—'} · 心跳距今 {worker?.heartbeat_age_seconds??'—'} 秒。</p><p>关闭网页不影响监控；启动工作台且开启自动推进时，监控自动恢复。默认每 300 秒核对一次。已授权的计算链和扫描批次会由 worker 按依赖与额度派发；普通单任务不会自动提交。</p><button className="button" onClick={()=>void load().catch(e=>setMessage(e.message))}>刷新 worker 状态</button>{limits&&<fieldset disabled={busy}>{Object.entries({max_inflight_total:'总在途任务上限',max_inflight_per_host:'每主机在途任务上限',max_cores_per_host:'每主机在途核数上限（空白不额外限制）'}).map(([key,label])=><label key={key}>{label}<input type="number" min="1" value={limits[key as keyof Limits]??''} onChange={e=>setLimits({...limits,[key]:e.target.value===''&&key==='max_cores_per_host'?null:Number(e.target.value)})}/></label>)}<button className="button" onClick={()=>void save()}>保存在途额度</button></fieldset>}<p>排队、运行、DISPATCHING 和 UNKNOWN 均计入在途额度。计算链的条件续算受冻结授权约束；普通失败任务不自动重试。</p>{message&&<p role="status">{message}</p>}</details>;
+}

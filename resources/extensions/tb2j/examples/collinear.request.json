@@ -1,0 +1,16 @@
+{
+  "schema": "fpilot.tb2j-request.v1",
+  "input_dir": "/path/to/wannier",
+  "mode": "collinear",
+  "prefix_up": "wan.1",
+  "prefix_down": "wan.2",
+  "efermi_ev": 5.0182,
+  "kmesh": [5, 4, 4],
+  "elements": ["Cr", "Fe"],
+  "emin_ev": -14.0,
+  "emax_ev": 0.0,
+  "nz": 100,
+  "nproc": 1,
+  "output_dir": "TB2J_results",
+  "executable": "wann2J.py"
+}

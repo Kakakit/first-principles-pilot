@@ -1,0 +1,86 @@
+{
+  "schema": "fpilot.extension.v2",
+  "id": "crystal-structure-distortion-analysis",
+  "name": "配位多面体畸变",
+  "version": "2.0.0",
+  "description": "按指定中心、配体、配位数与搜索半径分析四面体或八面体畸变。",
+  "entrypoint": "scripts/cli.py",
+  "contexts": [
+    "structure",
+    "attempt"
+  ],
+  "stages": [],
+  "sources": {
+    "min": 1,
+    "max": 1
+  },
+  "inputs": [
+    {
+      "role": "structure",
+      "title": "结构",
+      "names": [
+        "CONTCAR",
+        "POSCAR"
+      ],
+      "max_bytes": 10485760
+    }
+  ],
+  "evidence": [],
+  "execution": {
+    "locations": [
+      "local",
+      "ssh",
+      "scheduler"
+    ],
+    "timeout_seconds": 300
+  },
+  "dependencies": [
+    "numpy"
+  ],
+  "options_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "center_element": {
+        "type": "string",
+        "title": "中心元素",
+        "pattern": "^[A-Z][a-z]?$"
+      },
+      "ligand_element": {
+        "type": "string",
+        "title": "配体元素",
+        "pattern": "^[A-Z][a-z]?$"
+      },
+      "coordination": {
+        "type": "integer",
+        "title": "配位数",
+        "enum": [
+          4,
+          6
+        ],
+        "default": 6
+      },
+      "search_radius_angstrom": {
+        "type": "number",
+        "title": "搜索半径 / Å",
+        "exclusiveMinimum": 0,
+        "maximum": 20,
+        "default": 3
+      }
+    },
+    "required": [
+      "center_element",
+      "ligand_element",
+      "coordination",
+      "search_radius_angstrom"
+    ]
+  },
+  "ui_schema": {},
+  "outputs": [
+    "table",
+    "file"
+  ],
+  "fixtures": [
+    "fixtures/POSCAR"
+  ]
+}
