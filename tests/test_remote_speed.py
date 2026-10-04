@@ -68,6 +68,50 @@ class TransferTests(unittest.TestCase):
 
 
 class DispatchGuardTests(unittest.TestCase):
+    def test_project_directory_guard_accepts_owner_json_format_and_rejects_other_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project=Path(tmp)/'project';metadata=project/'.fpilot/project.json'
+            metadata.parent.mkdir(parents=True)
+            record={'config':{'alias':'test'},'remote_project_path_absolute':str(project),
+                    'project_id':'imported','project_slug':'project'}
+            for owner,allowed in (('imported',True),('original',False)):
+                with self.subTest(owner=owner):
+                    raw=json.dumps({'schema':'fpilot.remote-project.v1','project_id':owner,'project_slug':'project'},indent=2)+'\n'
+                    metadata.write_text(raw)
+                    with patch.object(transport,'_interpreter',return_value=sys.executable):
+                        command='set -e\n'+execution.project_directory_guard(record)+'printf FPILOT_MUTATION\n'
+                    result=subprocess.run(['bash','-c',command],capture_output=True)
+                    self.assertEqual(result.returncode==0,allowed,result.stderr)
+                    self.assertEqual(b'FPILOT_MUTATION' in result.stdout,allowed)
+                    self.assertEqual(metadata.read_text(),raw)
+                    if not allowed:
+                        self.assertIn(b'FPILOT_PROJECT_CONFLICT=1',result.stdout)
+                        self.assertIn('其他项目',result.stderr.decode())
+            metadata.unlink()
+            with patch.object(transport,'_interpreter',return_value=sys.executable):
+                command='set -e\n'+execution.project_directory_guard(record)+'printf FPILOT_MUTATION\n'
+            result=subprocess.run(['bash','-c',command],capture_output=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn(b'FPILOT_PROJECT_CONFLICT=1',result.stdout)
+            self.assertFalse(metadata.exists())
+
+    def test_project_conflict_is_terminal_before_submission_but_capacity_wait_is_not(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(execution,'ROOT',Path(tmp)),patch.object(execution,'save') as save:
+            with execution.db() as db:
+                db.execute('CREATE TABLE IF NOT EXISTS branch_hosts(project_id,scope,alias,state,attempt_id)')
+                db.execute("INSERT INTO branch_hosts VALUES('p','n','test','RESERVED','attempt')")
+            for conflict,state in ((False,'PREPARED'),(True,'FAILED')):
+                with self.subTest(conflict=conflict):
+                    record={'id':'attempt'}
+                    receipt={'exit_code':1,'stdout':('FPILOT_PROJECT_CONFLICT=1\n' if conflict else '')+'FPILOT_NOT_DISPATCHED=0\n','stderr':'project conflict' if conflict else 'busy'}
+                    self.assertTrue(fast_dispatch.known_not_submitted(record,receipt))
+                    self.assertEqual(record['state'],state)
+                    self.assertTrue(record['not_dispatched']);self.assertIsNone(record['job_id'])
+                    self.assertIn(receipt['stderr'],record['note'])
+            with execution.db() as db:
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM branch_hosts WHERE state='RESERVED'").fetchone()[0],0)
+            self.assertEqual(save.call_count,2)
+
     def test_capacity_guard_blocks_busy_and_changed_cores_before_mutation(self):
         profile={'ppn':48};config={'alias':'jutai-1','scheduler':'pbs','queue':'batch','walltime':'01:00:00'}
         record={'config':config,'node':'node01','cores':None,'reason':'','profile':profile}

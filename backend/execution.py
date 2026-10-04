@@ -627,8 +627,16 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     for prior in prior_attempts:
         if prior.get('path_schema') != 'fpilot.remote-attempt-path' or prior.get('project_id') != identity['project_id']:
             continue
+        # Local preparation cannot permanently claim a remote directory name.
+        never_submitted = (prior.get('state') in ('PREPARED', 'FAILED') and
+                           not prior.get('job_id') and
+                           (prior.get('not_dispatched') is True or
+                            (prior.get('state') == 'PREPARED' and
+                             not prior.get('dispatch_started_at') and not prior.get('dispatch_receipt'))))
+        if never_submitted:
+            continue
         if prior.get('project_slug') != identity['project_slug']:
-            raise ValueError('该项目已产生 当前 attempt，远程项目标识已锁定')
+            raise ValueError('该项目已有远端派发记录，远程项目标识已锁定')
         if prior.get('node_id') == identity['node_id'] and (
             prior.get('stage_sequence') != identity['stage_sequence'] or
             prior.get('stage_slug') != identity['stage_slug']
@@ -758,6 +766,42 @@ def start_watcher(key):
         record=get(key);record['watcher_error']=str(exc);save(record)
 
 
+def project_directory_guard(record):
+    """Protect an existing project's namespace and return an actionable blocker."""
+    from .remote_transport import _interpreter
+    project_dir = remote_paths.shell_path(record['remote_project_path_absolute'])
+    identity = {'schema': 'fpilot.remote-project.v1', 'project_id': record.get('project_id'),
+                'project_slug': record.get('project_slug')}
+    identity_json = shlex.quote(json.dumps(identity, ensure_ascii=False, separators=(',', ':')))
+    check = """import json,sys
+expected=json.loads(sys.argv[1])
+try:
+    with open(sys.argv[2]) as handle: actual=json.load(handle)
+    matches=isinstance(actual,dict) and all(actual.get(key)==value for key,value in expected.items())
+except (OSError,ValueError): matches=False
+if not matches:
+    print('FPILOT_PROJECT_CONFLICT=1')
+    print('远端项目目录已属于其他项目或归属记录无效；请更换远端项目标识后重新冻结。没有提交任务，也没有修改原目录。',file=sys.stderr)
+    sys.exit(1)
+"""
+    interpreter = shlex.quote(_interpreter(record['config']['alias']))
+    return f'''project_dir={project_dir}
+if test -d "$project_dir"; then
+  if test -f "$project_dir/.fpilot/project.json"; then
+    {interpreter} -c {shlex.quote(check)} {identity_json} "$project_dir/.fpilot/project.json"
+  elif ! test -z "$(find "$project_dir" -mindepth 1 -maxdepth 1 -print -quit)"; then
+    printf 'FPILOT_PROJECT_CONFLICT=1\n'
+    printf '远端项目目录非空且没有归属记录；请使用独立的远端项目标识后重新冻结。没有提交任务。\n' >&2
+    exit 1
+  fi
+else
+  mkdir -p "$project_dir"
+fi
+mkdir -p "$project_dir/.fpilot"
+if ! test -e "$project_dir/.fpilot/project.json"; then printf '%s' {identity_json} > "$project_dir/.fpilot/project.json"; fi
+'''
+
+
 def submit(key):
     from . import execution_control as control
     record=get(key)
@@ -857,21 +901,7 @@ def submit(key):
     destination = remote_paths.shell_path(paths['shell'])
     parent = shlex.quote(str(PurePosixPath(record['remote_path_absolute']).parent))
     expected = shlex.quote(record['remote_workspace_root_abs'])
-    project_dir=remote_paths.shell_path(record['remote_project_path_absolute'])
-    identity_json=shlex.quote(json.dumps({'schema':'fpilot.remote-project.v1','project_id':record.get('project_id'),'project_slug':record.get('project_slug')},ensure_ascii=False,separators=(',',':')))
-    project_guard=f'''project_dir={project_dir}
-if test -d "$project_dir"; then
-  if test -f "$project_dir/.fpilot/project.json"; then
-    test "$(cat "$project_dir/.fpilot/project.json")" = {identity_json}
-  else
-    test -z "$(find "$project_dir" -mindepth 1 -maxdepth 1 -print -quit)"
-  fi
-else
-  mkdir -p "$project_dir"
-fi
-mkdir -p "$project_dir/.fpilot"
-if ! test -e "$project_dir/.fpilot/project.json"; then printf '%s' {identity_json} > "$project_dir/.fpilot/project.json"; fi
-'''
+    project_guard=project_directory_guard(record)
     submit_command='sbatch --parsable '+job_script if scheduler=='slurm' else 'qsub '+job_script
     command=f'''set -e
 root={root_expr}

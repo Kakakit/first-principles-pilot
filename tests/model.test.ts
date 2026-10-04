@@ -10,6 +10,11 @@ test('importing backup appends independent projects without overwriting the sour
   const w=demoWorkspace(), original=structuredClone(w);const merged=mergeWorkspace(w,w);
   assert.deepEqual(w,original);assert.equal(merged.projects.length,2);
   assert.notEqual(merged.projects[1].id,w.projects[0].id);
+  assert.notEqual(merged.projects[1].remoteSlug,w.projects[0].remoteSlug);
+  const twice=mergeWorkspace(merged,w);
+  assert.equal(new Set(twice.projects.map(p=>p.remoteSlug)).size,3);
+  const long=structuredClone(w);long.projects[0].remoteSlug='x'.repeat(64);
+  assert.match(mergeWorkspace(w,long).projects[1].remoteSlug!,/^[a-z0-9-]{1,64}$/);
   assert(merged.projects[1].edges.every(e=>merged.projects[1].nodes.some(n=>n.id===e.source)&&merged.projects[1].nodes.some(n=>n.id===e.target)));
   assert.deepEqual(parseWorkspace(JSON.stringify(merged)),merged);
 });

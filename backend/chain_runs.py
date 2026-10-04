@@ -722,7 +722,13 @@ def _tick_one(run_id):
         try:
             submitted = ex.submit(step['attempt_id'])
             step['state'] = submitted['state']
-            step.pop('waiting_reason', None)
+            if submitted['state'] == 'PREPARED':
+                step['waiting_reason'] = submitted.get('note') or '派发前检查未通过，等待资源恢复；没有提交任务'
+            else:
+                step.pop('waiting_reason', None)
+                if submitted['state'] in ('FAILED', 'UNKNOWN'):
+                    step['state'] = 'BLOCKED'
+                    step['blocker'] = submitted.get('note') or 'attempt ' + submitted['state'] + '；须核对原作业'
         except ValueError as exc:
             if any(item in str(exc) for item in ('在途任务数已达上限', '核数预算不足',
                                                  '实时资源已变化或不可用')):

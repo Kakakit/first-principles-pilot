@@ -74,6 +74,40 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(record['path_schema'],'fpilot.remote-attempt-path')
         self.assertEqual(record['artifact_paths']['INCAR'], record['remote_path_absolute'] + '/INCAR')
 
+    def test_local_preparation_can_change_name_but_remote_dispatch_keeps_it_locked(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(ex,'ROOT',Path(tmp)):
+            config={'alias':'jutai-1','vasp_executable':'/opt/vasp_std'}
+            project={'id':'project','name':'Project','remoteSlug':'new-name',
+                     'nodes':[{'id':'node','data':{'kind':'scf','executionMode':'vasp','stageSequence':1,'stageSlug':'scf'}}]}
+            manifest={'ready':True,'dependencies':[],'errors':[],'stage':'scf','node_id':'node'}
+            files={name:b'test\n' for name in ('INCAR','POSCAR','KPOINTS','POTCAR')}
+            rendered={'resource_ready':True,'profile':{'node':'node02','ppn':4},'script':'#!/bin/bash\ntrue\n'}
+            receipt={'exit_code':0,'stdout':'FPILOT_ROOT_ABS=/home/user/230269265lht\nFPILOT_ROOT_SNAPSHOT=1:2:3:4\n','stderr':''}
+            for state,extra,allowed in (
+                    ('PREPARED',{},True),
+                    ('FAILED',{'not_dispatched':True,'dispatch_started_at':'old','dispatch_receipt':{'exit_code':1}},True),
+                    ('UNKNOWN',{'not_dispatched':True},False),
+                    ('PREPARED',{'dispatch_started_at':'old','dispatch_receipt':{'exit_code':None}},False),
+                    ('COMPLETED',{'job_id':'123.node01'},False),
+                    ('PREPARED',{'job_id':'123.node01','not_dispatched':True},False)):
+                with self.subTest(state=state,extra=extra):
+                    with ex.db() as db:db.execute('DELETE FROM attempts')
+                    prior={'id':'prior','state':state,'path_schema':'fpilot.remote-attempt-path',
+                           'project_id':'project','node_id':'node','project_slug':'old-name','config':config,**extra}
+                    with ex.db() as db:
+                        db.execute('INSERT INTO attempts(id,state,body) VALUES(?,?,?)',('prior',state,json.dumps(prior)))
+                    with patch.object(ex.servers,'preview',return_value=rendered), \
+                         patch.object(ex,'bundle',return_value=(manifest,files)), \
+                         patch.object(ex,'frozen_project',return_value=project), \
+                         patch.object(ex.servers.pbs,'audit_inputs',return_value={'status':'PASS'}), \
+                         patch.object(ex,'ssh',return_value=receipt):
+                        if allowed:
+                            result=ex.prepare.__wrapped__('b'*64,config,'probe','node02',cores=4)
+                            self.assertEqual(result['project_slug'],'new-name')
+                        else:
+                            with self.assertRaisesRegex(ValueError,'远程项目标识已锁定'):
+                                ex.prepare.__wrapped__('b'*64,config,'probe','node02',cores=4)
+
     def test_manual_chgcar_restart_ignores_stale_graph_dependency_fields(self):
         config={'alias':'jutai-1','vasp_executable':'/opt/vasp_std','remote_workspace_root':'$HOME/230269265lht'}
         manifest={'ready':True,'dependencies':[],'errors':[],'stage':'scf','node_id':'node-1'}

@@ -163,6 +163,25 @@ class ChainRunTests(unittest.TestCase):
         self.assertEqual(len(dispatched['attempts']), 1)
         self.assertNotIn('waiting_reason', dispatched)
 
+    def test_prepared_dispatch_wait_is_visible_and_project_blocker_stops_retries(self):
+        for result_state,expected_state in (('PREPARED','PREPARED'),('FAILED','BLOCKED')):
+            with self.subTest(result_state=result_state):
+                run=self.frozen();step=run['steps'][0];run['steps']=[step]
+                step.update(state='PREPARED',attempt_id='prepared',attempts=['prepared'])
+                run.update(state='ACTIVE',authorization={'config':{'alias':'jutai-1','vasp_executable':'/bin/vasp_std'},
+                    'resources':{step['node_id']:{'node':'node01','cores':None,'reason':''}}})
+                run=chains.save(run)
+                note='远端项目目录已属于其他项目' if result_state=='FAILED' else '派发前资源暂时占用'
+                with patch.object(chains,'_quota_available',return_value=True),patch.object(ex,'get',return_value={'state':'PREPARED'}), \
+                     patch.object(ex,'submit',return_value={'state':result_state,'note':note}) as submit:
+                    chains._tick_one(run['id'])
+                    updated=chains.get(run['id'])
+                    self.assertEqual(updated['steps'][0]['state'],expected_state)
+                    self.assertEqual(updated['steps'][0]['waiting_reason' if result_state=='PREPARED' else 'blocker'],note)
+                    if result_state=='FAILED':
+                        self.assertEqual(updated['state'],'BLOCKED')
+                        chains._tick_one(run['id']);submit.assert_called_once()
+
     def test_convergence_and_one_retry_stop(self):
         run = self.frozen()
         step = run['steps'][0]

@@ -79,7 +79,8 @@ def known_not_submitted(record,receipt):
     import re
     match=re.search(r'^FPILOT_NOT_DISPATCHED=([01])$',receipt.get('stdout',''),re.M)
     if not match or receipt.get('exit_code') in (None,0):return False
-    record.update(state='PREPARED' if match[1]=='0' else 'FAILED',job_id=None,
+    project_conflict = bool(re.search(r'^FPILOT_PROJECT_CONFLICT=1$',receipt.get('stdout',''),re.M))
+    record.update(state='PREPARED' if match[1]=='0' and not project_conflict else 'FAILED',job_id=None,
                   not_dispatched=True,dispatch_receipt=receipt,updated_at=ex.now(),
                   note='派发前检查未通过，没有调用调度器；'+receipt.get('stderr','')[-400:])
     with closing(ex.db()) as c:

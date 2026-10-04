@@ -102,7 +102,8 @@ export function inspectFlow(p: Project): Issue[] {
 export function mergeWorkspace(current: Workspace, imported: Workspace): Workspace {
   const projects = imported.projects.map(p=>{
     const ids = new Map(p.nodes.map(n=>[n.id,uid()]));
-    return {...p,id:uid(),name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>({...n,id:ids.get(n.id)!})),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
+    const id=uid(),base=(p.remoteSlug||slugify(p.name)||'project').slice(0,55).replace(/-+$/,'');
+    return {...p,id,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>({...n,id:ids.get(n.id)!})),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
   });
   if(current.projects.length+projects.length>100) throw new Error('最多保存 100 个项目，请先导出备份并整理。');
   return {...current,activeId:projects[0].id,projects:[...current.projects,...projects]};
