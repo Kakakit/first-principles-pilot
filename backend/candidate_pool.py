@@ -6,7 +6,9 @@ from . import servers
 
 def capacity_wait(rendered):
     blockers = rendered.get('blockers') or []
-    if rendered.get('node_status') not in ('BUSY', 'FULLY_IDLE', 'PARTIAL'):
+    # Scheduler-idle nodes can still carry load after a job finishes. Keep
+    # waiting for a clean live observation; never submit through this gate.
+    if rendered.get('node_status') not in ('BUSY', 'FULLY_IDLE', 'PARTIAL', 'SUSPECT_LOAD'):
         return False
     prefixes = ('selected node CPUS_FREE must be greater than zero',
                 'selected node STATUS must be FULLY_IDLE or PARTIAL',
@@ -66,9 +68,14 @@ def select(config, probe, candidates, occupied=(), render=None):
         # These contracts use one whole node per job. Local receipts also hold
         # the node while the scheduler's next capacity snapshot catches up.
         if c['node'] in occupied or capacity_wait(value):
-            waiting.append(c['node'])
+            waiting.append(c['node'] + ('（调度器空闲但负载未恢复，等待复检）'
+                                       if value.get('node_status') == 'SUSPECT_LOAD' else ''))
             continue
-        if (not value['resource_ready'] or value['profile'] != c['profile'] or
+        if not value['resource_ready']:
+            detail = '；'.join(map(str, value.get('blockers') or [])) or '资源诊断未通过'
+            invalid.append(c['node']+'：资源检查未通过（'+str(value.get('node_status') or '未知状态')+'）：'+detail)
+            continue
+        if (value['profile'] != c['profile'] or
                 hashlib.sha256(value['script'].encode()).hexdigest() != c['script_sha256']):
             invalid.append(c['node']+'：资源或脚本已偏离授权预览')
             continue

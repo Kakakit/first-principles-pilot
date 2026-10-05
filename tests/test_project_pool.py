@@ -87,6 +87,39 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(self.run_tick(),(1,1));self.assertEqual(self.run_tick(),(0,0))
         with self.assertRaisesRegex(ValueError,'UNKNOWN'):scans.resume(batch['id'],'p')
 
+    def test_residual_load_waits_then_continues_pending_cases_once(self):
+        batch=self.approved(1)
+        self.assertEqual(self.run_tick(),(1,1))
+        current=scans.get(batch['id']);first=current['cases'][0]['attempt_id']
+        record=ex.get(first);record['state']='COMPLETED';ex.save(record)
+        self.busy_nodes={'node01','node02'}
+        original=self.rendered
+        def residual(*args,**kwargs):
+            return {**original(*args,**kwargs),'node_status':'SUSPECT_LOAD'}
+        with patch.object(scans.servers,'capacity_probe',return_value={'id':'live'}),patch.object(scans.servers,'preview',side_effect=residual),patch.object(ex,'prepare') as prepare,patch.object(ex,'submit') as submit:
+            scans.tick()
+            prepare.assert_not_called();submit.assert_not_called()
+        current=scans.get(batch['id'])
+        self.assertEqual(current['state'],'ACTIVE')
+        self.assertIn('负载未恢复',current['waiting_reason'])
+        self.assertEqual([c['state'] for c in current['cases']],['COMPLETED','PENDING','PENDING','PENDING'])
+        self.busy_nodes=set()
+        self.assertEqual(self.run_tick(),(1,1))
+        self.assertEqual(self.run_tick(),(0,0))
+        self.assertEqual(scans.get(batch['id'])['cases'][0]['attempt_id'],first)
+
+    def test_residual_load_with_failed_diagnostic_blocks_with_real_reason(self):
+        batch=self.approved()
+        value={'script':'script node01','profile':{'node':'node01','ppn':4},'resource_ready':False,
+               'node_status':'SUSPECT_LOAD','blockers':['selected node CPUS_FREE must be greater than zero','运行时路径或调度器诊断未通过']}
+        with patch.object(scans.servers,'capacity_probe',return_value={'id':'live'}),patch.object(scans.servers,'preview',return_value=value),patch.object(ex,'prepare') as prepare,patch.object(ex,'submit') as submit:
+            scans.tick();prepare.assert_not_called();submit.assert_not_called()
+        current=scans.get(batch['id'])
+        self.assertEqual(current['state'],'BLOCKED')
+        self.assertIn('运行时路径或调度器诊断未通过',current['blocker'])
+        self.assertNotIn('偏离授权预览',current['blocker'])
+        self.assertNotIn('waiting_reason',current)
+
     def test_capacity_changes_at_final_gate_wait_on_original_prepared_attempt(self):
         batch=self.approved()
         def busy_at_submit(key):

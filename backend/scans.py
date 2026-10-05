@@ -417,4 +417,5 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
                 if candidate_pool.capacity_wait(current) and current['profile']==prepared['profile']:
                     batch['waiting_reason']='原准备节点暂时占用，等待空闲后提交同一个 attempt';save(batch);return False
             except (ValueError,KeyError,OSError):pass
+        batch.pop('waiting_reason',None)
         batch['state']='BLOCKED';batch['blocker']=control.redact(str(exc))[:1000];save(batch)

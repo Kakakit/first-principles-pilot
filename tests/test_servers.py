@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
-from backend import servers
+from backend import servers, candidate_pool
 
 class ServerTests(unittest.TestCase):
     def setUp(self):
@@ -96,6 +96,42 @@ class ServerTests(unittest.TestCase):
         report=self.probe('BUSY',0);r=servers.preview(self.config,report['id'],'node01')
         self.assertFalse(r['resource_ready']);self.assertTrue(r['script'])
         with self.assertRaises(ValueError):servers.preview(self.config,report['id'],'node06')
+
+    def test_pool_waits_for_residual_load_on_pbs_and_slurm_without_script_drift(self):
+        (servers.ROOT/'.ssh/config').write_text('Host jutai-1 gengzi-187\n')
+        for scheduler,alias,node,cores in [('PBS/Torque','jutai-1','node01',48),('Slurm','gengzi-187','cn1',56)]:
+            with self.subTest(scheduler=scheduler):
+                config=servers.select_profile(alias)
+                details=('CHECK_mpi_executable=OK\nCHECK_vasp_executable=OK\nCHECK_environment_script=OK\nQueue: batch\n enabled = True\n started = True\n resources_max.walltime = 48:00:00\n'
+                         if scheduler=='PBS/Torque' else 'CHECK_vasp_executable=OK\nFPILOT_PARTITION=master*|up|infinite\n')
+                def probe(status,free):
+                    capacity=f'===== {alias} =====\nSCHEDULER={scheduler}\nNODE={node} STATUS={status} STATE=IDLE CPUS_FREE={free} CPUS_TOTAL={cores} LOAD=1.23\n'
+                    with patch.object(servers,'run',return_value={'exit_code':0,'stdout':capacity+'FPILOT_DIAGNOSTICS_BEGIN\n'+details,'stderr':''}):
+                        return servers.probe(config,force=True)
+                report=probe('FULLY_IDLE',cores)
+                candidates=[{'node':node,'cores':cores,'reason':''}]
+                reviewed=candidate_pool.previews(config,report,candidates)
+                approved=candidate_pool.approve(candidates,reviewed,reviewed)
+                for status,free in [('BUSY',0),('SUSPECT_LOAD',0),('PARTIAL',cores//2)]:
+                    report=probe(status,free)
+                    with patch.object(servers,'run') as remote:
+                        value=servers.preview(config,report['id'],node,cores)
+                        self.assertFalse(value['resource_ready'])
+                        self.assertEqual(value['profile'],approved[0]['profile'])
+                        self.assertEqual(servers.hashlib.sha256(value['script'].encode()).hexdigest(),approved[0]['script_sha256'])
+                        selected,reason=candidate_pool.select(config,report,approved)
+                        self.assertIsNone(selected)
+                        self.assertIn(node,reason)
+                        if status=='SUSPECT_LOAD':self.assertIn('负载未恢复',reason)
+                        remote.assert_not_called()
+                for status in ('UNAVAILABLE','SUSPECT_MOM'):
+                    with self.assertRaisesRegex(ValueError,'资源检查未通过.*'+status):
+                        candidate_pool.select(config,probe(status,0),approved)
+                report=probe('FULLY_IDLE',cores)
+                self.assertEqual(candidate_pool.select(config,report,approved),(approved[0],''))
+                with self.assertRaisesRegex(ValueError,'偏离授权预览'):
+                    candidate_pool.select({**config,'walltime':'00:30:00'},report,approved)
+
     def test_stale_and_changed_config(self):
         report=self.probe();report.pop('id');report['preflight']['observed_at']=(datetime.now(timezone.utc)-timedelta(hours=1)).isoformat()
         raw=json.dumps(report).encode();key=servers.hashlib.sha256(raw).hexdigest();servers.put_file(servers.ROOT/'server-probes'/key,raw)

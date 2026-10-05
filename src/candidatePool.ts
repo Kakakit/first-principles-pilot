@@ -11,5 +11,5 @@ export function fullNodeCandidates(nodes:ProbeNode[],selected:string[]):Candidat
  });
 }
 export function capacityWait(value:ServerPreview){
- return ['BUSY','FULLY_IDLE','PARTIAL'].includes(value.node_status||'')&&Boolean(value.blockers.length)&&value.blockers.every(item=>['selected node CPUS_FREE must be greater than zero','selected node STATUS must be FULLY_IDLE or PARTIAL','user override cannot exceed CPUS_FREE'].some(prefix=>item.startsWith(prefix)));
+ return ['BUSY','FULLY_IDLE','PARTIAL','SUSPECT_LOAD'].includes(value.node_status||'')&&Boolean(value.blockers.length)&&value.blockers.every(item=>['selected node CPUS_FREE must be greater than zero','selected node STATUS must be FULLY_IDLE or PARTIAL','user override cannot exceed CPUS_FREE'].some(prefix=>item.startsWith(prefix)));
 }
