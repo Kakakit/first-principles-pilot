@@ -113,7 +113,7 @@ class DispatchGuardTests(unittest.TestCase):
             self.assertEqual(save.call_count,2)
 
     def test_capacity_guard_blocks_busy_and_changed_cores_before_mutation(self):
-        profile={'ppn':48};config={'alias':'jutai-1','scheduler':'pbs','queue':'batch','walltime':'01:00:00'}
+        profile={'ppn':48};config={'alias':'jutai-1','scheduler':'pbs','queue':'batch','walltime':'01:00:00','runtime_source':'script','program':'vasp_std','vasp_executable':'vasp_std'}
         record={'config':config,'node':'node01','cores':None,'reason':'','profile':profile}
         original=servers.availability_command
         for status,free,okay in (('FULLY_IDLE',48,True),('BUSY',0,False),('FULLY_IDLE',24,False)):

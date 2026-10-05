@@ -529,11 +529,13 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         if parent['state']!='FAILED' or parent['bundle_id']!=bundle_id or parent['config']!=config:
             raise ValueError('只可从已确认 FAILED 的原记录创建新 attempt；输入及配置必须沿用')
     from . import workbench_settings
-    settings_snapshot=workbench_settings.snapshot(config['alias'],PurePosixPath(config['vasp_executable']).name)
     if template_id is None:
-        from .workbench_settings import read
-        template_id=read()['defaults'].get(config['alias']+':'+PurePosixPath(config['vasp_executable']).name)
-    rendered=servers.preview(config,probe_id,node,cores,reason)
+        template_id=servers.selected_template(config)
+    if config.get('runtime_source')=='script' and template_id:
+        config=servers.with_script(config,template_id)
+    settings_snapshot=workbench_settings.snapshot(config['alias'],servers.program_name(config),config,template_id)
+    rendered=servers.preview_for_prepare(config,probe_id,node,cores,reason)
+    probe_id=rendered.get('probe_id',probe_id)
     if not rendered['resource_ready']:raise ValueError('资源检查未通过：'+'; '.join(rendered['blockers']))
     template_snapshot = None
     scheduler=servers.normalize_scheduler(config.get('scheduler'))
@@ -609,7 +611,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     ncl_required=any(_incar_value(files['INCAR'],tag) in ('.TRUE.','TRUE','T') for tag in ('LSORBIT','LNONCOLLINEAR'))
     executable_name=PurePosixPath(config['vasp_executable']).name
     if ncl_required and executable_name!='vasp_ncl':
-        raise ValueError('非共线/SOC 输入必须在服务器配置中选择同目录 vasp_ncl 并重新诊断')
+        raise ValueError('非共线/SOC 输入必须明确选择 vasp_ncl 运行方式/脚本；不会自动替换程序命令')
     if executable_name not in ('vasp_std','vasp_ncl'):
         raise ValueError('当前 VASP 程序应明确选择 vasp_std 或 vasp_ncl')
     with tempfile.TemporaryDirectory() as temp:
@@ -905,9 +907,7 @@ def submit(key):
     submit_command='sbatch --parsable '+job_script if scheduler=='slurm' else 'qsub '+job_script
     command=f'''set -e
 root={root_expr}
-test -d "$root"
-root_abs=$(cd "$root" && pwd -P)
-test "$root_abs" = {expected}
+{remote_paths.workspace_dispatch_guard(paths['root'],record['remote_workspace_root_abs'])}
 {project_guard} 
 dest={destination}
 parent={parent}

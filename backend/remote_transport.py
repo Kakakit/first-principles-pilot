@@ -203,10 +203,12 @@ class Session:
 
 
 def run(alias, command, data=None, timeout=90, stdout_limit=524288, lane='normal', mutating=None):
+    from .site_registration import connection_identity
+    connection=tuple(sorted(connection_identity(alias).items()))
     if mutating is None:
         mutating = bool(data) or any(token in command for token in ('qsub ', 'sbatch ', 'mkdir ', 'rm ', 'cp ', 'ln ', 'tar -x'))
     scope = SCOPE.get()
-    identity = (alias, command, hashlib.sha256(data or b'').hexdigest(), stdout_limit, timeout, lane)
+    identity = (alias, connection, command, hashlib.sha256(data or b'').hexdigest(), stdout_limit, timeout, lane)
     if scope is not None and not mutating:
         with scope['lock']:
             if identity in scope['memo']:
@@ -214,7 +216,10 @@ def run(alias, command, data=None, timeout=90, stdout_limit=524288, lane='normal
                 value['timing'] = {'ssh_requests': 0, 'cache_hit': True}
                 return value
     with LOCK:
-        key = (os.getpid(), alias, lane)
+        key = (os.getpid(), alias, lane, connection)
+        for old in list(SESSIONS):
+            if old[:3]==key[:3] and old!=key:
+                SESSIONS[old].closed=True;SESSIONS[old].close();del SESSIONS[old]
         if key not in SESSIONS: SESSIONS[key] = Session(alias, lane)
         session = SESSIONS[key]
     future = concurrent.futures.Future()

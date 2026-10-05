@@ -30,7 +30,7 @@ class FeCrRecipeChainTests(unittest.TestCase):
             (temp / 'potcars').mkdir()
             shutil.copyfile(potcar_source, temp / 'potcars' / potcar_id)
             shutil.copyfile(provenance_source, temp / 'potcars' / provenance_source.name)
-            with patch.object(inputs, 'ROOT', temp), patch.object(ex, 'ROOT', temp), patch.object(recipes, 'ROOT', temp):
+            with patch.object(inputs, 'ROOT', temp), patch.object(ex, 'ROOT', temp), patch.object(recipes, 'ROOT', temp), patch('backend.recycle.ROOT', temp), patch('backend.remote_transport._interpreter', return_value='/usr/bin/python3'), patch('backend.servers.select_profile', side_effect=lambda alias,variant='vasp_std': {'alias':alias,'vasp_executable':'/bin/'+variant}):
                 imported = recipes.import_text(raw)
                 self.assertFalse(imported['submission_authorized'])
                 self.assertEqual((temp / 'recipes' / 'originals' / imported['original']['sha256']).read_text(), raw)

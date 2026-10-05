@@ -1,5 +1,9 @@
 # 后续具体实施方案
 
+## 2026-10-05：服务器首次配置、脚本库与提交交互（已实施）
+
+用户已授权实施并同步 GitHub。已交付默认脚本方式登记、独立免交互连接测试与已有 Python 发现、ncl 分类、提交页直接选脚本、按程序选择链脚本、基本编辑保留同服务器节点信息、冻结本次选择及派发前实时复核。新服务器支持 `$HOME/fpilot`，原登记/旧任务合同保留；原稿、PBS 未编辑资源及输入来源保护保留。完整用法和证据见 [本轮验收](submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)，设计边界见 [实施方案](submission/SETUP_AND_SCRIPT_PLAN.md)。没有执行真实集群提交，本轮不扩展 GPU/多节点调度或发布新的运行 ZIP。
+
 ## 2026-10-04：D 从零上手与跨平台测试交付
 
 已实现已有解释器启动、本机路径/端口/监控设置、SSH 别名与 PBS/Slurm 运行时登记、空工作区模拟、开发数据可恢复归档和 Windows 10/11 x64 测试包。包内提供预构建页面和锁定 CPython 3.11 依赖，不携带科研数据、POTCAR、私人服务器配置或 Node。Mac 隔离验收与 Windows wheel 下载验证通过；原生 Windows、独立新用户操作和 Windows 到真实服务器闭环仍待测试。见 [D 包验收](release-d/ACCEPTANCE.md) 与 [Windows 使用说明](../packaging/windows/README.md)。下文“下一 D 包”属于历史规划，当前状态以本段和 CHECKPOINT 为准。

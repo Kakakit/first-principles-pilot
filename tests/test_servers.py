@@ -101,7 +101,35 @@ class ServerTests(unittest.TestCase):
         raw=json.dumps(report).encode();key=servers.hashlib.sha256(raw).hexdigest();servers.put_file(servers.ROOT/'server-probes'/key,raw)
         self.assertFalse(servers.preview(self.config,key,'node01')['resource_ready'])
         self.config['queue']='other'
-        with self.assertRaises(ValueError):servers.preview(self.config,key,'node01')
+        self.assertIn('未发现所选队列',servers.preview(self.config,key,'node01')['blockers'])
+    def test_job_edits_keep_capacity_and_runtime_without_remote_requests(self):
+        report=self.probe()
+        changed={**self.config,'name':'Edited','walltime':'02:00:00'}
+        with patch.object(servers,'run') as remote:
+            result=servers.preview(changed,report['id'],'node01',16,'small test')
+            remote.assert_not_called()
+        self.assertTrue(result['resource_ready']);self.assertIn('#PBS -N Edited',result['script'])
+        self.assertIn('ppn=16',result['script'])
+        changed['walltime']='49:00:00'
+        with patch.object(servers,'run') as remote:
+            self.assertIn('walltime 超过队列上限',servers.preview(changed,report['id'],'node01')['blockers'])
+            remote.assert_not_called()
+        with patch('backend.site_registration.connection_identity',return_value={'hostname':'changed'}):
+            with self.assertRaisesRegex(ValueError,'SSH 目标'):servers.preview(self.config,report['id'],'node01')
+
+    def test_script_runtime_requires_no_program_environment_paths(self):
+        from backend import job_templates
+        with patch.object(job_templates,'ROOT',servers.ROOT):
+            original='#!/bin/bash\n#PBS -q batch\n#PBS -l nodes=node01:ppn=48\nsource /unknown/setvars.sh\nmpirun -np "$NPROCS" /unknown/vasp_std > vasp.out\n'
+            script=job_templates.import_template(original,'jutai-1','vasp_std','user')
+            self.config={**self.config,'runtime_source':'script','program':'vasp_std','template_id':script['id'],'mpi_executable':'','environment_script':'','vasp_executable':'vasp_std'}
+            report=self.probe()
+            with patch.object(servers,'run') as remote:
+                result=servers.preview({**self.config,'name':'New'},report['id'],'node01')
+                remote.assert_not_called()
+            self.assertTrue(result['resource_ready'],result['blockers'])
+            self.assertIn('source /unknown/setvars.sh',result['script'])
+
     def test_lower_cores_requires_reason_and_queue_limit(self):
         report=self.probe()
         self.assertFalse(servers.preview(self.config,report['id'],'node01',16)['resource_ready'])

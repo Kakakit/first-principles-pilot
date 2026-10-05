@@ -50,10 +50,11 @@ class RemotePathTests(unittest.TestCase):
             (ex.ROOT/'inputs'/(key+'.zip')).write_bytes(b'changed')
             with self.assertRaises(ValueError):ex.path_preview(key,'gengzi-187')
             ssh.assert_not_called()
-    def test_missing_workspace_fails_without_creation(self):
+    def test_missing_workspace_resolves_parent_without_creation(self):
         root=self.root/'230269265lht'
         r=subprocess.run(['bash','-c',paths.workspace_probe_command(str(root))],capture_output=True,text=True)
-        with self.assertRaises(ValueError):paths.parse_workspace_probe({'exit_code':r.returncode,'stdout':r.stdout,'stderr':r.stderr},str(root))
+        probe=paths.parse_workspace_probe({'exit_code':r.returncode,'stdout':r.stdout,'stderr':r.stderr},str(root))
+        self.assertEqual(probe['absolute_path'],str(root.resolve()))
         self.assertFalse(root.exists())
     def test_legacy_path_is_preserved_but_not_supported(self):
         r={'relative_path':'230269265lht/material-projects/workbench-validation/flows/single/stages/scf/attempts/old'}

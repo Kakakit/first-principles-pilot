@@ -19,6 +19,7 @@ from typing import Any, Dict, Mapping, Optional
 
 
 WORKSPACE_NAME = "230269265lht"
+WORKSPACE_NAMES = (WORKSPACE_NAME, "fpilot")
 DEFAULT_WORKSPACE_ROOT = "$HOME/" + WORKSPACE_NAME
 _COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
@@ -62,8 +63,8 @@ def normalize_workspace_root(value: Optional[str] = None) -> str:
         if not suffix.startswith("/") or any(part == ".." for part in suffix.split("/")):
             raise ValueError("remote_workspace_root 必须位于 $HOME/230269265lht 下")
         parts = _segments(suffix)
-        if not parts or parts[0] != WORKSPACE_NAME:
-            raise ValueError("remote_workspace_root 必须位于 $HOME/230269265lht 下")
+        if not parts or parts[0] not in WORKSPACE_NAMES:
+            raise ValueError("remote_workspace_root 必须位于 $HOME/fpilot 或原登记工作区下")
         for part in parts:
             _valid_component(part, "remote_workspace_root")
         return "$HOME/" + "/".join(parts)
@@ -74,8 +75,8 @@ def normalize_workspace_root(value: Optional[str] = None) -> str:
         raise ValueError("remote_workspace_root 不允许 .. 路径穿越")
     normal = posixpath.normpath(root)
     parts = _segments(normal)
-    if WORKSPACE_NAME not in parts:
-        raise ValueError("绝对 remote_workspace_root 必须包含 230269265lht 工作区")
+    if not any(name in parts for name in WORKSPACE_NAMES):
+        raise ValueError("绝对 remote_workspace_root 必须包含 fpilot 或原登记工作区组件")
     for part in parts:
         _valid_component(part, "remote_workspace_root")
     return normal
@@ -152,8 +153,8 @@ def absolute_attempt_path(root_absolute: str, relative: str) -> str:
     if any(part == ".." for part in root_absolute.split("/")):
         raise ValueError("远端工作区绝对路径不允许 ..")
     normalized_root = posixpath.normpath(root_absolute)
-    if WORKSPACE_NAME not in _segments(normalized_root):
-        raise ValueError("远端工作区绝对路径缺少 230269265lht")
+    if not any(name in _segments(normalized_root) for name in WORKSPACE_NAMES):
+        raise ValueError("远端工作区绝对路径缺少 fpilot 或原登记工作区组件")
     return normalized_root.rstrip("/") + "/" + normalize_relative_path(relative)
 
 
@@ -178,14 +179,24 @@ def workspace_probe_command(root: str) -> str:
     # workspace contains years of calculation outputs.
     return """set -eu
 root={root}
-test -d "$root"
-root_abs=$(cd "$root" && pwd -P)
+ancestor=$root
+suffix=''
+while ! test -d "$ancestor"; do
+  test ! -e "$ancestor"
+  test ! -L "$ancestor"
+  suffix=/$(basename "$ancestor")$suffix
+  ancestor=$(dirname "$ancestor")
+done
+test -w "$ancestor"
+parent_abs=$(cd "$ancestor" && pwd -P)
+root_abs=$parent_abs$suffix
 case "/$root_abs/" in
-  */{workspace}/*|*/{workspace}) ;;
+  */{workspace}/*|*/fpilot/*) ;;
   *) exit 42 ;;
 esac
 printf 'FPILOT_ROOT_ABS=%s\\n' "$root_abs"
-meta=$(stat -c '%d:%i:%Y:%s' "$root_abs" 2>/dev/null || stat -f '%d:%i:%m:%z' "$root_abs" 2>/dev/null || printf 'unavailable')
+printf 'FPILOT_ROOT_PARENT=%s\\n' "$parent_abs"
+meta=$(stat -c '%d:%i:%Y:%s' "$ancestor" 2>/dev/null || stat -f '%d:%i:%m:%z' "$ancestor" 2>/dev/null || printf 'unavailable')
 printf 'FPILOT_ROOT_SNAPSHOT=%s\\n' "$meta"
 """.format(root=root_expr, workspace=WORKSPACE_NAME)
 
@@ -207,14 +218,22 @@ def parse_workspace_probe(receipt: Mapping[str, Any], root: str) -> Dict[str, An
     absolute = absolute_match.group(1).strip()
     # This also rejects symlinks resolving outside the registered workspace.
     absolute = posixpath.normpath(absolute)
-    if WORKSPACE_NAME not in _segments(absolute):
-        raise ValueError("远端工作区解析结果缺少 230269265lht")
+    if not any(name in _segments(absolute) for name in WORKSPACE_NAMES):
+        raise ValueError("远端工作区解析结果缺少 fpilot 或原登记工作区组件")
     return {
         "expression": root_expression,
         "absolute_path": absolute,
         "metadata": snapshot_match.group(1).strip(),
+        "existing_parent": (re.search(r"^FPILOT_ROOT_PARENT=(/[^\n]*)$", stdout, re.M).group(1)
+                            if re.search(r"^FPILOT_ROOT_PARENT=(/[^\n]*)$", stdout, re.M) else absolute),
         "probe_exit_code": receipt.get("exit_code"),
     }
+
+
+def workspace_dispatch_guard(root, expected):
+    """Resolve before creating an approved workspace; bind to the prepared path."""
+    return (workspace_probe_command(root) + 'test "$root_abs" = ' + shlex.quote(expected) + '\n'
+            + 'mkdir -p "$root"\ntest "$(cd "$root" && pwd -P)" = ' + shlex.quote(expected) + '\n')
 
 
 def frozen_identity(manifest: Mapping[str, Any], project: Optional[Mapping[str, Any]] = None) -> Dict[str, str]:

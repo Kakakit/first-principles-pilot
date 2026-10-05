@@ -135,8 +135,10 @@ def _render_script(config, profile, template_id):
     scheduler = servers.normalize_scheduler(config['scheduler'])
     resources = ex.template_resources(profile)
     if template_id is None:
-        from .workbench_settings import read
-        template_id=read()['defaults'].get(config['alias']+':wannier90')
+        template_id=config.get('template_id')
+        if not template_id:
+            from .workbench_settings import read
+            template_id=read()['defaults'].get(config['alias']+':wannier90')
     if template_id:
         rendered = job_templates.render_template(template_id, resources, config['alias'], config)
         if not rendered['submission_supported']:
@@ -324,7 +326,11 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
     parent, target = _parent(project, node_id, parent_id, config['alias'])
     from . import branch_bindings
     binding = branch_bindings.check(project,node_id,config['alias'],scope=execution_scope)
-    resource = servers.preview(config, probe_id, node, cores, resource_reason, purpose='wannier90')
+    if config.get('runtime_source')=='script':
+        template_id=template_id or servers.selected_template(config)
+        if template_id:config=servers.with_script(config,template_id,'wannier90')
+    resource = servers.preview_for_prepare(config, probe_id, node, cores, resource_reason, purpose='wannier90')
+    probe_id=resource.get('probe_id',probe_id)
     if not resource['resource_ready']:
         raise ValueError('实时资源检查未通过：' + '; '.join(resource['blockers']))
     if frozen:
@@ -394,7 +400,7 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
     scheduler = servers.normalize_scheduler(config['scheduler'])
     stored_config = {**config, 'remote_workspace_root': root}
     from .workbench_settings import snapshot as settings_snapshot
-    record = {'settings_snapshot':settings_snapshot(config['alias'],'wannier90'),'id': key, 'state': 'PREPARED', 'kind': 'wannier90', 'created_at': ex.now(),
+    record = {'settings_snapshot':settings_snapshot(config['alias'],'wannier90',config,script_source.get('id')),'id': key, 'state': 'PREPARED', 'kind': 'wannier90', 'created_at': ex.now(),
               'project_id': project['id'], 'flow_id': 'single', 'node_id': node_id,
               'execution_scope':scope,'branch_scopes':binding['scopes'],
               **({'scan_batch_id':scan_batch_id,'scan_case_id':scan_case_id,'scan_case_table_hash':scan_case_table_hash} if scan_batch_id else {}),
@@ -540,7 +546,7 @@ def submit(key):
                       else 'qsub -v W90_SEED=' + bundle['seed'] + ' ' + script_name)
     remote = f'''set -e
 root={remote_paths.shell_path(record['remote_workspace_root'])}
-test "$(cd "$root" && pwd -P)" = {shlex.quote(record['remote_workspace_root_abs'])}
+{remote_paths.workspace_dispatch_guard(record['remote_workspace_root'],record['remote_workspace_root_abs'])}
 project_dir={project_dir}
 if test -d "$project_dir"; then
   if test -f "$project_dir/.fpilot/project.json"; then

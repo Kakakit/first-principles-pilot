@@ -21,6 +21,17 @@ class SubmissionContracts(unittest.TestCase):
                 ex.prepare.__wrapped__(frozen['id'],config,'probe','node01',project_id='p',execution_scope='wrong')
             remote.assert_not_called()
 
+    def test_new_preparation_freezes_explicit_runtime_and_ignores_default_edits(self):
+        from backend import workbench_settings as settings
+        connection={'hostname':'server','port':'103','user':'user'}
+        with patch.object(settings,'ROOT',self.fixture.root),patch('backend.site_registration.connection_identity',return_value=connection):
+            saved=settings.snapshot('one','vasp_std',{'alias':'one','scheduler':'pbs','runtime_source':'script'},'script-id')
+            (self.fixture.root/'workbench-settings.json').write_text(json.dumps({'version':1,'runtimes':{'one:vasp_std':{'name':'new'}},'defaults':{'one:vasp_std':'new-script'}}))
+            settings.assert_current(saved)
+            self.assertEqual(saved['template_id'],'script-id')
+        with patch('backend.site_registration.connection_identity',return_value={**connection,'port':'22'}):
+            with self.assertRaisesRegex(ValueError,'SSH 连接目标'):settings.assert_current(saved)
+
     def test_default_changes_invalidate_prepared_dispatch_by_host_and_program(self):
         from backend import workbench_settings as settings, wannier_execution as w90, wannier_plot_restart as plot
         path=self.fixture.root/'workbench-settings.json'
@@ -43,6 +54,7 @@ class SubmissionContracts(unittest.TestCase):
             settings.assert_current(None)
 
     def setUp(self):
+        interpreter=patch('backend.remote_transport._interpreter',return_value='/usr/bin/python3');interpreter.start();self.addCleanup(interpreter.stop)
         self.fixture=fixture_module.ChainRunTests();self.fixture.setUp();self.addCleanup(self.fixture.tearDown)
         self.project=copy.deepcopy(self.fixture.project)
         self.project['nodes']=self.project['nodes'][:3]

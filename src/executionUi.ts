@@ -20,6 +20,8 @@ export type RegisteredProfile = {
   runtime_environment: string;
   pmi_library: string;
   pmi_type: string;
+  runtime_source?: string;
+  remote_workspace_root?: string;
 };
 
 export type ProbeNode = Record<string, string> & { NODE: string; STATUS: string };
@@ -56,6 +58,11 @@ export type PreparedBinding = {
   reason?: string;
   config: ServerConfig;
 };
+
+export function sameCapacityTarget(before:ServerConfig|null,after:ServerConfig):boolean {
+  const scheduler=(value?:string)=>(value||'pbs').toLowerCase().replace('pbs/torque','pbs').replace('torque','pbs');
+  return Boolean(before&&before.alias===after.alias&&scheduler(before.scheduler)===scheduler(after.scheduler));
+}
 
 export function bindingFingerprint(binding: PreparedBinding | null): string {
   if (!binding) return '';

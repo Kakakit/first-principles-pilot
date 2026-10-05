@@ -40,3 +40,12 @@ test('electronic source governs displayed restart parameters and legacy values d
  assert.equal(checkParameters(p,n).some(i=>/ISTART|ICHARG/.test(i.message)),false);
  n.data.sourceDraft={mode:'new',files:'charge'};assert.equal(effectiveParameters(p,n).ISTART.value,'0');assert.equal(effectiveParameters(p,n).ICHARG.value,'2');
 });
+
+import {sameCapacityTarget} from '../src/executionUi.ts';
+test('job edits and script choices retain node facts but target changes invalidate them',()=>{
+ const base={alias:'lab',scheduler:'pbs',name:'old',queue:'batch',walltime:'01:00:00'};
+ for(const change of [{name:'new'},{walltime:'02:00:00'},{queue:'other'},{runtime_source:'script',template_id:'chosen'},{remote_workspace_root:'$HOME/fpilot'}])assert.equal(sameCapacityTarget(base,{...base,...change}),true);
+ assert.equal(sameCapacityTarget(base,{...base,alias:'other'}),false);
+ assert.equal(sameCapacityTarget(base,{...base,scheduler:'slurm'}),false);
+ assert.equal(sameCapacityTarget(base,{...base,scheduler:'PBS/Torque'}),true);
+});

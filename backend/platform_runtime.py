@@ -60,7 +60,9 @@ def ssh_options(alias):
     path=base/('fpilot-ssh-'+str(os.getuid()))
     path.mkdir(mode=0o700,exist_ok=True);path.chmod(0o700)
     import hashlib
-    return ['-o','ControlMaster=auto','-o','ControlPersist=300','-o','ControlPath='+str(path/hashlib.sha256(alias.encode()).hexdigest()[:20])]
+    from .site_registration import connection_identity
+    identity=alias+repr(sorted(connection_identity(alias).items()))
+    return ['-o','ControlMaster=auto','-o','ControlPersist=300','-o','ControlPath='+str(path/hashlib.sha256(identity.encode()).hexdigest()[:20])]
 
 
 def local_python():

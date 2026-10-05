@@ -24,7 +24,7 @@ def prefix(record,purpose='vasp'):
         +"trap 'rc=$?; if test \"$rc\" -ne 0 && test \"$fpilot_submitting\" = 0; then printf \"FPILOT_NOT_DISPATCHED=%s\\n\" \"$fpilot_created\"; fi' EXIT\n"
         +'capacity=$(\n'+body+'\n)\n'
         +shlex.quote(remote_transport._interpreter(config['alias']))+' -c '+shlex.quote(code)+' "$capacity"\n')
-    if purpose=='vasp':
+    if purpose=='vasp' and config.get('runtime_source')!='script':
         for name in ('mpi_executable','vasp_executable','environment_script'):
             value=config.get(name)
             if value:command+='test '+('-r ' if name=='environment_script' else '-x ')+shlex.quote(value)+'\n'
@@ -45,7 +45,8 @@ CAPACITY=r'''
 text=sys.argv[1]
 capacity,marker,queues=text.partition('FPILOT_QUEUE_BEGIN\n')
 if not marker:raise ValueError('live queue report missing')
-selection=s['select_resources'](p['parse_preflight'](capacity),contract['config']['alias'],contract['node'],
+observed=p['parse_preflight'](capacity)
+selection=s['select_resources'](observed,contract['config']['alias'],contract['node'],
     user_override=contract['cores'],user_override_evidence=contract['reason'])
 expected=contract['profile'].get('ppn',contract['profile'].get('ntasks'))
 if selection['requested_cores']!=expected:raise ValueError('live capacity changed; prepare again')
@@ -66,7 +67,16 @@ if config['scheduler'] in ('pbs','PBS','PBS/Torque'):
     if selected.get('resources_max.walltime') and seconds(config['walltime'])>seconds(selected['resources_max.walltime']):raise ValueError('walltime exceeds queue limit')
 else:
     rows=[line.split('=',1)[1].split('|') for line in queues.splitlines() if line.startswith('FPILOT_PARTITION=')]
-    if not any(len(row)==3 and row[0].rstrip('*')==config['queue'] and row[1]=='up' for row in rows):raise ValueError('partition unavailable')
+    row=next((row for row in rows if len(row)==3 and row[0].rstrip('*')==config['queue'] and row[1]=='up'),None)
+    if row is None:raise ValueError('partition unavailable')
+    facts=next(n for h in observed['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==contract['node'])
+    if facts.get('PARTITIONS') and config['queue'] not in facts['PARTITIONS'].split(','):raise ValueError('node not in selected partition')
+    def duration(value):
+        days,clock=(value.split('-',1) if '-' in value else ('0',value))
+        parts=list(map(int,clock.split(':')))
+        if len(parts)==2:parts.insert(0,0)
+        return int(days)*86400+parts[0]*3600+parts[1]*60+parts[2]
+    if row[2].lower() not in ('infinite','unlimited','n/a') and duration(config['walltime'])>duration(row[2]):raise ValueError('walltime exceeds partition limit')
 print('FPILOT_LIVE_CAPACITY='+json.dumps(selection,separators=(',',':')))
 '''
 

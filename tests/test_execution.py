@@ -34,6 +34,7 @@ class ExecutionTests(unittest.TestCase):
 
     def test_remote_root_policy_and_attempt_layout(self):
         self.assertEqual(remote_paths.normalize_workspace_root(), '$HOME/230269265lht')
+        self.assertEqual(remote_paths.normalize_workspace_root('$HOME/fpilot'), '$HOME/fpilot')
         self.assertEqual(remote_paths.normalize_workspace_root('$HOME/230269265lht/scratch'),
                          '$HOME/230269265lht/scratch')
         self.assertEqual(remote_paths.normalize_workspace_root('/mnt/work/230269265lht'),
@@ -44,6 +45,20 @@ class ExecutionTests(unittest.TestCase):
             remote_paths.normalize_workspace_root('/tmp/230269265lht/../outside')
         relative = remote_paths.attempt_relative_path('project-1', 3, 'scf', '20260921-120000-abcd')
         self.assertEqual(relative, 'material-projects/project-1/flows/main/stages/03-scf/attempts/20260921-120000-abcd')
+
+    def test_new_workspace_probe_is_read_only_and_dispatch_binds_canonical_root(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root=str(Path(tmp).resolve()/'fpilot'/'new')
+            result=subprocess.run(['bash','-c',remote_paths.workspace_probe_command(root)],capture_output=True,text=True)
+            receipt=remote_paths.parse_workspace_probe({'exit_code':result.returncode,'stdout':result.stdout,'stderr':result.stderr},root)
+            self.assertFalse(Path(root).exists());self.assertEqual(receipt['absolute_path'],root)
+            guard=remote_paths.workspace_dispatch_guard(root,root)
+            result=subprocess.run(['bash','-c',guard],capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stderr);self.assertTrue(Path(root).is_dir())
+            link=Path(tmp)/'other';link.mkdir();Path(root).rmdir();Path(root).symlink_to(link)
+            result=subprocess.run(['bash','-c',guard],capture_output=True,text=True)
+            self.assertNotEqual(result.returncode,0)
 
     def test_prepare_binds_frozen_identity_and_records_remote_snapshot(self):
         config = {'alias': 'jutai-5', 'vasp_executable': '/opt/vasp_std',

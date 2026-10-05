@@ -223,8 +223,8 @@ def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None
     if batch['project_id'] != project_id or batch['state'] != 'FROZEN' or batch['case_table_hash'] != case_table_hash: raise ValueError('冻结 case 表或批次状态已变化；未授权')
     if not isinstance(reason,str) or len(reason)>2000: raise ValueError('资源选择理由无效')
     if template_id is None:
-        from .workbench_settings import read
-        template_id=read()['defaults'].get(config['alias']+':'+PurePosixPath(config.get('vasp_executable','vasp_std')).name)
+        template_id=servers.selected_template(config)
+    if config.get('runtime_source')=='script' and template_id:config=servers.with_script(config,template_id,'vasp_ncl' if batch.get('requires_ncl') else 'vasp_std')
     from . import branch_bindings
     for case in batch['cases']:
         manifest,_=ex.bundle(case['bundle_id'],allow_dependencies=True)
@@ -244,7 +244,7 @@ def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None
         if rendered['script'] != approved_script or rendered['profile'] != approved_profile:
             raise ValueError('脚本或资源预览已变化；请重新预览后授权')
     from .workbench_settings import snapshot as settings_snapshot
-    batch['authorization']={'settings_snapshot':settings_snapshot(config['alias'],PurePosixPath(config.get('vasp_executable','vasp_std')).name),'at':ex.now(),'case_table_hash':case_table_hash,'config':config,'reason':reason,'template_id':template_id,'dependency_attempt_id':dependency_attempt_id,'dependency_reason':dependency_reason,'approved_case_count':len(batch['cases'])}
+    batch['authorization']={'settings_snapshot':settings_snapshot(config['alias'],servers.program_name(config),config,template_id),'at':ex.now(),'case_table_hash':case_table_hash,'config':config,'reason':reason,'template_id':template_id,'dependency_attempt_id':dependency_attempt_id,'dependency_reason':dependency_reason,'approved_case_count':len(batch['cases'])}
     if checked is not None:
         batch['authorization'].update(candidates=checked, max_parallel=max_parallel)
     else:

@@ -21,6 +21,7 @@ SLURM = '''#!/bin/bash
 module load VASP
 mpirun vasp_std > vasp.out
 '''
+SAFE_PBS = PBS.replace('cd /scratch/user-choice','cd \"$PBS_O_WORKDIR\"').replace("trap 'echo done' EXIT\n",'').replace('-np 48','-np \"$NPROCS\"')
 RESOURCES = {'name': 'FP_Test', 'queue': 'batch', 'node': 'node02', 'ppn': 16, 'walltime': '00:10:00'}
 
 
@@ -34,19 +35,46 @@ class JobTemplateTests(unittest.TestCase):
     def tearDown(self):
         self.recycle_root.stop(); self.root.stop(); self.temp.cleanup()
 
-    def test_user_body_is_preserved_and_not_an_eligibility_gate(self):
+    def test_original_is_preserved_and_conflicts_require_an_adapted_copy(self):
         record = job_templates.import_template(PBS, 'jutai-1', 'vasp_std', 'user', 'PBS')
-        self.assertTrue(record['submission_supported'])
         self.assertEqual(record['original_text'], PBS)
         self.assertEqual(record['original_hash'], hashlib.sha256(PBS.encode()).hexdigest())
         preview = job_templates.render_template(record['id'], RESOURCES, alias='jutai-1')
-        self.assertTrue(preview['submission_supported'], preview['execution_blockers'])
-        self.assertIn('#PBS -l nodes=node02:ppn=16', preview['rendered_text'])
-        self.assertIn('cd /scratch/user-choice\ntrap', preview['rendered_text'])
-        ncl = job_templates.render_template(record['id'], RESOURCES, alias='jutai-1',
-                   config={'scheduler':'pbs','vasp_executable':'/opt/vasp/vasp_ncl'})
-        self.assertIn('/opt/vasp/vasp_ncl > vasp.out', ncl['rendered_text'])
-        self.assertEqual(job_templates.get_template(record['id'])['original_text'], PBS)
+        self.assertFalse(preview['submission_supported'])
+        blockers=';'.join(preview['execution_blockers'])
+        for text in ('目录','trap','进程数'):self.assertIn(text,blockers)
+        adapted=PBS.replace('cd /scratch/user-choice','cd "$PBS_O_WORKDIR"').replace("trap 'echo done' EXIT\n",'').replace('-np 48','-np 16')
+        child=job_templates.import_template(adapted,'jutai-1','vasp_std','user','adapted',parent_id=record['id'])
+        rendered=job_templates.render_template(child['id'],RESOURCES,alias='jutai-1',config={'runtime_source':'script','program':'vasp_std','scheduler':'pbs'})
+        self.assertTrue(rendered['submission_supported'],rendered['execution_blockers'])
+        self.assertEqual(rendered['parent_hash'],record['script_hash'])
+        self.assertEqual(job_templates.get_template(record['id'])['original_text'],PBS)
+
+    def test_mixed_pbs_resources_survive_and_ncl_requires_explicit_script(self):
+        original=SAFE_PBS.replace('nodes=node01:ppn=48','nodes=node01:ppn=48,mem=96gb,walltime=01:00:00')
+        record=job_templates.import_template(original,'jutai-1','vasp_std','user')
+        config={'scheduler':'pbs','runtime_source':'script','program':'vasp_std'}
+        result=job_templates.render_template(record['id'],RESOURCES,alias='jutai-1',config=config)
+        self.assertTrue(result['submission_supported'],result['execution_blockers'])
+        self.assertIn('nodes=node02:ppn=16,mem=96gb,walltime=00:10:00',result['rendered_text'])
+        bad=job_templates.render_template(record['id'],RESOURCES,alias='jutai-1',config={**config,'program':'vasp_ncl'})
+        self.assertFalse(bad['submission_supported']);self.assertIn('/opt/vasp/vasp_std',bad['rendered_text'])
+        ncl=job_templates.import_template(original.replace('vasp_std','vasp_ncl'),'jutai-1','vasp_ncl','user',parent_id=record['id'])
+        self.assertTrue(job_templates.render_template(ncl['id'],RESOURCES,alias='jutai-1',config={**config,'program':'vasp_ncl'})['submission_supported'])
+
+    def test_slurm_thread_layout_is_not_mapped_to_total_mpi_ranks(self):
+        record=job_templates.import_template(SLURM.replace('#SBATCH -n 48','#SBATCH -n 12\n#SBATCH --cpus-per-task=4'),'gengzi-187','vasp_std','user')
+        preview=job_templates.render_template(record['id'],RESOURCES,alias='gengzi-187',config={'scheduler':'slurm','runtime_source':'script','program':'vasp_std'})
+        self.assertFalse(preview['submission_supported']);self.assertTrue(any('线程' in v for v in preview['execution_blockers']))
+
+    def test_workdir_suffix_and_ambiguous_slurm_directives_are_blocked(self):
+        for body,alias,scheduler in ((SAFE_PBS.replace('$PBS_O_WORKDIR','$PBS_O_WORKDIR/../old'),'jutai-1','pbs'),
+                                     (SLURM.replace('#SBATCH -n 48','#SBATCH -n 48 --cpus-per-task=4'),'gengzi-187','slurm')):
+            record=job_templates.import_template(body,alias,'vasp_std','user')
+            rendered=job_templates.render_template(record['id'],RESOURCES,alias=alias,config={'scheduler':scheduler,'runtime_source':'script','program':'vasp_std'})
+            self.assertFalse(rendered['submission_supported'])
+        record=job_templates.import_template(SAFE_PBS+'echo -n 1\n','jutai-1','vasp_std','user')
+        self.assertTrue(job_templates.render_template(record['id'],RESOURCES,alias='jutai-1')['submission_supported'])
 
     def test_slurm_script_can_be_selected_and_resources_are_explicit(self):
         record = job_templates.import_template(SLURM, 'gengzi-187', 'gpu_vasp', 'user', 'Slurm')
@@ -58,7 +86,7 @@ class JobTemplateTests(unittest.TestCase):
         self.assertEqual(preview['original_text'], SLURM)
 
     def test_windows_scripts_keep_original_bytes_and_render_linux_copy(self):
-        for body, alias, program, scheduler in ((PBS, 'jutai-1', 'vasp_std', 'pbs'),
+        for body, alias, program, scheduler in ((SAFE_PBS, 'jutai-1', 'vasp_std', 'pbs'),
                                                 (SLURM, 'gengzi-187', 'gpu_vasp', 'slurm')):
             original = '\ufeff' + body.replace('\n', '\r\n')
             record = job_templates.import_template(original, alias, program, 'windows')

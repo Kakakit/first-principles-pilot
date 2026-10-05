@@ -152,6 +152,8 @@ def _registered_profile(alias, host, variant='vasp_std'):
         'variant': runtime_variant or variant,
         'status': host_status,
         'runtime_status': runtime_status,
+        'runtime_source':host.get('runtime_source','registered'),
+        'remote_workspace_root':host.get('remote_workspace_root','$HOME/230269265lht'),
         'ncl_runtime_status': ncl_runtime.get('status') if ncl_runtime else 'UNREGISTERED',
         'ncl_executable': ncl_runtime.get('executable') if ncl_runtime else '',
         'runtime_complete': not missing and runtime is not None,
@@ -193,7 +195,7 @@ def select_profile(alias, variant='vasp_std'):
     selected = _registered_profile(alias, host, variant)
     if not selected['selectable']:
         raise ValueError('{}：{}'.format(alias, selected['reason']))
-    return {
+    config = {
         'alias': alias,
         'name': 'FP_VASP',
         'queue': selected['queue'],
@@ -208,6 +210,10 @@ def select_profile(alias, variant='vasp_std'):
         'pmi_library': selected['pmi_library'],
         'pmi_type': selected['pmi_type'],
     }
+    if host.get('runtime_source')=='script':
+        config.update(runtime_source='script',program=variant,vasp_executable=variant)
+    if host.get('remote_workspace_root'):config['remote_workspace_root']=host['remote_workspace_root']
+    return config
 
 
 def default_config():
@@ -215,7 +221,7 @@ def default_config():
     try:
         profiles=registered_profiles()
         if profiles:return select_profile(next((p['alias'] for p in profiles if p['selectable']),profiles[0]['alias']))
-        return {**DEFAULT,'alias':'','queue':'','mpi_executable':'','vasp_executable':'','environment_script':''}
+        return {**DEFAULT,'alias':'','queue':'','mpi_executable':'','vasp_executable':'','environment_script':'','remote_workspace_root':'$HOME/fpilot'}
     except ValueError:
         # Keep imports and existing workspaces readable if the adjacent
         # registry is temporarily unavailable; validation still requires a
@@ -224,7 +230,7 @@ def default_config():
 
 
 def validate(config):
-    extra = {k:config[k] for k in ('remote_workspace_root',) if config.get(k)}
+    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates') if config.get(k)}
     config = {k: config.get(k, '') for k in DEFAULT}
     config.update(extra)
     if config.get('remote_workspace_root'):
@@ -235,30 +241,65 @@ def validate(config):
     registered = select_profile(config['alias'])
     if normalize_scheduler(config.get('scheduler')) != normalize_scheduler(registered.get('scheduler')):
         raise ValueError('调度器必须与登记主机一致')
-    ssh_config = Path.home()/'.ssh/config'
-    tokens = []
-    if ssh_config.exists():
-        for line in ssh_config.read_text().splitlines():
-            parts = shlex.split(line, comments=True)
-            if parts and parts[0].lower() == 'host': tokens.extend(parts[1:])
-    if config['alias'] not in tokens:
-        raise ValueError('SSH 配置中没有该明确别名，请先配置本机 SSH')
+    from . import site_registration
+    if config['alias'] not in site_registration.ssh_aliases():
+        if site_registration.connection_identity(config['alias']).get('hostname')==config['alias']:
+            raise ValueError('SSH 配置中没有该明确别名，请先配置本机 SSH')
     scheduler = normalize_scheduler(config['scheduler'])
-    for key in (('environment_script','mpi_executable','vasp_executable') if scheduler == 'pbs' else ('vasp_executable',)):
+    if config.get('runtime_source') not in (None,'registered','script'):raise ValueError('运行方式无效')
+    script_mode=config.get('runtime_source')=='script'
+    if script_mode:
+        program=program_name(config)
+        if program not in ('vasp_std','vasp_ncl','wannier90','gpu_vasp','other'):raise ValueError('脚本程序分类无效')
+        config['program']=program
+        config['vasp_executable']=program
+        if config.get('template_id') and not re.fullmatch('[a-f0-9]{64}',config['template_id']):raise ValueError('脚本 ID 无效')
+        if config.get('script_templates'):
+            try:choices=json.loads(config['script_templates'])
+            except (ValueError,TypeError):raise ValueError('程序脚本选择无效')
+            if not isinstance(choices,dict) or any(k not in ('vasp_std','vasp_ncl','wannier90') or not isinstance(v,str) or not re.fullmatch('[a-f0-9]{64}',v) for k,v in choices.items()):raise ValueError('程序脚本选择无效')
+    for key in (() if script_mode else (('environment_script','mpi_executable','vasp_executable') if scheduler == 'pbs' else ('vasp_executable',))):
         value = config[key]
         if not isinstance(value,str) or not value.startswith('/') or any(c in value for c in '\r\n\x00'):
             raise ValueError('运行时路径必须为单行绝对路径')
-    if scheduler == 'slurm':
+    if scheduler == 'slurm' and not script_mode:
         if not re.fullmatch(r'[A-Za-z0-9_.+-]+/[A-Za-z0-9_.+-]+',config.get('module','')) or config.get('launcher') != 'mpirun':
             raise ValueError('Slurm 模块和启动器必须来自已登记运行时')
     if not re.fullmatch(r'\d{2,3}:[0-5]\d:[0-5]\d',config['walltime']) or seconds(config['walltime']) <= 0:
         raise ValueError('walltime 需为正的 HH:MM:SS')
-    profile(config,'preview',1)
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,120}',config['name']):raise ValueError('作业名称只允许英文、数字、点、横线和下划线')
+    if config['queue'] or not script_mode:
+        if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',config['queue']):raise ValueError('队列/分区名称无效')
+        profile(config,'preview',1)
     return config
+
+
+def program_name(config):
+    return config.get('program') if config.get('runtime_source')=='script' and config.get('program') else PurePosixPath(config.get('vasp_executable','')).name
+
+
+def with_script(config, template_id, program=None):
+    """The selected immutable script supplies the runtime, without inventing paths."""
+    from . import job_templates
+    record=job_templates.get_template(template_id)
+    expected=program or program_name(config) or record['program']
+    return {**config,'runtime_source':'script','program':expected,'vasp_executable':expected,'template_id':template_id}
+
+
+def selected_template(config):
+    if config.get('template_id'):return config['template_id']
+    from .workbench_settings import read
+    return read()['defaults'].get(config['alias']+':'+program_name(config))
 
 
 def profile(config,node,ppn):
     scheduler = normalize_scheduler(config['scheduler'])
+    if config.get('runtime_source')=='script':
+        result={'schema':'fpilot.'+scheduler+'-site.v1','name':config['name'],'node':node,'walltime':config['walltime'],
+                'vasp_executable':program_name(config),'runtime_source':'script','environment':[] if scheduler=='pbs' else {}}
+        result.update({'queue':config['queue'],'ppn':ppn,'mpi_executable':''} if scheduler=='pbs' else
+                      {'partition':config['queue'],'ntasks':ppn,'module':'','launcher':''})
+        return result
     if scheduler == 'pbs':
         return pbs.load_profile(dict(schema='fpilot.pbs-site.v1', name=config['name'],queue=config['queue'],
             walltime=config['walltime'],node=node,ppn=ppn,mpi_executable=config['mpi_executable'],
@@ -284,13 +325,27 @@ def normalize_scheduler(value):
 
 
 def seconds(value):
-    parts = [int(p) for p in value.split(':')]
+    days,clock=value.split('-',1) if '-' in value else ('0',value)
+    parts = [int(p) for p in clock.split(':')]
+    if len(parts)==1:return int(days)*86400+parts[0]*60
     if len(parts) == 2: parts.insert(0,0)
-    return parts[0]*3600+parts[1]*60+parts[2]
+    return int(days)*86400+parts[0]*3600+parts[1]*60+parts[2]
 
 
 def config_hash(config):
     return hashlib.sha256(json.dumps(config,sort_keys=True).encode()).hexdigest()
+
+
+def capacity_config(config):
+    return {'alias':config.get('alias'),'scheduler':normalize_scheduler(config.get('scheduler'))}
+
+
+def runtime_config(config):
+    result=capacity_config(config)
+    result['runtime_source']=config.get('runtime_source','registered')
+    if result['runtime_source']!='script':
+        result.update({k:config.get(k,'') for k in ('mpi_executable','vasp_executable','environment_script','module','launcher','runtime_environment','pmi_library','pmi_type')})
+    return result
 
 
 def read_config():
@@ -301,7 +356,7 @@ def read_config():
         raw=probe_path.read_bytes()
         if hashlib.sha256(raw).hexdigest()!=probe_path.name:continue
         report=json.loads(raw)
-        if report['config_hash']==config_hash(config):
+        if runtime_config(report['config'])==runtime_config(config):
             latest=dict(report,id=probe_path.name);break
     return {'config':config, 'saved':path.exists(),'probe':latest,
             'registered_profiles':registered_profiles()}
@@ -368,7 +423,7 @@ def _probe_parts(config, commands):
 
 
 def _runtime_cache(config, purpose):
-    return ROOT / 'runtime-probes' / (config_hash(config) + '-' + purpose + '.json')
+    return ROOT / 'runtime-probes' / (config_hash(runtime_config(config)) + '-' + purpose + '.json')
 
 
 def _store_probe(report):
@@ -401,7 +456,11 @@ def capacity_probe(config, purpose='vasp', context=None):
             context[shared_key] = availability, diagnostics
     if availability['exit_code'] or diagnostics['exit_code']:
         invalidate_runtime(config, purpose)
-    report = {**cached, 'observed_at': datetime.now(timezone.utc).isoformat(),
+    from .site_registration import connection_identity
+    if cached.get('connection') and cached['connection']!=connection_identity(config['alias']):
+        invalidate_runtime(config,purpose)
+        return probe(config,purpose=purpose,force=True)
+    report = {**cached, 'config':config,'config_hash':config_hash(config),'observed_at': datetime.now(timezone.utc).isoformat(),
               'preflight': parser.parse_preflight(availability['stdout']+'\n'+availability['stderr']),
               'availability': availability, 'diagnostics': diagnostics,
               'queues': queue_records(diagnostics['stdout']) if scheduler == 'pbs' else partition_records(diagnostics['stdout']),
@@ -426,9 +485,10 @@ def probe_many(configs):
         if key in result:
             continue
         candidate = next((item for item in reports if item.get('config') and
+                          (config.get('runtime_source')=='script' and runtime_config(item['config'])==runtime_config(config) or
                           {k: v for k, v in item['config'].items() if k != 'vasp_executable'} ==
                           {k: v for k, v in validate(config).items() if k != 'vasp_executable'} and
-                          item.get('checks', {}).get(PurePosixPath(config['vasp_executable']).name) == 'OK'), None)
+                          item.get('checks', {}).get(PurePosixPath(config['vasp_executable']).name) == 'OK')), None)
         if candidate:
             normalized = validate(config)
             report = {**candidate, 'config': normalized, 'config_hash': config_hash(normalized),
@@ -454,9 +514,10 @@ def probe(config, purpose='vasp', force=False):
         checker_argv.append('EXCLUDED_NODES=node06')
     checker_argv += ['bash',str(CHECKER),config['alias']]
     scheduler=normalize_scheduler(config['scheduler'])
+    check_program=purpose=='vasp' and config.get('runtime_source')!='script'
     if scheduler == 'pbs':
         commands = ['set -e', 'command -v qstat', 'command -v qsub']
-        path_keys=('mpi_executable','vasp_executable','environment_script') if purpose=='vasp' else ()
+        path_keys=('mpi_executable','vasp_executable','environment_script') if check_program else ()
         for key in path_keys:
             flag = '-r' if key=='environment_script' else '-x'
             commands.append(f"if test {flag} {shlex.quote(config[key])}; then echo CHECK_{key}=OK; else echo CHECK_{key}=MISSING; fi")
@@ -464,11 +525,11 @@ def probe(config, purpose='vasp', force=False):
     else:
         commands=['set -e','command -v sbatch','command -v squeue','command -v sacct',
                   "sinfo -h -o 'FPILOT_PARTITION=%P|%a|%l'"]
-        if purpose=='vasp':
+        if check_program:
             commands[4:4]=['source /etc/profile.d/lmod.sh','module load '+shlex.quote(config['module']),'command -v mpirun',
                            'if test -x '+shlex.quote(config['vasp_executable'])+'; then echo CHECK_vasp_executable=OK; else echo CHECK_vasp_executable=MISSING; fi']
-        path_keys=('vasp_executable',)
-    if purpose == 'vasp':
+        path_keys=('vasp_executable',) if check_program else ()
+    if check_program:
         variants = []
         for variant in ('vasp_std', 'vasp_ncl'):
             path = str(PurePosixPath(config['vasp_executable']).with_name(variant))
@@ -477,10 +538,12 @@ def probe(config, purpose='vasp', force=False):
     availability,diagnostics=_probe_parts(config,commands)
     parsed=parser.parse_preflight(availability['stdout']+'\n'+availability['stderr'])
     checks = {k:v for k,v in re.findall(r'^CHECK_(\w+)=(\w+)$',diagnostics['stdout'],re.M)}
-    report = {'config':config,'config_hash':config_hash(config),'purpose':purpose,'observed_at':datetime.now(timezone.utc).isoformat(),
+    from .site_registration import connection_identity
+    report = {'config':config,'config_hash':config_hash(config),'connection':connection_identity(config['alias']),'purpose':purpose,'observed_at':datetime.now(timezone.utc).isoformat(),
               'preflight':parsed,'availability':availability,'diagnostics':diagnostics,'checks':checks,
               'queues':queue_records(diagnostics['stdout']) if scheduler=='pbs' else partition_records(diagnostics['stdout']),
-              'runtime_evidence':('只读检查调度器、队列和容量；Wannier90 程序与 MPI 命令由所选脚本负责，提交前请核对预览。'
+              'runtime_evidence':('只读检查调度器、队列和容量；环境与程序命令使用导入脚本，尚无本次程序运行证据。' if config.get('runtime_source')=='script' else
+                                  '只读检查调度器、队列和容量；Wannier90 程序与 MPI 命令由所选脚本负责，提交前请核对预览。'
                                   if purpose=='wannier90' else '只读检查调度器、队列和容量；分析 Python 与依赖由扩展 doctor 检查。' if purpose=='analysis' else
                                   '路径/命令存在性是本次检查；具体 VASP/MPI 运行能力来自登记的 SMOKE_CONFIRMED，本次尚未执行 VASP'),
               'remote_mutation':False}
@@ -489,7 +552,7 @@ def probe(config, purpose='vasp', force=False):
         path = _runtime_cache(config, purpose)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True))
-        if purpose == 'vasp':
+        if check_program:
             for variant in ('vasp_std', 'vasp_ncl'):
                 if checks.get(variant) != 'OK':
                     continue
@@ -508,8 +571,9 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     raw=(ROOT/'server-probes'/probe_id).read_bytes()
     if hashlib.sha256(raw).hexdigest()!=probe_id:raise ValueError('诊断记录校验失败')
     report=json.loads(raw)
-    if report['config_hash']!=config_hash(config):raise ValueError('配置已改变，请重新诊断')
-    if report.get('purpose','vasp') != purpose:raise ValueError('诊断用途与本次任务不一致')
+    if capacity_config(report['config'])!=capacity_config(config):raise ValueError('服务器或调度器已改变，请检测新服务器')
+    from .site_registration import connection_identity
+    if report.get('connection') and report['connection']!=connection_identity(config['alias']):raise ValueError('实际 SSH 目标已改变，请重新检测节点')
     if config['alias']=='jutai-1' and node=='node06':raise ValueError('node06 已按项目规则排除')
     nodes=[n for h in report['preflight']['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==node]
     if len(nodes)!=1:raise ValueError('请选择本次诊断中的节点')
@@ -531,23 +595,51 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
         maximum=queue.get('resources_max.walltime')
         if maximum and seconds(config['walltime'])>seconds(maximum):blockers.append('walltime 超过队列上限')
     elif queue.get('available') != 'up': blockers.append('Slurm 分区当前不可用')
-    required_checks=(('mpi_executable','vasp_executable','environment_script') if scheduler=='pbs' else ('vasp_executable',)) if purpose=='vasp' else ()
+    elif queue.get('time_limit','').lower() not in ('','infinite','unlimited','n/a') and seconds(config['walltime'])>seconds(queue['time_limit']):
+        blockers.append('walltime 超过分区上限')
+    if scheduler=='slurm' and facts.get('PARTITIONS') and config['queue'] not in facts['PARTITIONS'].split(','):
+        blockers.append('所选节点不属于该 Slurm 分区')
+    check_program=purpose=='vasp' and config.get('runtime_source')!='script'
+    if check_program and runtime_config(report['config'])!=runtime_config(config):
+        # Only changed runtime paths are checked. Keep the node/queue observation.
+        cached=_runtime_cache(config,purpose)
+        if cached.exists():runtime=json.loads(cached.read_text())
+        else:
+            keys=('mpi_executable','vasp_executable','environment_script') if scheduler=='pbs' else ('vasp_executable',)
+            commands=['set -e']
+            if scheduler=='slurm':commands+=['source /etc/profile.d/lmod.sh','module load '+shlex.quote(config['module'])]
+            for key in keys:
+                commands.append('if test '+('-r ' if key=='environment_script' else '-x ')+shlex.quote(config[key])+'; then echo CHECK_'+key+'=OK; else echo CHECK_'+key+'=MISSING; fi')
+            receipt=run(['ssh','-o','BatchMode=yes',config['alias'],'\n'.join(commands)])
+            runtime={**report,'config':config,'checks':dict(re.findall(r'^CHECK_(\w+)=(\w+)$',receipt['stdout'],re.M)),'diagnostics':receipt,'observed_at':datetime.now(timezone.utc).isoformat()}
+            if receipt['exit_code']==0 and all(runtime['checks'].get(k)=='OK' for k in keys):
+                cached.parent.mkdir(parents=True,exist_ok=True);cached.write_text(json.dumps(runtime,ensure_ascii=False))
+        report={**report,'checks':runtime['checks'],'diagnostics':runtime['diagnostics']}
+    required_checks=(('mpi_executable','vasp_executable','environment_script') if scheduler=='pbs' else ('vasp_executable',)) if check_program else ()
     if report['diagnostics']['exit_code']!=0 or any(report['checks'].get(k)!='OK' for k in required_checks):
         blockers.append('运行时路径或调度器诊断未通过')
     if report['availability']['exit_code']!=0: blockers.append('容量诊断异常')
     p=profile(config,node,ppn)
     renderer=pbs.render_script if scheduler=='pbs' else slurm.render_script
-    script=renderer(p)
-    if purpose=='vasp':
-        from .workbench_settings import read
-        template_id=read()['defaults'].get(config['alias']+':'+PurePosixPath(config['vasp_executable']).name)
+    script='' if config.get('runtime_source')=='script' else renderer(p)
+    if purpose=='vasp' or config.get('runtime_source')=='script':
+        template_id=selected_template(config)
         if template_id:
             from . import job_templates
             from .execution import template_resources
             selected=job_templates.render_template(template_id,template_resources(p),config['alias'],config)
             blockers.extend(selected.get('execution_blockers',[]))
-            script=selected['rendered_text']
+            script=selected['rendered_text'] or selected['script_text']
+        elif config.get('runtime_source')=='script':blockers.append('请先选择当前程序的已导入脚本')
     return {'script':script,'profile':p,'resource_selection':selection,'blockers':blockers,
             'node_status':facts.get('STATUS'),
             'resource_ready':not blockers,'submission_enabled':False,'probe_id':probe_id,
             'note':'资源与脚本预览已生成。提交前仍需绑定冻结输入、完成输入审查，并再次检查所选节点容量。'}
+
+
+def preview_for_prepare(config, probe_id, node, cores=None, reason='', purpose='vasp'):
+    result=preview(config,probe_id,node,cores,reason,purpose=purpose) if purpose!='vasp' else preview(config,probe_id,node,cores,reason)
+    if any('stale' in str(v).lower() or '过期' in str(v) for v in result.get('blockers',[])):
+        fresh=capacity_probe(config,purpose=purpose)
+        return preview(config,fresh['id'],node,cores,reason,purpose=purpose)
+    return result

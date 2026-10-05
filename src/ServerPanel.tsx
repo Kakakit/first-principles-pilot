@@ -5,9 +5,10 @@ import {requestJson,errorMessage} from './apiClient';
 import {runtimeFor,emptySettings,openSettings} from './submissionDefaults';
 import type { ServerConfig, RegisteredProfile, ServerPreview, ServerProbe } from './executionUi';
 import RemoteProgress from './RemoteProgress';
+import ScriptPicker from './ScriptPicker';
 
 type Props = {
-  maintenance?:boolean; project?:Project; scopeId?:string; program?:string; onTemplate?:(id:string)=>void;
+  maintenance?:boolean; project?:Project; scopeId?:string; program?:string; programs?:string[]; onTemplate?:(id:string)=>void;
   config: ServerConfig | null;
   profiles: RegisteredProfile[];
   probe: ServerProbe | null;
@@ -68,7 +69,7 @@ function MaintenanceServerPanel({
         <label className="field">最长运行时间（HH:MM:SS）<input value={config.walltime || ''} onChange={event => setField('walltime', event.target.value)} /></label>
         <label className="field">远端工作区根目录（任务目录的上层）<input value={config.remote_workspace_root || '$HOME/230269265lht'} onChange={event => setField('remote_workspace_root', event.target.value)} /></label><p className="path-layout-note">项目与每次运行将保存在此根目录内的 material-projects 子目录。填写完整工作区路径，不需要再手动追加 material-projects。</p>
       </div>
-      <details><summary>脚本运行时路径（按所选主机核对）</summary><p>登记信息不完整的主机请填入实际脚本所用路径；诊断会检查文件存在性。</p><label className="field">程序可执行文件<input value={config.vasp_executable || ''} onChange={event=>setField('vasp_executable',event.target.value)}/></label>{selectedProfile?.scheduler?.toLowerCase()!=='slurm'&&<><label className="field">MPI 可执行文件<input value={config.mpi_executable || ''} onChange={event=>setField('mpi_executable',event.target.value)}/></label><label className="field">环境脚本<input value={config.environment_script || ''} onChange={event=>setField('environment_script',event.target.value)}/></label></>}</details>
+      {config.runtime_source==='script'?<p>环境加载、MPI 与程序命令使用下方选定的导入脚本，无需重新填写路径。</p>:<details><summary>高级：登记运行时路径</summary><p>填写服务器已有运行方式；也可在下方选择导入脚本。</p><label className="field">程序可执行文件<input value={config.vasp_executable || ''} onChange={event=>setField('vasp_executable',event.target.value)}/></label>{selectedProfile?.scheduler?.toLowerCase()!=='slurm'&&<><label className="field">MPI 可执行文件<input value={config.mpi_executable || ''} onChange={event=>setField('mpi_executable',event.target.value)}/></label><label className="field">环境脚本<input value={config.environment_script || ''} onChange={event=>setField('environment_script',event.target.value)}/></label></>}</details>}
       <div className="submit-actions"><button className="button" disabled={!canProbe} onClick={onProbe}>仅重新诊断当前配置</button><button className="button primary" disabled={!canProbe} onClick={onSaveAndProbe}>保存并诊断一次</button></div>
     </fieldset>}
     {busy && <RemoteProgress label={progressLabel||'正在核对主机与资源'}/>}
@@ -102,15 +103,29 @@ export default function ServerPanel(props:Props){
  useEffect(()=>{const update=()=>setBindingRevision(v=>v+1);window.addEventListener('fpilot:binding-changed',update);return()=>window.removeEventListener('fpilot:binding-changed',update);},[]);
  const [binding,setBinding]=useState<{alias?:string;state:string}|null>(null),[bindingError,setBindingError]=useState('');
  useEffect(()=>{if(props.maintenance||!project||!scopeId)return;let active=true;void requestJson('/api/branch-binding',{project,node_id:scopeId}).then(value=>{if(active){setBindingError('');setBinding(value);if(config&&value.alias&&value.alias!==config.alias){void requestJson('/api/workbench-settings').then(settings=>{if(active)props.onConfigChange(runtimeFor(config,profiles,settings,value.alias,program));});}}}).catch(e=>{if(active)setBindingError(errorMessage(e));});return()=>{active=false;};},[project?.id,JSON.stringify(project?.edges),scopeId,config?.alias,bindingRevision]);
- useEffect(()=>{if(props.maintenance||!config)return;let active=true;void requestJson('/api/workbench-settings').then(settings=>{if(active){setSettingsCache(settings);const next=runtimeFor(config,profiles,settings,config.alias,program);if(JSON.stringify(next)!==JSON.stringify(config))props.onConfigChange(next);props.onTemplate?.(settings.defaults[config.alias+':'+program]||'');}}).catch(e=>{if(active)setBindingError(errorMessage(e));});return()=>{active=false;};},[config?.alias,program,profiles.length]);
+ useEffect(()=>{if(props.maintenance||!config)return;let active=true;void requestJson('/api/workbench-settings').then(settings=>{if(active){setSettingsCache(settings);let next=runtimeFor(config,profiles,settings,config.alias,program);if(props.programs&&props.programs.length>1){const choices=Object.fromEntries(props.programs.map(p=>[p,settings.defaults[config.alias+':'+p]||'']).filter(([,id])=>id));if(Object.keys(choices).length)next={...next,runtime_source:'script',program:props.programs[0],vasp_executable:props.programs[0],script_templates:JSON.stringify(choices),template_id:choices[props.programs[0]]||''};}if(JSON.stringify(next)!==JSON.stringify(config))props.onConfigChange(next);props.onTemplate?.(next.template_id||'');}}).catch(e=>{if(active)setBindingError(errorMessage(e));});return()=>{active=false;};},[config?.alias,program,props.programs?.join(','),profiles.length]);
  if(props.maintenance)return <MaintenanceServerPanel {...props}/>;
  const nodes=availableNodes(probe,config?.alias);
  const locked=Boolean(binding?.alias);
  const set=(key:string,value:string)=>{if(config)props.onConfigChange({...config,[key]:value});};
- return <><section className="input-submit-card" aria-label="服务器与资源"><h3>2 · 资源</h3>{config&&<label>分支服务器{locked?<strong className="server-lock">{binding?.alias} · {binding?.state==='RESERVED'?'回执待核查，服务器已预留':'已绑定'}</strong>:<select value={config.alias||''} disabled={busy} onChange={e=>{props.onConfigChange(runtimeFor(config,profiles,settingsCache,e.target.value,program));props.onNodeChange('');}}>{profiles.map(p=><option key={p.alias} value={p.alias} disabled={!p.selectable}>{p.alias}</option>)}</select>}</label>}
+ const localErrors:string[]=[];
+ const seconds=(value:string)=>{const parts=value.split('-'),clock=parts.pop()||'';return Number(parts[0]||0)*86400+clock.split(':').reduce((total,n)=>total*60+Number(n),0);};
+ if(config){
+  if(!/^[A-Za-z0-9_.-]{1,120}$/.test(config.name||''))localErrors.push('作业名称只允许英文、数字、点、横线和下划线');
+  if(!/^\d{2,3}:[0-5]\d:[0-5]\d$/.test(config.walltime||'')||seconds(config.walltime)<=0)localErrors.push('运行时间需为正的 HH:MM:SS');
+  const queue=probe?.queues.find(q=>q.name===config.queue),maximum=queue?.['resources_max.walltime']||queue?.time_limit;
+  if(maximum&&maximum!=='infinite'&&seconds(config.walltime)>seconds(maximum))localErrors.push('运行时间超过已检测队列/分区上限');
+  const capacity=nodes.find(n=>n.NODE===node);
+  if(cores&&(!/^[1-9]\d*$/.test(cores)||capacity&&Number(cores)>Number(capacity.CPUS_FREE)))localErrors.push('核数需为正整数，且不超过上次检测的可用容量');
+ }
+ const selectedProfile=profiles.find(p=>p.alias===config?.alias);
+ return <><section className="input-submit-card" aria-label="服务器与脚本"><h3>2 · 服务器与脚本</h3>{config&&<><label>分支服务器{locked?<strong className="server-lock">{binding?.alias} · {binding?.state==='RESERVED'?'回执待核查，服务器已预留':'已绑定'}</strong>:<select value={config.alias||''} disabled={busy} onChange={e=>{props.onConfigChange(runtimeFor(config,profiles,settingsCache,e.target.value,program));props.onNodeChange('');}}>{profiles.map(p=><option key={p.alias} value={p.alias} disabled={!p.selectable}>{p.alias}</option>)}</select>}</label>
+ <ScriptPicker config={config} programs={props.programs||[program]} disabled={busy} onChange={props.onConfigChange} onSelect={props.onTemplate} registeredExecutable={program==='vasp_ncl'?selectedProfile?.ncl_executable:selectedProfile?.vasp_executable}/>
+ <fieldset disabled={busy}><div className="submit-grid"><label>作业名称<input value={config.name||''} onChange={e=>set('name',e.target.value)}/></label><label>{config.scheduler==='slurm'?'分区':'队列'}<input value={config.queue||''} onChange={e=>set('queue',e.target.value)}/></label><label>运行时间（HH:MM:SS）<input value={config.walltime||''} onChange={e=>set('walltime',e.target.value)}/></label></div></fieldset>
+ </>}<button className="text-button" onClick={()=>openSettings('server')}>服务器与默认脚本设置</button></section>
+ <section className="input-submit-card" aria-label="服务器与资源"><h3>3 · 节点与资源</h3>
  <button className="button" disabled={busy||props.canProbe===false} onClick={props.onProbe}>检测空闲节点</button>{props.resourceExtra}
  {probe&&!props.resourceExtra&&props.purpose!=='chain'&&<div className="submit-grid"><label>计算节点<select value={node} disabled={busy} onChange={e=>props.onNodeChange(e.target.value)}><option value="">请选择</option>{nodes.map(n=><option key={n.NODE} value={n.NODE}>{n.NODE} · 空闲 {n.CPUS_FREE||0} / {n.CPUS_TOTAL||'?'} 核</option>)}</select></label><label>核数（留空使用当前可用核）<input value={cores} disabled={busy} onChange={e=>props.onCoresChange(e.target.value)} inputMode="numeric"/></label></div>}
  {cores&&node&&Number(cores)<Number(nodes.find(n=>n.NODE===node)?.CPUS_FREE||0)&&<label>少用核数的理由<input value={reason} onChange={e=>props.onReasonChange(e.target.value)}/></label>}
- {probe&&<p role="status">节点检测完成 · {new Date(probe.observed_at).toLocaleTimeString()}</p>}{binding?.state==='CONFLICT'&&<p role="alert" className="structure-error">历史服务器冲突，请到设置 → 计算流程整理分支归属。</p>}{bindingError&&<p role="alert" className="structure-error">{bindingError}</p>}{props.error&&<p role="alert" className="structure-error">{props.error}</p>}{busy&&<RemoteProgress label={props.progressLabel||'正在检测节点'}/>}</section>
- <section className="input-submit-card" aria-label="脚本基础配置"><h3>3 · 脚本基础配置</h3>{config&&<fieldset disabled={busy}><div className="submit-grid"><label>作业名称<input value={config.name||''} onChange={e=>set('name',e.target.value)}/></label><label>{config.scheduler==='slurm'?'分区':'队列'}<input value={config.queue||''} onChange={e=>set('queue',e.target.value)}/></label><label>运行时间（HH:MM:SS）<input value={config.walltime||''} onChange={e=>set('walltime',e.target.value)}/></label></div></fieldset>}<button className="text-button" onClick={()=>openSettings('server')}>服务器与默认脚本设置</button>{props.preview?.blockers.map((b,i)=><p role="alert" key={i} className="structure-error">{b}</p>)}</section></>;
+ {localErrors.map(error=><p role="alert" className="structure-error" key={error}>{error}</p>)}{probe&&<p role="status">上次节点检测 · {new Date(probe.observed_at).toLocaleTimeString()} · 编辑保留选择，派发前自动实时复核</p>}{binding?.state==='CONFLICT'&&<p role="alert" className="structure-error">历史服务器冲突，请到设置 → 计算流程整理分支归属。</p>}{bindingError&&<p role="alert" className="structure-error">{bindingError}</p>}{props.error&&<p role="alert" className="structure-error">{props.error}</p>}{props.preview?.blockers.map((b,i)=><p role="alert" key={i} className="structure-error">{b}</p>)}{busy&&<RemoteProgress label={props.progressLabel||'正在检测节点'}/>}</section></>;
 }

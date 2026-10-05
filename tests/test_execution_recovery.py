@@ -145,7 +145,7 @@ class RecoveryTests(unittest.TestCase):
         self.record()
         shim=self.root/'bin';shim.mkdir();mode=self.root/'mode';mode.write_text('offline')
         ssh=shim/'ssh'
-        ssh.write_text('#!'+sys.executable+'\nimport os,pathlib,sys\nr=pathlib.Path(os.environ["FPILOT_WORKSPACE"])\nwith (r/"ssh-calls").open("a") as f:f.write(" ".join(sys.argv)+"\\n")\nif (r/"mode").read_text()=="offline":sys.exit(255)\nprint("FPILOT_EXIT=0\\nFPILOT_TIMING=1\\njob_state = C")\n')
+        ssh.write_text('#!'+sys.executable+'\nimport os,pathlib,sys\nr=pathlib.Path(os.environ["FPILOT_WORKSPACE"])\nwith (r/"ssh-calls").open("a") as f:f.write(" ".join(sys.argv)+"\\n")\nif "-G" in sys.argv:print("hostname test.invalid\\nuser test\\nport 22");sys.exit(0)\nif (r/"mode").read_text()=="offline":sys.exit(255)\nprint("FPILOT_EXIT=0\\nFPILOT_TIMING=1\\njob_state = C")\n')
         ssh.chmod(0o700)
         env=dict(os.environ,FPILOT_WORKSPACE=str(self.root),FPILOT_NOTIFICATIONS='0',FPILOT_SSH_MODE='legacy',PATH=str(shim)+os.pathsep+os.environ.get('PATH',''))
         cwd=Path(__file__).resolve().parents[1]

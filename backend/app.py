@@ -1406,7 +1406,7 @@ class TemplateImport(BaseModel):
     name: str
     scheduler: Literal['pbs', 'slurm']
     alias: str
-    program: Literal['vasp_std', 'gpu_vasp', 'wannier90', 'other']
+    program: Literal['vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other']
     source: str
     prepared: bool = False
     parent_id: Optional[str] = None
@@ -1576,4 +1576,11 @@ def site_register(payload:dict):
 def site_check_ssh(payload:dict):
     from . import site_registration
     try:return site_registration.check_ssh(payload.get('alias'))
+    except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/sites/test-connection')
+def site_test_connection(payload:dict):
+    from . import site_registration
+    try:return site_registration.test_connection(payload.get('alias'),payload.get('python',''),payload.get('remote_workspace_root'))
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc

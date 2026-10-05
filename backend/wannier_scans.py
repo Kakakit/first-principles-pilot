@@ -209,6 +209,7 @@ def render(config, probe_id, node, cores, reason, template_id=None):
 
 
 def template(config):
+    if config.get('template_id'):return config['template_id']
     from .workbench_settings import read
     return read()['defaults'].get(config['alias']+':wannier90')
 
@@ -231,7 +232,7 @@ def authorize(batch, project_id, case_table_hash, config, candidates, reviewed, 
     branch_bindings.check(source['project'],batch['base_node_id'],config['alias'],scope=batch['scan_node_id'])
     from .workbench_settings import snapshot
     batch.update(state='ACTIVE',authorization={'config':config,'candidates':checked,'max_parallel':max_parallel,'reason':'',
-                    'template_id':template(config),'settings_snapshot':snapshot(config['alias'],'wannier90'),'at':ex.now(),'case_table_hash':case_table_hash})
+                    'template_id':template(config),'settings_snapshot':snapshot(config['alias'],'wannier90',config,template(config)),'at':ex.now(),'case_table_hash':case_table_hash})
     return scans.save(batch)
 
 

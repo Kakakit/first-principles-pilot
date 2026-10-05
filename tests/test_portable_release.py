@@ -108,6 +108,35 @@ class SetupTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,'invalid script'):site_registration.register({**config,'queue':'other'})
                 self.assertEqual((root/'site-registry.json').read_bytes(),before)
 
+    def test_script_site_with_include_alias_and_read_only_connection_discovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);registry=root/'builtin.json';registry.write_text('{"hosts":{}}')
+            (root/'.ssh'/'sites').mkdir(parents=True);(root/'.ssh/config').write_text('Include sites/*\n')
+            (root/'.ssh/sites/lab').write_text('Host my-lab\n HostName invalid.example\n Port 103\n')
+            config={'alias':'my-lab','scheduler':'pbs','runtime_source':'script','remote_workspace_root':'$HOME/fpilot','python':'/usr/bin/python3'}
+            with patch.object(site_registration,'ROOT',root),patch.object(servers,'ROOT',root),patch.object(servers,'REGISTRY_PATH',registry),patch.object(Path,'home',return_value=root):
+                self.assertEqual(site_registration.ssh_aliases(),['my-lab'])
+                saved=site_registration.register(config)
+                self.assertEqual(saved['config']['runtime_source'],'script');self.assertEqual(saved['config']['queue'],'')
+                self.assertEqual(saved['config']['remote_workspace_root'],'$HOME/fpilot')
+                parsed=Mock(returncode=0,stdout='hostname invalid.example\nuser test\nport 103\n',stderr='')
+                connected=Mock(returncode=0,stdout='FPILOT_SSH_OK\nFPILOT_TOOL_qsub=/bin/qsub\nFPILOT_TOOL_qstat=/bin/qstat\nFPILOT_PYTHON={"path":"/usr/bin/python3","version":[3,9,6],"supported":true}\nFPILOT_ROOT_ABS=/home/test/fpilot\nFPILOT_ROOT_PARENT=/home/test\nFPILOT_ROOT_SNAPSHOT=1:2\nFPILOT_ROOT_READY=1\n',stderr='')
+                with patch.object(site_registration.subprocess,'run',side_effect=[parsed,connected]) as remote:
+                    report=site_registration.test_connection('my-lab',remote_workspace_root='$HOME/fpilot')
+                self.assertTrue(report['connected']);self.assertTrue(report['workspace']['ready'])
+                self.assertFalse(report['remote_mutation']);self.assertEqual(report['python']['path'],'/usr/bin/python3')
+                argv=remote.call_args_list[1].args[0]
+                self.assertIn('ControlMaster=no',argv);self.assertIn('ControlPath=none',argv);self.assertIn('BatchMode=yes',argv)
+                self.assertNotIn('mkdir',argv[-1]);self.assertNotIn('source ',argv[-1])
+                self.assertEqual(report['schedulers'],['pbs'])
+                denied=Mock(returncode=255,stdout='',stderr='Permission denied (publickey)')
+                with patch.object(site_registration.subprocess,'run',side_effect=[parsed,denied]):
+                    with self.assertRaisesRegex(ValueError,'软件进程'):site_registration.test_connection('my-lab')
+                no_python=Mock(returncode=0,stdout='FPILOT_SSH_OK\n',stderr='')
+                with patch.object(site_registration.subprocess,'run',side_effect=[parsed,no_python]):
+                    report=site_registration.test_connection('my-lab')
+                    self.assertIsNone(report['python']);self.assertIn('3.8+',report['note'])
+
     def test_research_path_and_worker_changes_require_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp).resolve();config=root/'local.json';research=root/'research';research.mkdir()

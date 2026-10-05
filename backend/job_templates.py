@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -81,6 +82,7 @@ def parse(text, scheduler):
                     add('name' if option == '-N' else 'queue', arg, i)
                 else:
                     for entry in arg.split(','):
+                        entry=entry.strip()
                         if entry.startswith('nodes='):
                             node = re.fullmatch(r'nodes=([^:]+):ppn=([0-9]+)', entry.strip())
                             if node:
@@ -93,6 +95,19 @@ def parse(text, scheduler):
                             blockers.append('PBS -l 资源不支持：' + entry)
             elif not re.fullmatch(r'#PBS\s+(?:-j\s+(?:n|oe|eo)|-o\s+(?:vasp\.)?pbs\.out|-e\s+(?:vasp\.)?pbs\.err|-S\s+/bin/bash)', code):
                 blockers.append('PBS 选项未纳入当前映射：' + code)
+        if scheduler=='slurm' and code.startswith('#SBATCH'):
+            if body_started:blockers.append('Slurm 指令位于正文之后，调度器不会按预期读取')
+            options={'name':r'(?:--job-name(?:=|\s+)|-J\s*)', 'queue':r'(?:--partition(?:=|\s+)|-p\s*)',
+                     'node':r'(?:--nodelist(?:=|\s+)|-w\s*)', 'ppn':r'(?:--ntasks(?:=|\s+)|-n\s*)',
+                     'walltime':r'(?:--time(?:=|\s+)|-t\s*)'}
+            for key,option in options.items():
+                match=re.fullmatch(r'#SBATCH\s+'+option+r'(\S+)',code)
+                if match:
+                    value=match[1]
+                    if key=='walltime' and value.isdigit():value='{:02d}:{:02d}:00'.format(int(value)//60,int(value)%60)
+                    add(key,value,i)
+            if re.search(r'^#SBATCH\s+(?:--(?:job-name|partition|nodelist|ntasks|time)\b|-[Jpwnt])',code) and i not in indexes:
+                blockers.append('第 {} 行 Slurm 资源无法明确映射，请将各资源指令分行填写'.format(i+1))
         if not code or code.startswith('#'):
             continue
         body_started = True
@@ -158,15 +173,15 @@ def import_template(text, alias, program, source, name='', prepared=False, paren
         raise ValueError('调度器声明与原稿不一致；未保存')
     if alias not in servers.load_registry()['hosts']:
         raise ValueError('请选择登记的 SSH 别名')
-    if program not in ('vasp_std', 'gpu_vasp', 'wannier90', 'other'):
+    if program not in ('vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other'):
         raise ValueError('程序类型无效')
     for value in (source, name or '未命名模板'):
         if not isinstance(value, str) or not value.strip() or len(value) > 1000 or any(c in value for c in '\r\n\x00'):
             raise ValueError('名称与来源必须为非空单行文本')
     parent = get_template(parent_id) if parent_id else None
-    if parent and (parent['alias'] != alias or parent['program'] != program or parent['scheduler'] != detected):
-        raise ValueError('适配副本必须保持来源主机、程序和调度器绑定')
-    identity = dict(schema=SCHEMA, script_hash=digest(raw), alias=alias, program=program,
+    if parent and (parent['alias'] != alias or parent['scheduler'] != detected):
+        raise ValueError('适配副本必须保持来源主机和调度器绑定')
+    identity = dict(schema=SCHEMA, adapter_version=2, script_hash=digest(raw), alias=alias, program=program,
                     source=source, name=name or '未命名模板', scheduler=detected, prepared=bool(prepared), parent_id=parent_id)
     key = digest(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode())
     record = dict(identity, id=key, original_hash=digest(raw), bytes=len(raw), created_at=datetime.now(timezone.utc).isoformat(),
@@ -197,7 +212,16 @@ def render_pbs(text, values, indexes):
     for i, fields in indexes.items():
         seen.update(fields)
         eol = '\r\n' if lines[i].endswith('\r\n') else '\n'
-        lines[i] = eol.join(directives(fields)) + eol
+        resource=re.fullmatch(r'(\s*#PBS\s+-l\s+)([^\r\n]+)(?:\r?\n)?',lines[i])
+        if resource:
+            entries=[]
+            for entry in resource[2].split(','):
+                name=entry.strip().split('=',1)[0]
+                if name=='nodes' and ('node' in fields or 'ppn' in fields):entry='nodes={node}:ppn={ppn}'.format(**values)
+                elif name=='walltime' and 'walltime' in fields:entry='walltime='+values['walltime']
+                entries.append(entry)
+            lines[i]=resource[1]+','.join(entries)+eol
+        else:lines[i] = eol.join(directives(fields)) + eol
     missing = set(FIELDS) - seen
     if missing:
         eol = '\r\n' if '\r\n' in text else '\n'
@@ -208,7 +232,7 @@ def render_pbs(text, values, indexes):
 
 def render_slurm(text, values):
     lines = text.splitlines(keepends=True)
-    known = re.compile(r'^\s*#SBATCH\s+(?:--(?:job-name|partition|nodelist|ntasks|time|nodes)\b|-J\b|-p\b|-N\b|-n\b|-t\b)')
+    known = re.compile(r'^\s*#SBATCH\s+(?:--(?:job-name|partition|nodelist|ntasks|time|nodes)\b|-(?:J|p|w|N|n|t)(?:\b|[0-9]))')
     lines = [line for line in lines if not known.match(line)]
     directives = [f'#SBATCH --job-name={values["name"]}\n', f'#SBATCH --partition={values["queue"]}\n',
                   f'#SBATCH --nodelist={values["node"]}\n', f'#SBATCH --nodes=1\n',
@@ -243,7 +267,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     record = get_template(template_id)
     execution_original = execution_text(record['original_text'])
     overrides = resources_checked(resources or {})
-    values, _, indexes = parse(execution_original, record['scheduler'])
+    values, parsed_blockers, indexes = parse(execution_original, record['scheduler'])
     blockers = []
     values.update(overrides)
     selected = alias or record['alias']
@@ -254,7 +278,8 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     if missing: blockers.append('缺少覆盖后的资源字段：' + '、'.join(missing))
     rendered = (render_pbs(execution_original, values, indexes) if record['scheduler']=='pbs'
                 else render_slurm(execution_original, values)) if not blockers else None
-    if rendered and config and PurePosixPath(config.get('vasp_executable','')).name == 'vasp_ncl':
+    script_mode=bool(config and config.get('runtime_source')=='script')
+    if rendered and config and not script_mode and record.get('adapter_version')!=2 and PurePosixPath(config.get('vasp_executable','')).name == 'vasp_ncl':
         standard = str(PurePosixPath(config['vasp_executable']).with_name('vasp_std'))
         registered_standard=servers.select_profile(selected)['vasp_executable']
         rendered = rendered.replace(registered_standard,config['vasp_executable']).replace(standard, config['vasp_executable'])
@@ -262,13 +287,49 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
                           config['vasp_executable'], rendered)
     runtime_ok = bool(rendered)
     execution_blockers = list(blockers)
+    warnings=['脚本正文由用户管理；预览和实时资源检查仍需完成']
+    if script_mode or record.get('adapter_version')==2:
+        # Preserve arbitrary environment setup; reject only concrete mapping/exit conflicts.
+        execution_blockers.extend(v for v in parsed_blockers if not v.startswith(('PBS -l 资源不支持：','PBS 选项未纳入当前映射：')) and 'GPU 环境' not in v and (not v.startswith('第 ') or 'Slurm 资源' in v))
+        for i,line in enumerate(execution_original.splitlines(),1):
+            code=line.strip()
+            if not code or code.startswith('#'):continue
+            if re.search(r'\bcd\s+',code):
+                try:parts=shlex.split(code,comments=True)
+                except ValueError:parts=[]
+                args=parts[1:] if parts and parts[0]=='cd' else []
+                if args and args[0]=='--':args=args[1:]
+                workdir='PBS_O_WORKDIR' if record['scheduler']=='pbs' else 'SLURM_SUBMIT_DIR'
+                safe=len(args)==1 and re.fullmatch(r'\$(?:'+workdir+r'|\{'+workdir+r'(?::\?[^}]*)?\})',args[0])
+                if not safe and (not parts or 'cd' in parts):
+                    execution_blockers.append('第 {} 行进入固定/未知目录；请保存适配副本，使用调度器提交目录'.format(i))
+            if re.search(r'\btrap\s+',code):execution_blockers.append('第 {} 行已有 trap；请在适配副本中处理退出状态采集冲突'.format(i))
+            for match in re.finditer(r'(?:-np|-n|--ntasks)\s*=?\s*([0-9]+)\b',code):
+                if match[0].startswith(('-n ','-n=' ,'--ntasks')) and not re.search(r'\b(?:mpirun|mpiexec|srun)\b',code):continue
+                if values.get('ppn') and int(match[1])!=values['ppn']:
+                    execution_blockers.append('第 {} 行固定 MPI 进程数 {} 与请求核数 {} 不一致；请修改正文或保持原核数'.format(i,match[1],values['ppn']))
+        if record['scheduler']=='slurm':
+            if re.search(r'(?m)^\s*#SBATCH\s+(?:--cpus-per-task(?:=|\s+)(?!1(?:\s|$))\S+|-c\s*(?!1(?:\s|$))\S+|--(?:ntasks-per-node|ntasks-per-core|ntasks-per-socket|gres|gpus)\b)',execution_original):
+                execution_blockers.append('此 Slurm 脚本含线程/GPU/特殊任务布局，不能把总核数直接映射为 ntasks；请先保存纯 MPI 单节点适配副本')
+            if re.search(r'(?m)^\s*#SBATCH\s+(?:--nodes(?:=|\s+)|-N\s*)(?!1(?:\s|$))\S+',execution_original):
+                execution_blockers.append('当前资源选择仅支持单节点；请先保存单节点适配副本')
+        elif re.search(r'(?m)^\s*#PBS\s+-l\s+.*(?:select=|nodes=[2-9][0-9]*:|gpus=)',execution_original):
+            execution_blockers.append('PBS select/多节点/GPU 资源不属于当前单节点核数映射；请保存匹配的适配副本')
+        if config and (script_mode or record.get('adapter_version')==2):
+            expected=servers.program_name(config) or record['program']
+            compatible=record['program']==expected or expected=='vasp_std' and record['program']=='gpu_vasp'
+            if not compatible:execution_blockers.append('脚本分类 {} 与本次程序 {} 不一致，请选择对应脚本'.format(record['program'],expected))
+            named=set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(execution_original))))
+            if expected in ('vasp_std','vasp_ncl') and named and expected not in named:
+                execution_blockers.append('脚本正文明确启动 {}，本次需要 {}；不会自动替换程序命令'.format('/'.join(sorted(named)),expected))
+    execution_blockers=list(dict.fromkeys(execution_blockers))
     parent_text = get_template(record['parent_id'])['original_text'] if record.get('parent_id') else record['original_text']
     return dict(schema='fpilot.job-template-preview.v1', id=template_id, name=record['name'], alias=selected,
                 scheduler=record['scheduler'], program=record['program'], source=record['source'], original_hash=record['script_hash'],
                 parent_id=record.get('parent_id'), parent_hash=record.get('parent_hash'), original_text=record['original_text'],
                 rendered_text=rendered, script_text=rendered or record['original_text'], resources=values,
                 line_endings_normalized=execution_original != record['original_text'],
-                blockers=blockers, execution_blockers=execution_blockers, warnings=['脚本正文由用户管理；预览和实时资源检查仍需完成'],
+                blockers=blockers, execution_blockers=execution_blockers, warnings=warnings,
                 submission_supported=not execution_blockers, runtime_matches_registry=runtime_ok,
                 runtime_validation_required=True, remote_submission_performed=False,
                 resource_diff=''.join(difflib.unified_diff(record['original_text'].splitlines(True), (rendered or record['original_text']).splitlines(True), fromfile='original', tofile='resource-preview')),
