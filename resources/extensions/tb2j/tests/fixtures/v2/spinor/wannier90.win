@@ -1,0 +1,16 @@
+num_wann = 8
+spinors = true
+begin unit_cell_cart
+ang
+6 0 0
+0 6 0
+0 0 6
+end unit_cell_cart
+begin atoms_cart
+ang
+Fe 0 0 0
+O 1 1 1
+Fe 2 0 0
+end atoms_cart
+write_hr = true
+write_xyz = true

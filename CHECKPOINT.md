@@ -1,4 +1,16 @@
-# 当前开发交接 · 2026-10-05
+# 当前开发交接 · 2026-10-06
+
+活动源为本仓库；复用本机已有 Python。原开发 Git 历史与个人研究记录不入库。
+
+## 2026-10-06：TB2J v2 独立扩展
+
+TB2J 2.0.0 使用来源服务器直接命令行执行并等待。表单选项冻结为 JSON，独立扩展检查输入、构造同一 Python 的官方 CLI argv 并整理 SpinIO 结果；不导入主体 backend、不自行 SSH。默认 ssh/local，不检测节点、不填写调度核数、不提交 PBS/Slurm；原调度适配器未改，旧 CLI 兼容。
+
+SOC 单来源、共线同服务器同 DFT 父 .1/.2，hr+centres/tb 组合、冻结或手动费米能、SOC 基底确认、轨道标签分组和高精度 CSV/JSON 已接入扩展管理、Wannier 结果页及分析历史。通用协议增加 required/preferred_location 可选字段与冻结来源摘要，模板同步。程序完成、数值收敛和物理验证独立；单方向 SOC 和未知/不完整产物明确提示。
+
+383 项 Python 全量回归、66 项前端、类型检查/构建及独立包旧 CLI 兼容通过。隔离 UI/API 完成安装/启停/卸载保留历史、两种模式运行和下载；容量探测、调度提交、真实 SSH 均为 0。正式本机扩展已安装启用用于远端；本机 TB2J 实际导入失败，不把安装元数据当可用环境。使用前登记来源服务器已有 Python。收尾时正式服务停止并保持停止，worker 配置与既有队列保留；未提交研究作业、未恢复队列、未安装环境或发布运行 ZIP。真实 TB2J/科学闭环另按明确来源与单次授权验收。
+
+详情见 [使用指南](resources/extensions/tb2j/README.md) 和 [验收记录](docs/extensions-b/TB2J_ACCEPTANCE.md)。
 
 活动源为本仓库；复用本机已有 Python，通过 fpilot.local.json 或 FPILOT_PYTHON 登记。原开发 Git 历史与个人研究记录不入库。
 
@@ -15,3 +27,4 @@ Python 360 项、前端 64 项、类型检查和生产构建通过。空白独�
 方案和验收见 docs/submission/SETUP_AND_SCRIPT_PLAN.md、SETUP_AND_SCRIPT_ACCEPTANCE.md。运行 ZIP 未重发，新设备从最新源码构建/打包；Windows 原生与具体真实任务仍需相应验收和授权。
 
 同步始终基于远端 main 的准确父提交，只发布筛选过的源码/说明。不上传工作区数据、POTCAR、SSH 配置/密钥、私人服务器脚本或旧本地 Git 历史，不强推。详细规则见 docs/GITHUB.md、docs/DEVELOPMENT.md。
+

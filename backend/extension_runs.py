@@ -3,6 +3,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -70,8 +71,24 @@ def lock(key):
 
 
 def _stage(record):
+    if record.get('kind')=='wannier90':
+        # Only this attempt's frozen bundle/snapshot supplies analysis lineage.
+        snapshot=record.get('source_snapshot') or {};bundle={}
+        key=record.get('bundle_id')
+        if isinstance(key,str) and __import__('re').fullmatch(r'[a-f0-9]{64}',key):
+            try:bundle=json.loads((ex.ROOT/'wannier-bundles'/(key+'.json')).read_text())
+            except (OSError,ValueError):pass
+        parameters=bundle.get('parameters') or snapshot.get('parameters') or {}
+        frozen_win=bundle.get('win') or snapshot.get('win') or ''
+        count=re.search(r'^\s*num_wann\s*[:=]\s*(\d+)',frozen_win,re.M|re.I)
+        num_wann=parameters.get('num_wann') if parameters.get('num_wann') is not None else int(count.group(1)) if count else None
+        model={'bundle_id':key,'seed':record.get('seed') or bundle.get('seed') or snapshot.get('seed'),
+               'parent_attempt_id':record.get('parent_attempt_id') or bundle.get('parent_attempt_id') or snapshot.get('source_attempt_id'),
+               'spinors':bundle.get('spinors',snapshot.get('spinors')),
+               'num_wann':num_wann,
+               'energy_reference':copy.deepcopy(bundle.get('energy_reference') or record.get('live_energy_reference') or {})}
+        return 'wannier90',model
     if record.get('stage'):return record['stage'],{}
-    if record.get('kind')=='wannier90':return 'wannier90',{}
     key=record.get('bundle_id')
     if key:
         try:
@@ -110,6 +127,17 @@ def describe_sources(raw,project_id=None):
     return rows
 
 
+def selected_input(role,source):
+    """Absent optional roles stay absent; explicit invalid names never fall back."""
+    files={f['name']:f for f in source['files']};chosen=source.get('chosen_files') or {}
+    if role['role'] in chosen:
+        name=chosen[role['role']]
+        if name=='' and not role.get('required',True):return None
+        if name not in role['names'] or name not in files:raise ValueError('输入文件选择无效：'+role['title'])
+        return files[name]
+    return next((files[n] for n in role['names'] if n in files),None)
+
+
 def blockers(manifest,sources,location='local'):
     reasons=[];bounds=manifest['sources']
     if not bounds['min']<=len(sources)<=bounds['max']:reasons.append(f"需要 {bounds['min']}–{bounds['max']} 个来源")
@@ -121,10 +149,9 @@ def blockers(manifest,sources,location='local'):
             if not (source['state']=='COMPLETED' if required=='COMPLETED' else source['evidence'].get(required) is True):
                 reasons.append(source['name']+'：缺少 '+required+' 证据')
         for role in manifest['inputs']:
-            files={f['name']:f for f in source['files']}
-            selected=source['chosen_files'].get(role['role'])
-            names=[selected] if selected else role['names']
-            candidate=next((files.get(n) for n in names if n in role['names'] and files.get(n)),None)
+            try:candidate=selected_input(role,source)
+            except ValueError as exc:reasons.append(source['name']+'：'+str(exc));continue
+            if candidate is None and not role.get('required',True):continue
             if not candidate or not 0<candidate['size_bytes']<=role['max_bytes']:
                 reasons.append(source['name']+'：缺少有效 '+role['title'])
             elif location=='local' and candidate['size_bytes']>artifacts.MAX_PULL_BYTES:reasons.append(source['name']+'：'+candidate['name']+' 超过 10 MiB，请在远端运行')
@@ -148,11 +175,12 @@ def context(payload):
 def _input_request(record,dest):
     inputs={r['role']:[] for r in record['manifest']['inputs']}
     for index,source in enumerate(record['sources']):
-        files={f['name']:f for f in source['files']}
         for role in record['manifest']['inputs']:
-            selected=source['chosen_files'].get(role['role'])
-            name=selected or next(n for n in role['names'] if n in files)
-            fact=files[name];target=dest/'inputs'/(str(index)+'-'+role['role']+'-'+name);target.parent.mkdir(parents=True,exist_ok=True)
+            fact=selected_input(role,source)
+            if fact is None:
+                if role.get('required',True):raise ValueError('缺少 '+role['title'])
+                continue
+            name=fact['name'];target=dest/'inputs'/(str(index)+'-'+role['role']+'-'+name);target.parent.mkdir(parents=True,exist_ok=True)
             item={'name':name,'source_id':source['id'],'path':str(target),'size_bytes':fact['size_bytes']}
             if source['kind']=='structure':target.write_text(source['poscar'])
             elif record['location']=='local':
@@ -164,7 +192,7 @@ def _input_request(record,dest):
                 item['mtime_epoch']=int(datetime.fromisoformat(fact['modified_at']).timestamp())
             inputs[role['role']].append(item)
     sources=[{k:v for k,v in s.items() if k not in ('poscar','chosen_files')} for s in record['sources']]
-    return {'schema':p.REQUEST,'analysis_id':record['id'],'inputs':inputs,'sources':sources,'options':record['options'],
+    return {'schema':p.REQUEST,'analysis_id':record['id'],'inputs':{k:v for k,v in inputs.items() if v},'sources':sources,'options':record['options'],
             'output_dir':str(dest/'outputs'),'result_file':str(dest/'outputs/result.json')}
 
 

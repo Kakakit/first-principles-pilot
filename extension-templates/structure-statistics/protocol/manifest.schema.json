@@ -110,6 +110,10 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 1099511627776
+          },
+          "required": {
+            "type": "boolean",
+            "default": true
           }
         }
       }
@@ -140,6 +144,14 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 86400
+        },
+        "preferred_location": {
+          "enum": [
+            "local",
+            "ssh",
+            "scheduler"
+          ],
+          "default": "local"
         }
       }
     },

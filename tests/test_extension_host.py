@@ -217,4 +217,73 @@ class ExtensionHostTests(unittest.TestCase):
         with patch.object(remote,'inspect',return_value={'job_id':'731.server','exit':{'exit_code':4},'doctor':{'ready':False,'missing':['numpy']}}):result=runs.refresh(record['id'])
         self.assertEqual(result['state'],'FAILED');self.assertIn('numpy',result['error'])
 
+    def test_optional_inputs_are_associated_by_source_and_required_defaults_stay_compatible(self):
+        manifest=copy.deepcopy(p.inspect_package(TEMPLATE)['manifest']);manifest['sources']['max']=2
+        manifest['inputs'].append({'role':'extra-file','title':'可选文件','names':['EXTRA'],'max_bytes':100,'required':False})
+        sources=[{'id':'aa','kind':'structure','stage':'structure','name':'a','state':'DRAFT','evidence':{},'chosen_files':{},'poscar':SI,'files':[{'name':'POSCAR','size_bytes':len(SI.encode())}]},{'id':'bb','kind':'structure','stage':'structure','name':'b','state':'DRAFT','evidence':{},'chosen_files':{},'poscar':SI,'files':[{'name':'POSCAR','size_bytes':len(SI.encode())},{'name':'EXTRA','size_bytes':len(SI.encode())}]}]
+        manifest['inputs'][1]['max_bytes']=10000
+        self.assertEqual(runs.blockers(manifest,sources),[])
+        record={'id':'a'*32,'manifest':manifest,'sources':sources,'location':'local','options':{}}
+        req=runs._input_request(record,self.root/'request');self.assertEqual([i['source_id'] for i in req['inputs']['extra-file']],['bb'])
+        sources[1]['chosen_files']={'extra-file':''};req=runs._input_request(record,self.root/'request2');self.assertNotIn('extra-file',req['inputs'])
+        sources[0]['chosen_files']={'structure':'bogus'};self.assertTrue(any('选择无效' in r for r in runs.blockers(manifest,sources)))
+        sources[0]['chosen_files']={};sources[0]['files']=[];self.assertTrue(any('缺少有效' in r for r in runs.blockers(manifest,sources)))
+        package=self.root/'optional';shutil.copytree(TEMPLATE,package);p.atomic_json(package/'extension.manifest.json',manifest);self.assertIn('extra-file',[r['role'] for r in p.inspect_package(package)['manifest']['inputs']])
+        manifest['inputs'][1]['required']='false';p.atomic_json(package/'extension.manifest.json',manifest)
+        with self.assertRaisesRegex(ValueError,'required'):p.inspect_package(package)
+
+    def test_preferred_location_is_optional_and_validated(self):
+        package=self.root/'preferred';shutil.copytree(TEMPLATE,package);manifest=p.inspect_package(package)['manifest'];self.assertNotIn('preferred_location',manifest['execution'])
+        manifest['execution']['preferred_location']='ssh';p.atomic_json(package/'extension.manifest.json',manifest);self.assertEqual(p.inspect_package(package)['manifest']['execution']['preferred_location'],'ssh')
+        manifest['execution']['preferred_location']='unknown';p.atomic_json(package/'extension.manifest.json',manifest)
+        with self.assertRaisesRegex(ValueError,'优先'):p.inspect_package(package)
+
+    def test_tb2j_ssh_freezes_options_runs_once_without_scheduler_and_keeps_downloads_after_uninstall(self):
+        import os
+        from tests.test_tb2j_extension import module as tb
+        self.stack.enter_context(patch.dict(os.environ,{'PYTHONPATH':str(tb.FAKE)}))
+        installed=self.install('tb2j');self.assertTrue(installed['enabled']);self.assertEqual(installed['execution']['preferred_location'],'ssh')
+        req=tb.request(self.root/'source');source=req['sources'][0];key=source['id'];source['alias']='jutai-1';source['input_summary']['energy_reference']['host']='jutai-1'
+        files={key:{i['name']:Path(i['path']).read_bytes() for values in req['inputs'].values() for i in values}}
+        self.mock_attempts(files,stage='wannier90',evidence={'wannier_all_done':True})
+        frozen={'id':key,'kind':'wannier90','project_id':'project','node_id':'w90-node','state':'COMPLETED','config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','evidence':{'wannier_all_done':True},'seed':'wannier90','parent_attempt_id':'parent','source_snapshot':{'seed':'wannier90','spinors':True,'parameters':{'num_wann':8}},'live_energy_reference':source['input_summary']['energy_reference']}
+        self.stack.enter_context(patch.object(ex,'get',return_value=frozen));self.runtime();runtime=remote.runtimes()['jutai-1'];runtime.update(node='',cores=None,reason='');p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
+        payload={'extension_id':'tb2j','project_id':'project','sources':[{'kind':'attempt','attempt_id':key}],'options':req['options'],'location':'ssh','alias':'jutai-1'}
+        with patch.object(remote,'resource_preview',side_effect=AssertionError('no node probe in direct SSH')):
+            preview=runs.preview(payload);payload['preview_id']=preview['preview_id'];receipt=runs.start(payload)
+        analysis=receipt['analysis_id'];payload['options']['nz']=999
+        remote_dir=self.root/'simulated-server'
+        def stage(record,dest,request):
+            shutil.copytree(dest,remote_dir);request=copy.deepcopy(request);request['output_dir']=str(remote_dir/'outputs');request['result_file']=str(remote_dir/'outputs/result.json')
+            for values in request['inputs'].values():
+                for item in values:
+                    target=remote_dir/'inputs'/Path(item['path']).name;target.parent.mkdir(exist_ok=True);target.write_bytes(files[item['source_id']][item['name']]);item['path']=str(target)
+            p.atomic_json(remote_dir/'request.json',request);return str(remote_dir)
+        def direct(record):
+            response=subprocess.run(['bash',str(remote_dir/'launch.sh')],capture_output=True,text=True,timeout=35);return {'exit_code':response.returncode,'stdout':response.stdout,'stderr':response.stderr}
+        def ssh(alias,command,data=None,timeout=None,**kwargs):
+            self.assertNotIn('qsub',command);self.assertNotIn('sbatch',command);response=subprocess.run(['bash','-c',command],capture_output=True,text=True);return {'exit_code':response.returncode,'stdout':response.stdout,'stderr':response.stderr}
+        def pull(record,name,target):target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(remote_dir/name,target);return target
+        original=remote.script
+        with patch.object(remote,'stage',side_effect=stage),patch.object(remote,'direct',side_effect=direct) as dispatch,patch.object(ex,'ssh',side_effect=ssh),patch.object(remote,'pull',side_effect=pull),patch.object(remote,'submit',side_effect=AssertionError('no scheduler submission')),patch.object(remote,'resource_preview',side_effect=AssertionError('no capacity probe')),patch.object(remote,'script',side_effect=lambda runtime,directory,entry,mode,cores,timeout:original(runtime,str(remote_dir),entry,mode,cores,timeout)):
+            runs._execute(analysis);runs._execute(analysis);self.assertEqual(dispatch.call_count,1)
+        record=runs.get(analysis);self.assertEqual(record['state'],'COMPLETED',record.get('error'));self.assertEqual(record['options']['nz'],100);self.assertNotIn('requested_cores',record);self.assertNotIn('job_id',record)
+        self.assertEqual(record['sources'][0]['input_summary']['parent_attempt_id'],'parent');self.assertEqual(record['result']['tables'][0]['rows'][0]['atom_j'],3)
+        p.enable('tb2j',False);self.assertFalse(runs.context(payload)['extensions']);p.uninstall('tb2j');self.assertTrue(runs.output(analysis,'exchange.csv')[0].is_file());self.assertEqual(runs.history('project')[0]['id'],analysis)
+
+    def test_tb2j_direct_unknown_is_only_reconciled_and_never_reexecuted(self):
+        payload=self.remote_payload('ssh');receipt=runs.start(payload);key=receipt['analysis_id']
+        with patch.object(remote,'stage',return_value='/workspace/analyses/'+key),patch.object(remote,'direct',side_effect=ValueError('SSH disconnected')) as dispatch:
+            runs._execute(key);runs._execute(key);self.assertEqual(dispatch.call_count,1)
+        self.assertEqual(runs.get(key)['state'],'UNKNOWN')
+        with patch.object(remote,'inspect',return_value={'exit':None,'job_id':None}),patch.object(remote,'direct') as dispatch:runs.refresh(key);dispatch.assert_not_called()
+        self.assertEqual(runs.get(key)['state'],'UNKNOWN')
+
+    def test_wannier_summary_uses_frozen_bundle_num_wann_parent_and_energy(self):
+        key='b'*64;energy={'fermi_eV':3.25,'attempt_id':'parent','host':'site'}
+        p.atomic_json(self.root/'wannier-bundles'/(key+'.json'),{'win':'num_wann = 24\nspinors = true','seed':'wannier90','parent_attempt_id':'parent','spinors':True,'energy_reference':energy})
+        record={'kind':'wannier90','stage':'wannier90','bundle_id':key,'live_energy_reference':{'fermi_eV':999},'source_snapshot':{'parameters':{'num_iter':'100'}}}
+        stage,summary=runs._stage(record);self.assertEqual(stage,'wannier90');self.assertEqual(summary['num_wann'],24);self.assertEqual(summary['parent_attempt_id'],'parent');self.assertEqual(summary['energy_reference'],energy)
+        summary['energy_reference']['fermi_eV']=8;self.assertEqual(json.loads((self.root/'wannier-bundles'/(key+'.json')).read_text())['energy_reference']['fermi_eV'],3.25)
+
 if __name__=='__main__':unittest.main()

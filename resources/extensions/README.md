@@ -1,6 +1,8 @@
 # First-principles extensions
 
-This directory is the formal home for reusable analysis or calculation extensions. It keeps scripts grouped by method and system instead of flattening them into the plugin root.
+This directory contains reusable analysis or calculation extensions. New packages use `extension.manifest.json` and an independent doctor/check/run CLI: see the [v2 protocol](../../docs/extensions-b/PROTOCOL.md) and `extension-templates/structure-statistics`. TB2J v2 supports installation, enable/disable and removal, and defaults to direct CLI execution on the source server.
+
+The legacy `extension.json` discovery instructions below remain for compatibility.
 
 ## Discovery and module contract
 

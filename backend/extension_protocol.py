@@ -93,15 +93,18 @@ def inspect_package(root):
     roles = manifest['inputs']
     if not isinstance(roles,list) or not roles or len(roles)>16: raise ValueError('输入角色须为非空有限列表')
     for role in roles:
-        if not isinstance(role,dict) or set(role) != {'role','title','names','max_bytes'} or not ID.fullmatch(role.get('role','')):
+        if not isinstance(role,dict) or not {'role','title','names','max_bytes'} <= set(role) or set(role) - {'role','title','names','max_bytes','required'} or not ID.fullmatch(role.get('role','')):
             raise ValueError('输入角色定义无效')
+        if type(role.get('required',True)) is not bool: raise ValueError('输入 required 须为 boolean')
         if not isinstance(role['names'],list) or not role['names'] or any(not isinstance(n,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}',n) for n in role['names']): raise ValueError('输入产物名称无效')
         if type(role['max_bytes']) is not int or not 0 < role['max_bytes'] <= 1024**4: raise ValueError('输入大小上限无效')
     if len({r['role'] for r in roles}) != len(roles): raise ValueError('输入角色重复')
     if not isinstance(manifest['evidence'],list) or any(not isinstance(s,str) for s in manifest['evidence']): raise ValueError('证据声明无效')
     execution = manifest['execution']
-    if not isinstance(execution,dict) or set(execution) != {'locations','timeout_seconds'} or not execution['locations'] or not set(execution['locations']) <= MODES or type(execution['timeout_seconds']) is not int or not 1 <= execution['timeout_seconds'] <= 86400:
+    if not isinstance(execution,dict) or not {'locations','timeout_seconds'} <= set(execution) or set(execution) - {'locations','timeout_seconds','preferred_location'} or not execution['locations'] or not set(execution['locations']) <= MODES or type(execution['timeout_seconds']) is not int or not 1 <= execution['timeout_seconds'] <= 86400:
         raise ValueError('运行位置或超时无效')
+    if execution.get('preferred_location','local') not in MODES or ('preferred_location' in execution and execution['preferred_location'] not in execution['locations']):
+        raise ValueError('优先运行位置须在支持列表中')
     deps = manifest['dependencies']
     if not isinstance(deps,list) or any(not isinstance(d,str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_.]*',d) for d in deps): raise ValueError('依赖模块名称无效')
     schema = manifest['options_schema']; _local_refs(schema)

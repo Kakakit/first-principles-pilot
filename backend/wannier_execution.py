@@ -44,6 +44,7 @@ PARAMETERS = {
     'dis_froz_min': ('冻结窗下界', 'number', 'eV'),
     'dis_froz_max': ('冻结窗上界', 'number', 'eV'),
     'write_hr': ('输出 Hamiltonian', 'boolean', ''),
+    'write_xyz': ('输出 Wannier 中心（TB2J hr 所需）', 'boolean', ''),
 }
 WINDOW_TAGS = ('dis_win_min', 'dis_win_max', 'dis_froz_min', 'dis_froz_max')
 
