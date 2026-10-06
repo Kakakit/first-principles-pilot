@@ -17,7 +17,7 @@ from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 from pathlib import Path
 from jsonschema import Draft7Validator
-from . import artifacts, execution as ex, extension_protocol as p, extension_remote as remote
+from . import artifacts, execution as ex, extension_protocol as p, extension_remote as remote, extension_environments as environments
 from .recycle import is_recycled, inactive, assert_available
 from .storage import ROOT
 from .platform_runtime import exclusive_lock, process_alive, stop_child
@@ -170,9 +170,15 @@ def context(payload):
         # Stage/role filtering comes only from the manifest, never an ID branch.
         if any(s['kind'] not in item['contexts'] or item['stages'] and s['stage'] not in item['stages'] for s in sources):continue
         reasons=blockers(item,sources,payload.get('location','local'))
-        if payload.get('location','local')=='local' and not (item.get('doctor') or {}).get('ready'):
-            reasons.append('本机缺依赖：'+', '.join((item.get('doctor') or {}).get('missing') or ['请重新检查环境']))
-        rows.append({**item,'blockers':reasons})
+        runtime=None;environment=None;location=payload.get('location','local')
+        if location in item['execution']['locations']:
+            try:
+                runtime=environments.resolve(item['id'],location,payload.get('alias',''))
+                if location=='local':
+                    environment=p.doctor(p.installed(item['id']),python=runtime['python'])
+                    if not environment['ready']:reasons.append('本机缺依赖或 Python 不可用：'+', '.join(environment.get('missing') or [environment.get('reason') or '请重新检查环境']))
+            except ValueError as exc:reasons.append(str(exc))
+        rows.append({**item,'blockers':reasons,'runtime':runtime,'runtime_doctor':environment})
     return {'extensions':rows,'sources':[{k:v for k,v in s.items() if k!='poscar'} for s in sources]}
 
 
@@ -207,24 +213,24 @@ def start(payload):
     location=payload.get('location','local');sources=describe_sources(payload['sources'],payload.get('project_id'))
     reasons=blockers(manifest,sources,location)
     if reasons:raise ValueError('；'.join(reasons))
-    runtime=None
-    if location!='local':
-        runtime=remote.runtimes().get(payload.get('alias'))
-        if not runtime:raise ValueError('请先在扩展管理保存此主机的已有 Python 运行时')
+    runtime=environments.resolve(manifest['id'],location,payload.get('alias',''))
+    environments.expected(runtime,payload)
+    if location!='local' or payload.get('preview_id'):
         approval=json.loads((ROOT/'analysis-previews'/(payload.get('preview_id','')+'.json')).read_text()) if __import__('re').fullmatch(r'[a-f0-9]{32}',payload.get('preview_id','')) else None
         binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
-        if not approval or approval['binding']!=binding or (datetime.now(timezone.utc)-datetime.fromisoformat(approval['created_at'])).total_seconds()>600:raise ValueError('请重新预览当前来源、选项和远端运行脚本')
+        if not approval or approval['binding']!=binding or (datetime.now(timezone.utc)-datetime.fromisoformat(approval['created_at'])).total_seconds()>600:raise ValueError('请重新预览当前来源、选项和运行环境')
         runtime=copy.deepcopy(runtime)
         if location=='scheduler':
             runtime['cores']=approval['resources']['selection']['requested_cores']
             runtime['reason']=runtime['reason'] or '沿用用户已审阅脚本的核数，不扩大资源'
-        if any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
-    if location=='local' and not p.doctor(receipt)['ready']:raise ValueError('本地环境未满足，请检查依赖')
+        if location!='local' and any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
+    environment=p.doctor(receipt,refresh=True,python=runtime['python']) if location=='local' else None
+    if environment is not None and not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     key=uuid.uuid4().hex;dest=directory(key);dest.mkdir(parents=True)
     shutil.copytree(receipt['root'],dest/'package',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
     record={'schema':'fpilot.analysis.v2','id':key,'project_id':payload.get('project_id') or 'geometry',
             'extension_id':manifest['id'],'manifest':manifest,'revision':receipt['revision'],'sources':sources,'options':options,
-            'location':location,'runtime':runtime,'state':'QUEUED','created_at':now(),'result':None,'outputs':[],
+            'location':location,'runtime':runtime,'runtime_doctor':environment,'state':'QUEUED','created_at':now(),'result':None,'outputs':[],
             'scientific_validation':'NOT_PERFORMED','verification':'小型本地输入内容身份；远端输入来源与大小/修改时间核验'}
     save(record);schedule(key)
     return {'analysis_id':key,'state':'QUEUED'}
@@ -272,11 +278,14 @@ def check(payload):
     sources=describe_sources(payload['sources'],payload.get('project_id'))
     reasons=blockers(manifest,sources,payload.get('location','local'))
     if reasons:return {'status':'NOT_APPLICABLE','reason':'；'.join(reasons)}
+    runtime=environments.resolve(manifest['id'],payload.get('location','local'),payload.get('alias',''));environments.expected(runtime,payload)
     if payload.get('location','local')!='local':return {'status':'PENDING_REMOTE','reason':'文件清单适用；远端环境和内容检查将在独立分析目录执行'}
+    environment=p.doctor(receipt,refresh=True,python=runtime['python'])
+    if not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     with tempfile.TemporaryDirectory(prefix='fpilot-analysis-check-') as temporary:
         dest=Path(temporary);record={'id':'check','manifest':manifest,'sources':sources,'options':options,'location':'local'}
         request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
-        return _check_result(p.invoke(receipt['root'],'check',dest/'request.json',timeout=min(manifest['execution']['timeout_seconds'],60)))
+        return _check_result(p.invoke(receipt['root'],'check',dest/'request.json',python=runtime['python'],timeout=min(manifest['execution']['timeout_seconds'],60)))
 
 
 def _check_result(value):
@@ -288,13 +297,16 @@ def _check_result(value):
 def _local(record):
     assert_available('analyses',record['id'],record)
     dest=directory(record['id']);record.update(state='RUNNING',owner_pid=os.getpid());save(record)
+    python=(record.get('runtime') or {}).get('python') or sys.executable
+    environment=p.doctor(p.inspect_package(dest/'package'),refresh=True,python=python);record['runtime_doctor']=environment;save(record)
+    if not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
-    checked=_check_result(p.invoke(dest/'package','check',dest/'request.json',timeout=min(record['manifest']['execution']['timeout_seconds'],60)))
+    checked=_check_result(p.invoke(dest/'package','check',dest/'request.json',python=python,timeout=min(record['manifest']['execution']['timeout_seconds'],60)))
     assert_available('analyses',record['id'],record)
     record['check']=checked;save(record)
     if checked['status']!='APPLICABLE':record.update(state='NOT_APPLICABLE',error=checked['reason']);save(record);return
     with (dest/'stdout.log').open('w') as stdout,(dest/'stderr.log').open('w') as stderr:
-        process=subprocess.Popen([sys.executable,str(p.inside(dest/'package',record['manifest']['entrypoint'])),'run','--request',str(dest/'request.json')],cwd=dest,stdout=stdout,stderr=stderr,start_new_session=True,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'})
+        process=subprocess.Popen([python,str(p.inside(dest/'package',record['manifest']['entrypoint'])),'run','--request',str(dest/'request.json')],cwd=dest,stdout=stdout,stderr=stderr,start_new_session=True,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'})
         with _process_lock:_local_processes[record['id']]=process
         try:
             if inactive('analyses',record['id'],record):stop_local(record['id'])
@@ -325,6 +337,9 @@ def _collect(record):
 
 def _refresh(record):
     receipt=remote.inspect(record)
+    if receipt.get('doctor'):
+        receipt['doctor']=p.doctor_result(receipt['doctor'],record['runtime']['python'])
+        record['runtime_doctor']=receipt['doctor']
     if receipt.get('job_id'):
         job=receipt['job_id']
         if not __import__('re').fullmatch(r'\d+(?:\.[A-Za-z0-9_.-]+)?',job) or record.get('job_id') and record['job_id']!=job:raise ValueError('分析 job ID 回执不一致')
@@ -432,9 +447,11 @@ def preview(payload):
     sources=describe_sources(payload['sources'],payload.get('project_id'));options=p.options_for(manifest,payload.get('options') or {})
     location=payload.get('location','local');reasons=blockers(manifest,sources,location)
     if reasons:raise ValueError('；'.join(reasons))
-    if location=='local':return {'ready':True,'reason':'使用本机登记解释器，在独立目录运行'}
-    runtime=remote.runtimes().get(payload.get('alias'))
-    if not runtime:raise ValueError('请先保存远端已有 Python 运行时')
+    runtime=environments.resolve(manifest['id'],location,payload.get('alias',''));environments.expected(runtime,payload)
+    if location=='local':
+        key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
+        p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':{'ready':True}})
+        return {'preview_id':key,'ready':True,'runtime':runtime,'reason':'使用选定本地解释器，在独立目录运行'}
     if any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
     resources=remote.resource_preview(runtime) if location=='scheduler' else {'ready':True}
     if not resources['ready']:return resources

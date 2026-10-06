@@ -39,7 +39,7 @@ python scripts/cli.py check --request /absolute/request.json
 python scripts/cli.py run --request /absolute/request.json
 ```
 
-doctor 在 stdout 返回单个 JSON：`schema=fpilot.extension-doctor.v2`、布尔 `ready`、`missing` 模块列表和可选原因。check 返回 `schema=fpilot.extension-check.v2`、`status=APPLICABLE/NOT_APPLICABLE`、`reason`。stdout 不混入其他文字，诊断写 stderr。run 将结果写到请求的 `result_file`，正常结束返回 0；非零退出不能视为完成。
+doctor 在 stdout 返回单个 JSON：`schema=fpilot.extension-doctor.v2`、布尔 `ready`、`missing` 模块列表和可选原因。推荐同时返回 `python`（实际解释器路径）、`python_version`、`versions`（模块名称到版本的映射）；科学程序版本也可用 `version` 返回。检查实际模块导入，不能把残留安装元数据当作可用。旧 helper 将 Python 版本放在 python 字段的回执仍兼容。check 返回 `schema=fpilot.extension-check.v2`、`status=APPLICABLE/NOT_APPLICABLE`、`reason`。stdout 不混入其他文字，诊断写 stderr。run 将结果写到请求的 `result_file`，正常结束返回 0；非零退出不能视为完成。
 
 请求 `fpilot.extension-request.v2` 包含 `analysis_id`、`inputs`、`sources`、`options`、`output_dir`、`result_file`。`inputs.<role>` 按来源顺序排列，每项给出 `path/name/source_id/size_bytes`，可能附小文件 sha256。可选角色可能只有部分来源，或整个键缺省；扩展须按 source_id 关联，不能按数组下标配对。path 均为本次独立副本，扩展只向 output_dir 写文件。
 
@@ -62,11 +62,26 @@ sources 是宿主冻结的来源摘要，包含具体 attempt、节点、主机�
 
 ## 本机、SSH 与调度运行
 
-本机使用当前登记解释器。来源 attempt 的单个文件仅经受控工具回传，必须是已知大小、非空、普通文件且不超过 10 MiB；大文件应选择远端运行。草稿结构保存独立副本。本机 run 超时停止整个独立子进程组，失败保留日志。
+界面按“本地运行 / 服务器运行”组织，一个扩展可支持两边；仍由 execution.locations 和 preferred_location 声明能力和默认位置，不新增互斥类型。本地使用“本地默认 Python”，未配置时沿用工作台解释器。每台服务器使用原 runtimes 登记作为服务器默认环境。扩展可按本地或具体服务器单独指定 Python；ssh 与 scheduler 共用该服务器覆盖。覆盖优先于默认，恢复默认会清除覆盖。环境配置保存在本机数据的 extensions-v2/runtime-bindings.json，不进入扩展包或 GitHub。
+
+环境选择只影响扩展子进程，不改变工作台启动环境。直接调用 Python 绝对路径，[无需 activate](https://docs.python.org/3/library/venv.html#how-venvs-work)。不自动安装、升级或创建环境。不存在的覆盖路径明确失败，不能静默回退。来源 attempt 的单个文件仅经受控工具回传，必须是已知大小、非空、普通文件且不超过 10 MiB；大文件应选择远端运行。草稿结构保存独立副本。本机 run 超时停止整个独立子进程组，失败保留日志。
 
 远端运行时登记已有 SSH 别名、Python 绝对路径和工作区，不创建环境。SSH 可以直接执行扩展并等待，节点/核数可留空；只有声明 scheduler 并选择调度的扩展使用 PBS/Slurm。TB2J 默认 SSH + 来源服务器已有 Python，无调度节点检测或调度核数预算。预览绑定来源、选项、包版本和运行时，10 分钟内点击“按此来源与脚本运行”。调度派发前核对实时容量和额度；资源不足等待，离线或配置错误报错。
 
 远端独立目录位于 `<remote_workspace_root>/analyses/<analysis_id>`。原计算文件只读，使用普通独立复制并核对源文件大小/修改时间和目标大小，不建立可写硬链接、不扫描大文件 SHA。此策略不声称内容完全一致。来源元数据变化使准备失败。
+
+“检查所选环境”使用指定解释器只执行扩展 doctor，远端小包保存在 `<remote_workspace_root>/extension-checks/<check_id>`，不读取计算来源、不运行分析、不探测容量或提交作业。检查结果与启用状态分开。一个环境缺依赖只阻止该环境执行，参数仍可编辑。
+
+doctor → check → run 全程使用同一解释器。创建分析时冻结实际 Python、服务器配置、参数、扩展包；实际执行的 doctor 版本回执保存到 runtime_doctor。修改默认或覆盖使旧预览不再匹配，须重新检查或预览；已创建记录继续使用自己的冻结配置。旧本地历史未记录解释器时界面显示“未记录”，不按当前默认补填。UNKNOWN 仍只核查原记录，不重执行。
+
+## 环境 API 与兼容
+
+- `GET /api/extension-host/runtimes` 保留原 `runtimes`、`aliases`，新增 `local:{python,inherited,scope}` 和 `overrides:{extension_id:{local?,remote?:{alias:python}}}`。local.inherited 表示是否沿用工作台解释器；执行解析后 inherited 表示是否继承默认环境。
+- `PUT /api/extension-host/runtimes/local` 接收 `{python:"/absolute/python"}`；`python:null` 恢复工作台解释器。
+- 原 `PUT /api/extension-host/runtimes` 的服务器登记字段保持不变。
+- `PUT /api/extension-host/packages/{id}/runtime` 接收 `{scope:"local",python:"/absolute/python"}`，或 `{scope:"remote",alias:"source-server",python:"/absolute/python"}`；python:null 清除此范围的覆盖。
+- `POST /api/extension-host/packages/{id}/doctor` 可接收 `{location:"local"}` 或 `{location:"ssh",alias:"source-server"}`（也支持 scheduler）。返回 runtime 和 doctor；无请求体的旧调用仍检查所选本地默认/覆盖环境。
+- check、preview、analyses 可携带 `runtime_python`；与当前解析路径不符时拒绝旧选择。远端预览继续绑定整个运行配置；本地预览也可返回 preview_id，提交时若携带则核对冻结绑定。旧本地直接运行请求保持兼容。
 
 脚本顺序为 doctor→check→run，记录 doctor.json/check.json、日志和原子 exit.json；doctor/check 最多 30/60 秒，run 使用清单超时，超时停止子进程组并写退出码 124。调度器另受用户 walltime 限制。SSH 连接等待最多 900 秒；连接中断或调度器提前终止而没有结束回执时记 UNKNOWN，只核对原目录/精确 job ID，不重投。缺依赖、输入不适用、非零退出分别记 FAILED、NOT_APPLICABLE、FAILED。
 
@@ -74,7 +89,7 @@ sources 是宿主冻结的来源摘要，包含具体 attempt、节点、主机�
 
 ## 生命周期与依赖选择
 
-安装复制包并按小包内容形成 revision；清单和 doctor 按版本/已有解释器缓存。首次安装本机环境满足即启用；缺本机依赖时保留停用记录。允许远端运行的包可显式启用，远端 doctor 将在独立目录核对。重新检查刷新环境状态；停用立即移出可运行动作。卸载取消登记并移入 extensions-v2/recycle，历史 analyses-v2 中的包、请求、日志、报告和产物保留。已创建的分析继续使用自己的冻结包。
+安装复制包并按小包内容形成 revision；清单和 doctor 按版本/所选解释器缓存。“导入并启用”在包验证通过后启用，依赖检查单独保存，缺依赖不自动停用；旧安装/启用状态保留。重新检查只刷新所选环境，停用立即移出可运行动作。卸载取消登记并移入 extensions-v2/recycle，历史 analyses-v2 中的包、请求、日志、报告和产物保留。已创建的分析继续使用自己的冻结包与 Python。
 
 前端薄接 [react-jsonschema-form 6.11.0](https://rjsf-team.github.io/react-jsonschema-form/docs/quickstart/)（Apache-2.0），按需加载表单；后端使用 [jsonschema 4.25.1](https://github.com/python-jsonschema/jsonschema/blob/v4.25.1/pyproject.toml)（MIT，Python 3.9）。两者按锁定版本使用，不自建表单/JSON Schema 引擎。用户扩展自己的算法许可须随包保存。
 

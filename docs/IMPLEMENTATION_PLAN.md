@@ -1,8 +1,12 @@
 # 后续具体实施方案
 
+## 2026-10-06：扩展运行位置与 Python 环境（已实施）
+
+已实现本地/服务器分类、默认环境＋扩展覆盖、按目标 doctor、同一 Python 的执行和冻结配置。旧远端默认字段、安装状态和历史保留，启用与依赖分开。两套已有解释器、隔离 UI/API、全量回归及构建已验收；不创建环境、不重跑研究计算、不发布运行 ZIP。用法与证据见 [环境验收](extensions-b/ENVIRONMENTS_ACCEPTANCE.md)，接口见 [协议](extensions-b/PROTOCOL.md)。
+
 ## 2026-10-06：TB2J v2 独立扩展（已实施）
 
-按用户最终要求，TB2J 使用来源服务器直接命令行执行并等待，默认不检测节点、不填写调度核数、不提交 PBS/Slurm。表单参数冻结后由独立扩展构造官方 CLI argv；主体只补充通用可选角色、优先运行位置与冻结 Wannier 来源摘要。已接入扩展管理、Wannier 结果页、参数表单、CSV/JSON 和分析历史，旧入口兼容。正式本机扩展已安装启用，远端环境与真实科学计算尚未验收；本轮不恢复现有队列、不发布运行 ZIP。证据见 [TB2J 验收](extensions-b/TB2J_ACCEPTANCE.md)，用法见 [扩展指南](../resources/extensions/tb2j/README.md)。
+按用户最终要求，TB2J 使用来源服务器直接命令行执行并等待，默认不检测节点、不填写调度核数、不提交 PBS/Slurm。表单参数冻结后由独立扩展构造官方 CLI argv；主体只补充通用可选角色、优先运行位置与冻结 Wannier 来源摘要。已接入扩展管理、Wannier 结果页、参数表单、CSV/JSON 和分析历史，旧入口兼容。后续已修复参数交互并完成共线/SOC 实跑与导出一致性验收，数值收敛和物理验证未完成；本轮不重跑、不恢复队列、不发布运行 ZIP。证据见 [TB2J 验收](extensions-b/TB2J_ACCEPTANCE.md)、[交互与实跑](extensions-b/TB2J_INTERACTION_ACCEPTANCE.md)，用法见 [扩展指南](../resources/extensions/tb2j/README.md)。
 
 ## 2026-10-05：服务器首次配置、脚本库与提交交互（已实施）
 

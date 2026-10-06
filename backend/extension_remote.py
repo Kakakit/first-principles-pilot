@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import uuid
 from pathlib import Path
 from . import execution as ex, remote_paths, servers
 from . import extension_protocol as protocol
@@ -33,6 +34,28 @@ def save_runtime(value):
     if value['cores'] is not None and (type(value['cores']) is not int or value['cores']<1): raise ValueError('核数须为正整数或默认')
     result=runtimes(); result[value['alias']]=value; protocol.atomic_json(ROOT/'extensions-v2/runtimes.json',result)
     return value
+
+
+def cli_command(runtime,entrypoint,action,seconds):
+    runner="import os,signal,subprocess,sys; p=subprocess.Popen(sys.argv[2:],start_new_session=True)\ntry: code=p.wait(timeout=int(sys.argv[1]))\nexcept subprocess.TimeoutExpired:\n os.killpg(p.pid,signal.SIGKILL); p.wait(); print('Extension CLI timeout; process group stopped',file=sys.stderr); code=124\nsys.exit(code)"
+    return ' '.join(shlex.quote(str(s)) for s in [runtime['python'],'-c',runner,seconds,runtime['python'],'package/'+entrypoint,action])
+
+
+def doctor(receipt,runtime):
+    """Run only doctor in an isolated small-package directory; never dispatch."""
+    directory=remote_paths.validate_root(runtime['config'].get('remote_workspace_root')).rstrip('/')+'/extension-checks/'+uuid.uuid4().hex
+    stream=io.BytesIO()
+    with tarfile.open(fileobj=stream,mode='w:gz') as archive:
+        archive.add(receipt['root'],arcname='package',filter=lambda info:None if '__pycache__' in info.name else info)
+    command='set -e\ndest='+remote_paths.shell_path(directory)+'\ntest ! -e "$dest"\nmkdir -p "$dest"\ntar -xzf - -C "$dest"\ncd "$dest"\nexport PYTHONDONTWRITEBYTECODE=1\n'+cli_command(runtime,receipt['manifest']['entrypoint'],'doctor',30)+'\n'
+    try:
+        response=ex.ssh(runtime['alias'],command,stream.getvalue(),timeout=75)
+        if response.get('exit_code')!=0:raise ValueError(response.get('stderr') or '服务器环境检查失败')
+        result=json.loads(response['stdout'])
+        if result.get('schema')!='fpilot.extension-doctor.v2' or type(result.get('ready')) is not bool:raise ValueError('doctor 回执格式无效')
+        return protocol.doctor_result(result,runtime['python'])
+    except Exception as exc:
+        return {'schema':'fpilot.extension-doctor.v2','ready':False,'python':runtime['python'],'missing':[],'reason':str(exc)[-1500:]}
 
 
 def resource_preview(runtime):
@@ -68,9 +91,8 @@ def script(runtime, directory, entrypoint, mode, cores=None, timeout=300):
             header += ['#PBS -N fp_analysis','#PBS -q '+config['queue'],'#PBS -l nodes='+runtime['node']+':ppn='+str(cores),'#PBS -l walltime='+config['walltime']]
         else:
             header += ['#SBATCH --job-name=fp_analysis','#SBATCH --partition='+config['queue'],'#SBATCH --nodelist='+runtime['node'],'#SBATCH --cpus-per-task='+str(cores),'#SBATCH --time='+config['walltime']]
-    runner="import os,signal,subprocess,sys; p=subprocess.Popen(sys.argv[2:],start_new_session=True)\ntry: code=p.wait(timeout=int(sys.argv[1]))\nexcept subprocess.TimeoutExpired:\n os.killpg(p.pid,signal.SIGKILL); p.wait(); print('Extension CLI timeout; process group stopped',file=sys.stderr); code=124\nsys.exit(code)"
     def command(action, seconds):
-        return ' '.join(shlex.quote(str(s)) for s in [runtime['python'],'-c',runner,seconds,runtime['python'],'package/'+entrypoint,action])
+        return cli_command(runtime,entrypoint,action,seconds)
     # Keep command failures observable: errexit would skip the durable exit receipt.
     header += ['set -u','cd '+remote_paths.shell_path(directory)+' || exit "$?"','export PYTHONDONTWRITEBYTECODE=1',
                command('doctor',30)+' > doctor.json 2> doctor.err',

@@ -136,14 +136,28 @@ def invoke(root, action, request=None, python=None, timeout=30):
     return payload
 
 
-def doctor(receipt, refresh=False):
-    key = (receipt['revision'],sys.executable,Path(sys.executable).stat().st_mtime_ns)
+def doctor(receipt, refresh=False, python=None):
+    from .extension_environments import resolve
+    python=python or resolve(receipt['manifest']['id'])['python']
+    try:modified=Path(python).stat().st_mtime_ns
+    except OSError:modified=None
+    key = (receipt['revision'],python,modified)
     if not refresh and key in _doctor_cache: return _doctor_cache[key]
     try:
-        result = invoke(receipt['root'],'doctor',timeout=30)
+        result = invoke(receipt['root'],'doctor',python=python,timeout=30)
         if result.get('schema') != 'fpilot.extension-doctor.v2' or type(result.get('ready')) is not bool: raise ValueError('doctor 回执格式无效')
-    except Exception as exc: result = {'schema':'fpilot.extension-doctor.v2','ready':False,'missing':[],'reason':str(exc)[:1500]}
+        result = doctor_result(result,python)
+    except Exception as exc: result = {'schema':'fpilot.extension-doctor.v2','ready':False,'missing':[],'python':python,'reason':str(exc)[:1500]}
     _doctor_cache[key] = result
+    return result
+
+
+def doctor_result(result,python):
+    # Older portable helpers put the Python version in the python field.
+    result=dict(result)
+    old=result.get('python')
+    if isinstance(old,str) and re.fullmatch(r'\d+\.\d+\.\d+',old):result.setdefault('python_version',old)
+    result['python']=python
     return result
 
 
@@ -192,7 +206,7 @@ def install_directory(path):
         copied = inspect_package(dest)
         environment = doctor(copied)
         value = registry(); old = value['installed'].get(key)
-        value['installed'][key] = {'package':name,'revision':copied['revision'],'enabled':bool(environment['ready']),'doctor':environment}
+        value['installed'][key] = {'package':name,'revision':copied['revision'],'enabled':True,'doctor':environment}
         _save_registry(value)
         if old: _recycle(old)
     return public(copied,value['installed'][key])
@@ -224,8 +238,6 @@ def import_zip(encoded):
 def enable(key, enabled):
     if type(enabled) is not bool: raise ValueError('启用状态须为布尔值')
     receipt = installed(key)
-    if enabled and not doctor(receipt)['ready'] and not set(receipt['manifest']['execution']['locations']) & {'ssh','scheduler'}:
-        raise ValueError('环境未满足；请在扩展管理中重新检查依赖')
     with _lock:
         value=registry(); value['installed'][key]['enabled']=enabled; _save_registry(value)
     return public(receipt,value['installed'][key])
@@ -235,7 +247,6 @@ def recheck(key):
     receipt=installed(key); environment=doctor(receipt,refresh=True)
     with _lock:
         value=registry();value['installed'][key]['doctor']=environment
-        if not environment['ready'] and receipt['manifest']['execution']['locations']==['local']: value['installed'][key]['enabled']=False
         _save_registry(value)
     return public(receipt,value['installed'][key])
 

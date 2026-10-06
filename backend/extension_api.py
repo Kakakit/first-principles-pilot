@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import subprocess
 import zipfile
-from . import extension_protocol as p, extension_runs as runs, extension_remote as remote, servers
+from . import extension_protocol as p, extension_runs as runs, extension_remote as remote, extension_environments as environments, servers
 
 router=APIRouter(prefix='/api/extension-host')
 
@@ -29,13 +29,21 @@ def enabled(key:str,payload:dict):
     return call(p.enable,key,payload['enabled'])
 
 @router.post('/packages/{key}/doctor')
-def doctor(key:str):return call(p.recheck,key)
+def doctor(key:str,payload:dict=None):
+    result=call(environments.check,key,payload)
+    return {**p.public(p.installed(key),p.registry()['installed'][key]),**result}
+
+@router.put('/packages/{key}/runtime')
+def package_runtime(key:str,payload:dict):return call(environments.save_override,key,payload)
 
 @router.delete('/packages/{key}')
 def uninstall(key:str):return call(p.uninstall,key)
 
 @router.get('/runtimes')
-def runtimes():return {'runtimes':remote.runtimes(),'aliases':call(servers.registered_profiles)}
+def runtimes():return {'runtimes':remote.runtimes(),'aliases':call(servers.registered_profiles),'local':environments.local_default(),'overrides':environments.settings()['overrides']}
+
+@router.put('/runtimes/local')
+def local_runtime(payload:dict):return call(environments.save_local,payload)
 
 @router.get('/runtimes/{alias}/config')
 def runtime_config(alias:str):return call(servers.select_profile,alias)

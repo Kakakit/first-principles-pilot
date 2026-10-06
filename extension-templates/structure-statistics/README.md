@@ -9,6 +9,10 @@
 5. 工作台“扩展管理”填写本目录绝对路径，点击“导入并启用”；也可将目录压缩成 ZIP 导入。
 6. 结构页“结构分析”选择扩展，填写必要参数后运行。停用/卸载不删除历史报告。
 
+扩展管理按“本地运行 / 服务器运行”筛选；同一个包可以支持两边。在“Python 环境 · 默认或单独指定”选择位置，本地继承本地默认，服务器继承该主机默认，也可保存扩展自己的 Python 覆盖。恢复默认会清除对应覆盖；路径不写进包。未设置本地默认时沿用工作台解释器，扩展设置不会改变工作台启动环境。
+
+保存后点击“检查所选环境”。远端检查只上传小扩展包并执行 doctor，不执行分析或提交作业。模板 doctor 实际导入 dependencies 中的模块，并分别返回解释器路径、Python 版本和可取得的依赖版本；缺依赖时仍保持启用与参数编辑。正式 doctor/check/run 使用同一选定 Python。修改环境须重新检查或预览，历史分析保留执行时的环境。直接调用已有 Python 的绝对路径，无需 activate，不创建环境。
+
 CLI 用法：`python scripts/cli.py check --request /absolute/request.json`，`run` 同样接受请求文件。请求使用 `fpilot.extension-request.v2`；结果使用 `fpilot.extension-result.v2`，包括 summary、warnings、单位、表格/曲线、输出文件和来源。完整协议见主体 `docs/extensions-b/PROTOCOL.md`，其 schema 也随模板位于 `protocol/`。
 
 修改输出时仅写入请求的 `output_dir`，结果文件写到 `result_file`，读取 `inputs.<role>[i].path`；不能猜测作者路径或读取工作台内部数据。远端运行使用用户保存的已有 Python 路径；缺依赖仅报告，不创建环境或自动升级。

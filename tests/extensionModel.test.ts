@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,analysisLabel,runningAnalysis,preferredLocation,sourceRuntime,sourceOptionsSchema,readableSource,formAvailability} from '../src/extensionModel';
+import {defaults,analysisLabel,runningAnalysis,preferredLocation,sourceRuntime,sourceOptionsSchema,readableSource,formAvailability,executionCategories,runtimeChoice,environmentVersion} from '../src/extensionModel';
 test('schema defaults retain false/zero and only declared nested fields',()=>{const schema={type:'object',properties:{visible:{type:'boolean',default:false},count:{type:'integer',default:0},missing:{type:'string'},nested:{type:'object',properties:{level:{default:2}}}}};assert.deepEqual(defaults(schema),{visible:false,count:0,nested:{level:2}});const first=defaults(schema);first.nested.level=5;assert.equal(defaults(schema).nested.level,2);});
 test('UNKNOWN requires explicit reconciliation and cannot look completed',()=>{assert.equal(runningAnalysis('UNKNOWN'),false);assert.equal(analysisLabel('UNKNOWN'),'状态待核对');assert.equal(runningAnalysis('WAIT_RESOURCE'),true);assert.equal(analysisLabel('COMPLETED'),'分析程序完成');});
 
@@ -30,4 +30,20 @@ test('source element choices are declared by the package and do not select magne
 });
 test('source captions use meaningful names instead of internal fingerprints',()=>{
  assert.equal(readableSource('a'.repeat(32),'已完成运行'),'已完成运行');assert.equal(readableSource('25262.node01'),'25262.node01');
+});
+test('one package can appear in both local and server categories; broken bundles are safe',()=>{
+ assert.deepEqual(executionCategories({execution:{locations:['local','ssh','scheduler'],timeout_seconds:30}}),['local','remote']);
+ assert.deepEqual(executionCategories({} as any),[]);assert.equal(preferredLocation({} as any),undefined);
+});
+test('Python overrides stay scoped to package, location and exact server',()=>{
+ const data={local:{python:'/local/default'},runtimes:{a:{python:'/a/default'},b:{python:'/b/default'}},overrides:{one:{local:'/local/custom',remote:{a:'/a/custom'}}}};
+ assert.equal(runtimeChoice('one','local','a',data)?.python,'/local/custom');
+ assert.equal(runtimeChoice('one','ssh','a',data)?.python,'/a/custom');assert.equal(runtimeChoice('one','scheduler','a',data)?.python,'/a/custom');
+ assert.equal(runtimeChoice('one','ssh','b',data)?.python,'/b/default');assert.equal(runtimeChoice('two','local','a',data)?.inherited,true);
+ assert.equal(runtimeChoice('one','ssh','missing',data),undefined);
+ delete data.overrides.one.local;assert.equal(runtimeChoice('one','local','a',data)?.python,'/local/default');
+});
+test('environment caption keeps Python and library versions distinct',()=>{
+ assert.equal(environmentVersion({ready:true,python_version:'3.11.9',version:'0.9.20',versions:{ase:'3.23'}}),'Python 3.11.9 · 版本 0.9.20 · ase 3.23');
+ assert.equal(environmentVersion({ready:false}),'');
 });

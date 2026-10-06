@@ -48,6 +48,8 @@ python packaging/build.py --target windows --output /你的输出目录/Windows
 
 ## 运行约定与说明
 
+扩展管理按本地/服务器运行分类，同一扩展可支持两边。设置本地默认 Python、每台服务器默认 Python，或在扩展中单独指定已有环境；保存后检查依赖，运行时保留实际环境和历史。工作台启动环境不受影响。见 [使用与验收](docs/extensions-b/ENVIRONMENTS_ACCEPTANCE.md)。
+
 首次配置按“SSH 别名 → 测试免交互连接、发现已有 Python → 导入任务脚本”完成。默认使用脚本中的环境、MPI 与程序命令，无需重新填写 setvars/MPI 路径；完整运行时登记仍可在高级方式中使用。
 
 提交顺序是选择冻结输入 → 选服务器与导入脚本、编辑基础字段 → 检测节点并选择资源 → 准备并确认一次。检测后修改名称、walltime、核数或同服务器脚本会保留节点选择，更新最终预览；派发前自动实时复核。计算来源在配置中冻结，UNKNOWN 核查原 job ID，不自动重投。同一远端文件依赖分支保持服务器绑定；独立分支可分别选择服务器。
@@ -62,4 +64,4 @@ $HOME/fpilot/material-projects/<project-slug>/flows/main/stages/<NN>-<stage-slug
 
 新服务器默认使用 `$HOME/fpilot`；可选择包含 `fpilot` 的专用绝对目录，原服务器的登记根目录与旧 attempt 不迁移。只读检查不创建目录，正式确认后才创建本次运行目录。已有 attempt 的准确来源、路径与冻结策略保持；小文件使用受控入口，大于 10 MiB 的结果留在服务器处理。回收在本机隐藏对象并暂停后续派发，恢复后须手动继续。原科研文件和服务器任务不随本机回收删除。
 
-详细使用与证据按需查阅：[首次配置与脚本使用](docs/submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)、[提交流程](docs/submission/ACCEPTANCE.md)、[能窗迭代](docs/wannier-window/README.md)、[扩展协议](docs/extensions-b/PROTOCOL.md)、[主题格式](docs/appearance/THEME_FORMAT.md)、[回收站](docs/trash-flow/ACCEPTANCE.md)、[远端性能](docs/remote-speed/ACCEPTANCE.md)、[D 包验收](docs/release-d/ACCEPTANCE.md)。历史长版说明保存在 history（原始资料留在本机）。
+详细使用与证据按需查阅：[首次配置与脚本使用](docs/submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)、[提交流程](docs/submission/ACCEPTANCE.md)、[能窗迭代](docs/wannier-window/README.md)、[扩展协议](docs/extensions-b/PROTOCOL.md)、[主题格式](docs/appearance/THEME_FORMAT.md)、[回收站](docs/trash-flow/ACCEPTANCE.md)、[远端性能](docs/remote-speed/ACCEPTANCE.md)、[D 包验收](docs/release-d/ACCEPTANCE.md)。历史长版说明保存在 [history](docs/history/README_through_20261004.md)。

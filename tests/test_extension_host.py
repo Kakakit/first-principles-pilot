@@ -50,10 +50,10 @@ class ExtensionHostTests(unittest.TestCase):
         package=self.root/'invalid';shutil.copytree(TEMPLATE,package)
         manifest=json.loads((package/'extension.manifest.json').read_text());manifest['options_schema']={'type':'object','$ref':'https://example.invalid/a'};p.atomic_json(package/'extension.manifest.json',manifest)
         with self.assertRaisesRegex(ValueError,'引用'):p.install_directory(package)
-    def test_missing_dependency_saved_disabled_and_actionable(self):
+    def test_missing_dependency_preserves_enabled_but_blocks_execution(self):
         package=self.root/'missing';shutil.copytree(TEMPLATE,package)
         manifest=json.loads((package/'extension.manifest.json').read_text());manifest['dependencies']=['fpilot_missing_fixture_dependency'];p.atomic_json(package/'extension.manifest.json',manifest)
-        item=p.install_directory(package);self.assertFalse(item['enabled']);self.assertIn('fpilot_missing_fixture_dependency',item['doctor']['missing'])
+        item=p.install_directory(package);self.assertTrue(item['enabled']);self.assertIn('fpilot_missing_fixture_dependency',item['doctor']['missing'])
         self.assertTrue(p.enable(item['id'],True)['enabled'])
         with self.assertRaisesRegex(ValueError,'本地环境'):runs.start(self.payload())
         self.assertTrue(any('本机缺依赖' in reason for row in runs.context(self.payload())['extensions'] for reason in row['blockers']))
