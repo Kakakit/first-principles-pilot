@@ -43,7 +43,9 @@ doctor 在 stdout 返回单个 JSON：`schema=fpilot.extension-doctor.v2`、布�
 
 请求 `fpilot.extension-request.v2` 包含 `analysis_id`、`inputs`、`sources`、`options`、`output_dir`、`result_file`。`inputs.<role>` 按来源顺序排列，每项给出 `path/name/source_id/size_bytes`，可能附小文件 sha256。可选角色可能只有部分来源，或整个键缺省；扩展须按 source_id 关联，不能按数组下标配对。path 均为本次独立副本，扩展只向 output_dir 写文件。
 
-sources 是宿主冻结的来源摘要，包含具体 attempt、节点、主机、阶段、程序/收敛证据和实际冻结输入摘要。Wannier 摘要补充 seed、DFT 父 attempt、自旋模式、num_wann（已记录时）及本次冻结 energy_reference；不抓取其他计算或最新草稿的能量参考。结构草稿包含当前几何内容身份及原始文件身份提示。来源、选项、包 revision 和运行时创建时冻结，报告与下载 JSON 沿用冻结来源。
+sources 是宿主冻结的来源摘要，包含具体 attempt、节点、主机、阶段、程序/收敛证据和实际冻结输入摘要。Wannier 摘要补充 seed、DFT 父 attempt、可读父运行名称、自旋模式、num_wann、冻结结构的 elements（已记录时）及本次冻结 energy_reference；不抓取其他计算或最新草稿的能量参考。结构草稿包含当前几何内容身份及原始文件身份提示。来源、选项、包 revision 和运行时创建时冻结，报告与下载 JSON 沿用冻结来源。
+
+数组选项可以在 `ui_schema[field]["ui:options"].source_enum` 声明 `"elements"`。宿主把冻结来源的元素并集作为该字段的字符串选项；不自动勾选或判断磁性。来源没有元素摘要时保持手工数组输入。独立 CLI 仍接收普通字符串数组，不依赖界面服务。缺少输入或运行时只阻止执行操作，允许先编辑参数。
 
 ## 结果与通用展示
 

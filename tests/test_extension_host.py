@@ -93,7 +93,7 @@ class ExtensionHostTests(unittest.TestCase):
         self.assertEqual(record['state'],'COMPLETED',record.get('error'));self.assertEqual(record['scientific_validation'],'INSUFFICIENT');self.assertEqual([row['raw'] for row in record['result']['tables'][0]['rows']],[0,0,0]);self.assertEqual(record['result']['tables'][0]['columns'][1]['unit'],'C/m²');self.assertEqual(len(record['result']['sources']),2)
     def test_nonconverged_and_large_files_report_distinct_reasons(self):
         self.install('lcalcpol-polarization-analysis');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True})
-        sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('lcalcpol-polarization-analysis')['manifest'];self.assertIn('aa：缺少 ediff_reached 证据',runs.blockers(m,sources))
+        sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('lcalcpol-polarization-analysis')['manifest'];self.assertIn('已完成运行：缺少 ediff_reached 证据',runs.blockers(m,sources))
         sources[0]['evidence']['ediff_reached']=True;sources[0]['files'][1]['size_bytes']=artifacts.MAX_PULL_BYTES+1
         self.assertTrue(any('10 MiB' in s for s in runs.blockers(m,sources,'local')));self.assertFalse(runs.blockers(m,sources,'scheduler'))
     def runtime(self,scheduler='pbs'):
@@ -104,6 +104,13 @@ class ExtensionHostTests(unittest.TestCase):
     def test_remote_preview_binding_rejects_later_changes(self):
         payload=self.remote_payload();payload['options']={'include_elements':False}
         with self.assertRaisesRegex(ValueError,'重新预览'):runs.start(payload)
+    def test_ssh_preview_accepts_home_workspace_without_resource_probe(self):
+        self.install();runtime=self.runtime();runtime['config']['remote_workspace_root']='$HOME/230269265lht'
+        p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
+        with patch.object(remote,'resource_preview') as probe:
+            receipt=runs.preview(self.payload(location='ssh',alias='jutai-1'))
+        self.assertTrue(receipt['ready']);self.assertIn('analyses/analysis-preview',receipt['script'])
+        self.assertIn('doctor.json',receipt['script']);self.assertNotIn('#PBS',receipt['script']);probe.assert_not_called()
     def test_scheduler_dispatch_exact_id_once_and_unknown_recovery(self):
         payload=self.remote_payload();receipt=runs.start(payload);key=receipt['analysis_id']
         with patch.object(remote,'stage',return_value='/workspace/analyses/'+key),patch.object(remote,'submit',side_effect=ValueError('no receipt')) as submit:
@@ -281,9 +288,9 @@ class ExtensionHostTests(unittest.TestCase):
 
     def test_wannier_summary_uses_frozen_bundle_num_wann_parent_and_energy(self):
         key='b'*64;energy={'fermi_eV':3.25,'attempt_id':'parent','host':'site'}
-        p.atomic_json(self.root/'wannier-bundles'/(key+'.json'),{'win':'num_wann = 24\nspinors = true','seed':'wannier90','parent_attempt_id':'parent','spinors':True,'energy_reference':energy})
+        p.atomic_json(self.root/'wannier-bundles'/(key+'.json'),{'win':'num_wann = 24\nspinors = true\nbegin atoms_cart\nCr 0 0 0\nFe 1 1 1\nO 2 2 2\nCr 3 3 3\nend atoms_cart','seed':'wannier90','parent_attempt_id':'parent','spinors':True,'energy_reference':energy})
         record={'kind':'wannier90','stage':'wannier90','bundle_id':key,'live_energy_reference':{'fermi_eV':999},'source_snapshot':{'parameters':{'num_iter':'100'}}}
-        stage,summary=runs._stage(record);self.assertEqual(stage,'wannier90');self.assertEqual(summary['num_wann'],24);self.assertEqual(summary['parent_attempt_id'],'parent');self.assertEqual(summary['energy_reference'],energy)
+        stage,summary=runs._stage(record);self.assertEqual(stage,'wannier90');self.assertEqual(summary['num_wann'],24);self.assertEqual(summary['parent_attempt_id'],'parent');self.assertEqual(summary['energy_reference'],energy);self.assertEqual(summary['elements'],['Cr','Fe','O']);self.assertEqual(summary['parent_name'],'DFT 来源已记录')
         summary['energy_reference']['fermi_eV']=8;self.assertEqual(json.loads((self.root/'wannier-bundles'/(key+'.json')).read_text())['energy_reference']['fermi_eV'],3.25)
 
 if __name__=='__main__':unittest.main()

@@ -1,6 +1,6 @@
 export type ExtensionSource={kind:'structure';poscar:string;name?:string;original_sha256?:string;files?:Record<string,string>}|{kind:'attempt';attempt_id:string;files?:Record<string,string>};
 export type ExtensionManifest={id:string;name:string;version:string;description:string;installed:boolean;enabled:boolean;error?:string;contexts:string[];stages:string[];sources:{min:number;max:number};inputs:Array<{role:string;title:string;names:string[];max_bytes:number;required?:boolean}>;execution:{locations:string[];timeout_seconds:number;preferred_location?:string};dependencies:string[];doctor?:{ready:boolean;missing:string[];reason:string;python?:string};options_schema:Record<string,any>;ui_schema:Record<string,any>;blockers?:string[]};
-export type ResolvedSource={id:string;name:string;stage:string;kind:string;files:Array<{name:string;size_bytes:number}>;alias?:string;state:string;sha256?:string;input_summary?:{seed?:string;parent_attempt_id?:string;spinors?:boolean|string;num_wann?:number;energy_reference?:{fermi_eV?:number;attempt_id?:string}}};
+export type ResolvedSource={id:string;name:string;stage:string;kind:string;files:Array<{name:string;size_bytes:number}>;alias?:string;state:string;sha256?:string;input_summary?:{seed?:string;parent_attempt_id?:string;parent_name?:string;elements?:string[];spinors?:boolean|string;num_wann?:number;energy_reference?:{fermi_eV?:number;attempt_id?:string}}};
 export type Analysis={id:string;state:string;created_at:string;extension_id:string;manifest:ExtensionManifest;location:string;job_id?:string;remote_dir?:string;error?:string;check?:{status:string;reason:string};sources:Array<{id:string;name:string;sha256?:string;attempt_id?:string}>;scientific_validation:string;result?:{summary:string;warnings:string[];tables:Array<{title:string;columns:Array<{key:string;label:string;unit:string}>;rows:Record<string,unknown>[]}>;curves:Array<{title:string;x_label:string;x_unit:string;y_label:string;y_unit:string;series:Array<{label:string;points:number[][]}>}>};outputs:Array<{path:string;label:string;media_type:string;size_bytes:number;available:boolean}>};
 export function defaults(schema:Record<string,any>):any {
  if('default' in schema)return structuredClone(schema.default);
@@ -17,4 +17,23 @@ export function preferredLocation(manifest:Pick<ExtensionManifest,'execution'>):
 }
 export function sourceRuntime(sourceAlias:string|undefined,runtimes:Record<string,unknown>):string {
  return sourceAlias?(sourceAlias in runtimes?sourceAlias:''):Object.keys(runtimes)[0]||'';
+}
+
+export function sourceOptionsSchema(manifest:Pick<ExtensionManifest,'options_schema'|'ui_schema'>,sources:ResolvedSource[]):Record<string,any> {
+ const schema=structuredClone(manifest.options_schema);
+ const elements=[...new Set(sources.flatMap(source=>source.input_summary?.elements||[]))];
+ for(const [key,ui] of Object.entries(manifest.ui_schema)){
+  if((ui as Record<string,any>)?.['ui:options']?.source_enum==='elements'&&schema.properties?.[key]?.type==='array'&&elements.length){
+   schema.properties[key].items={...schema.properties[key].items,enum:elements};
+  }
+ }
+ return schema;
+}
+
+export function readableSource(value:string|undefined,fallback='运行来源'):string {
+ return value&&!/^[a-f0-9]{12,64}$/i.test(value)?value:fallback;
+}
+
+export function formAvailability(busy:boolean,blocked:boolean,running:boolean){
+ return {editingDisabled:busy,actionsDisabled:busy||blocked,submitDisabled:busy||blocked||running};
 }

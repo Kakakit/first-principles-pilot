@@ -1,5 +1,21 @@
 # 当前开发交接 · 2026-10-06
 
+## 2026-10-06：TB2J 参数交互、服务器 Python 与真实运行验收
+
+TB2J 2.0.1 已安装启用。缺少运行时或输入只阻止执行按钮，文本、数值、选择与勾选仍可编辑；冻结 .win 的来源结构元素 列为元素选项，由用户选择磁性元素。来源与父来源显示运行名称/job ID，不展示内容指纹。结果页提供“登记服务器 Python”，按服务器保存解释器与工作区，自动选中来源服务器；调度资源配置折叠。实际执行使用同一 Python 做导入、版本、CLI 参数检查，不安装或升级环境。扩展独立 CLI 与通用宿主分工保留，没有按 TB2J ID 分派算法。
+
+实际预览发现目录占位符含非法路径字符，已改为 analysis-preview，并补齐 $HOME 工作区的 SSH 预览回归。直接运行不调用节点或调度资源探测，不提交 PBS/Slurm。
+
+按本轮明确授权，已有完成的双通道与 SOC 来源各执行一次。服务器 TB2J 0.9.20 doctor/check 通过；两类程序完成，各 234 对和 5850 个轨道矩阵元素，导出单位/索引/J/轨道矩阵与本次官方 SpinIO 产物一致；SOC DMI、各向异性张量亦逐项一致。SOC 基底 orbital 根据原投影顺序与中心配对证据明确确认。CSV 实际下载与宿主原件逐字节一致。大 Hamiltonian 同服务器复制，不回传超过 10 MiB 的文件；三份来源共 12 个文件的大小与修改时间保持不变。
+
+参数仅用于功能验收：3×3×3、nz=12、-14 至 0 eV（相对冻结 E_F）、6 Å、单进程、所选磁性元素、轨道分解。程序完成、数值收敛和物理验证分别保存；数值/物理未验证，单方向 SOC 保持 SINGLE_DIRECTION。原 attempt、扫描批次及链的状态保持原样，没有恢复队列、提交 VASP/Wannier 或发布运行 ZIP。
+
+384 项 Python、69 项前端通过，类型检查与生产构建通过。服务保持运行，worker 原开关保留。使用指南和协议已更新，验收见 docs/extensions-b/TB2J_INTERACTION_ACCEPTANCE.md。恢复原件、环境与来源证据、日志和截图：workspace-data/development-backups/tb2j-interaction-20261006/，不上传 GitHub。GitHub 按既有增量白名单同步，提交说明为“修复 TB2J 参数交互和服务器 Python 选择，并完成共线及 SOC 实跑验收”。
+
+
+## 此前交付记录
+
+
 活动源为本仓库；复用本机已有 Python。原开发 Git 历史与个人研究记录不入库。
 
 ## 2026-10-06：TB2J v2 独立扩展
@@ -27,4 +43,3 @@ Python 360 项、前端 64 项、类型检查和生产构建通过。空白独�
 方案和验收见 docs/submission/SETUP_AND_SCRIPT_PLAN.md、SETUP_AND_SCRIPT_ACCEPTANCE.md。运行 ZIP 未重发，新设备从最新源码构建/打包；Windows 原生与具体真实任务仍需相应验收和授权。
 
 同步始终基于远端 main 的准确父提交，只发布筛选过的源码/说明。不上传工作区数据、POTCAR、SSH 配置/密钥、私人服务器脚本或旧本地 Git 历史，不强推。详细规则见 docs/GITHUB.md、docs/DEVELOPMENT.md。
-

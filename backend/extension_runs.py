@@ -82,11 +82,15 @@ def _stage(record):
         frozen_win=bundle.get('win') or snapshot.get('win') or ''
         count=re.search(r'^\s*num_wann\s*[:=]\s*(\d+)',frozen_win,re.M|re.I)
         num_wann=parameters.get('num_wann') if parameters.get('num_wann') is not None else int(count.group(1)) if count else None
+        atom_block=re.search(r'^\s*begin\s+atoms_(?:cart|frac)\s*$(.*?)^\s*end\s+atoms_(?:cart|frac)\s*$',frozen_win,re.M|re.I|re.S)
+        elements=list(dict.fromkeys(match.group(1) for line in (atom_block.group(1).splitlines() if atom_block else []) for match in [re.match(r'^\s*([A-Z][a-z]?)(?:\d*)\s+[-+.0-9]',line)] if match))
         model={'bundle_id':key,'seed':record.get('seed') or bundle.get('seed') or snapshot.get('seed'),
                'parent_attempt_id':record.get('parent_attempt_id') or bundle.get('parent_attempt_id') or snapshot.get('source_attempt_id'),
                'spinors':bundle.get('spinors',snapshot.get('spinors')),
-               'num_wann':num_wann,
+               'num_wann':num_wann,'elements':elements,
                'energy_reference':copy.deepcopy(bundle.get('energy_reference') or record.get('live_energy_reference') or {})}
+        try:parent=ex.get(model['parent_attempt_id']);model['parent_name']=parent.get('job_id') or parent.get('stage_slug') or 'DFT 来源'
+        except (OSError,ValueError,KeyError,TypeError):model['parent_name']='DFT 来源已记录' if model['parent_attempt_id'] else '缺少来源'
         return 'wannier90',model
     if record.get('stage'):return record['stage'],{}
     key=record.get('bundle_id')
@@ -118,7 +122,7 @@ def describe_sources(raw,project_id=None):
             if project_id and record.get('project_id')!=project_id:raise ValueError('来源不属于当前项目')
             stage,model=_stage(record);listing=artifacts.listing(record['id'])
             rows.append({'id':record['id'],'kind':'attempt','attempt_id':record['id'],'node_id':record.get('node_id'),
-                         'stage':stage,'name':record.get('job_id') or record['id'][:12],'alias':record['config']['alias'],
+                         'stage':stage,'name':record.get('job_id') or ('已完成运行' if record['state']=='COMPLETED' else '未提交运行'),'alias':record['config']['alias'],
                          'state':record['state'],'evidence':record.get('evidence') or {},'input_summary':model,
                          'remote_root':ex.attempt_path(record)['shell'],'files':[f for f in listing['files'] if f['path']==f['name']],
                          'chosen_files':value.get('files') or {}})
@@ -436,7 +440,7 @@ def preview(payload):
     if not resources['ready']:return resources
     key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
     p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':resources})
-    text=remote.script(runtime,(runtime['config'].get('remote_workspace_root') or '$HOME/230269265lht').rstrip('/')+'/analyses/<analysis_id>',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
+    text=remote.script(runtime,(runtime['config'].get('remote_workspace_root') or '$HOME/230269265lht').rstrip('/')+'/analyses/analysis-preview',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
     return {'preview_id':key,'ready':True,'resources':resources,'runtime':runtime,'script':text,'reason':'将在独立 analyses 目录执行 doctor、check、run；来源文件只读'}
 
 
