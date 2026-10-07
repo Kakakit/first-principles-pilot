@@ -18,3 +18,8 @@ export function inputForReview(inputs:FrozenInputChoice[],nodeId?:string|null,re
 export function configurationNodes(project:Project) {
   return project.nodes.filter(node=>['relax','scf','bands','dos','vasp-wannier','wannier90','scan'].includes(node.data.kind));
 }
+
+export function chainNodes(project:Project,selectedIds?:string[]) {
+  return project.nodes.filter(node=>['relax','scf','bands','dos','vasp-wannier'].includes(node.data.kind)&&
+    (selectedIds===undefined||selectedIds.includes(node.id)));
+}
