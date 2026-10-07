@@ -63,3 +63,5 @@ Experimental extensions require explicit approval before selection:
 `pdos-orbital-centers` remains a planned candidate. `prepare-remote-dense-wannier` remains blocked until its local generation and authorized remote execution are separated.
 
 `electronic-structure-characterization` version 0.3.0 is `ready` after 14 current-host parser/workflow/CLI tests and a real 180-k-point, 72-band, 14-ion CrFeO prepare-characterize-plot run. The processed bundle exposes 48 band-weight and 48 PDOS selectors per spin; concrete data, figures and QA receipts remain under `runs/crfeo-ferri-v1/analysis/s8_electronic_structure_characterization/`.
+
+可选独立交互展示遵循 v2 的 presentation 入口。TB2J 2.1.0 在扩展内实现元素对 Jij–r、完整数据筛选排序与确认轨道标签；宿主仅提供隔离展示、文件、下载和独立设置，不按扩展 ID 解析科学数据。旧扩展与已卸载扩展的历史结果保持可读。

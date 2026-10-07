@@ -22,6 +22,8 @@ class ExtensionHostTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name);self.stack=ExitStack()
         for module in (p,runs,remote,ex,artifacts):self.stack.enter_context(patch.object(module,'ROOT',self.root))
         self.stack.enter_context(patch.object(runs,'schedule'))
+        # These cases test execution; optional presentation lifecycle is tested separately.
+        self.stack.enter_context(patch('backend.extension_presentations.schedule'))
         self.stack.enter_context(patch.object(ex,'ssh',side_effect=AssertionError('real SSH forbidden in tests')))
         p._cache.clear();p._doctor_cache.clear()
         self.addCleanup(self.stack.close);self.addCleanup(self.temp.cleanup)

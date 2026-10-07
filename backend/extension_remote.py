@@ -131,6 +131,7 @@ def stage(record,directory,request):
         archive.add(directory/'package',arcname='package',filter=lambda info: None if '__pycache__' in info.name else info)
         archive.add(directory/'request.remote.json',arcname='request.json')
         archive.add(directory/'launch.sh',arcname='launch.sh')
+        archive.add(Path(__file__).with_name('extension_process.py'),arcname='extension-runner.py')
         if (directory/'inputs').exists(): archive.add(directory/'inputs',arcname='inputs')
     python=shlex.quote(runtime['python'])
     rewrite="import json,os; p='request.json'; v=json.load(open(p)); t=json.dumps(v).replace('__WORKDIR__',os.getcwd()); open(p,'w').write(t)"
@@ -153,15 +154,20 @@ def submit(record):
 
 
 def direct(record):
-    return ex.ssh(record['runtime']['alias'],'set -e\ncd '+remote_paths.shell_path(record['remote_dir'])+'\nbash launch.sh',timeout=min(record['manifest']['execution']['timeout_seconds']+60,900))
+    command='set -e\ncd '+remote_paths.shell_path(record['remote_dir'])+'\n'+shlex.quote(record['runtime']['python'])+' extension-runner.py start . --timeout '+str(record['manifest']['execution']['timeout_seconds'])
+    response=ex.ssh(record['runtime']['alias'],command,timeout=30,mutating=True)
+    if response.get('exit_code')!=0:raise ValueError('未收到启动回执；保留原目录，只核对，不重新执行')
+    receipt=json.loads(response['stdout'])
+    if receipt.get('reserved') is not True:raise ValueError('启动回执无效；只核对原目录')
+    return {**response,'launch':receipt}
 
 
 def inspect(record):
     directory=record['remote_dir'];runtime=record['runtime']
     python=shlex.quote(runtime['python'])
-    code="import json,pathlib; p=pathlib.Path('.'); print(json.dumps({'exit':json.load(open('exit.json')) if (p/'exit.json').is_file() else None,'job_id':(p/'job.id').read_text().strip().split(';')[0] if (p/'job.id').is_file() else None,'check':json.load(open('check.json')) if (p/'check.json').is_file() else None,'doctor':json.load(open('doctor.json')) if (p/'doctor.json').is_file() else None}))"
-    result=ex.ssh(runtime['alias'],'set -e\ncd '+remote_paths.shell_path(directory)+'\n'+python+' -c '+shlex.quote(code),timeout=30)
-    if result.get('exit_code')!=0: raise ValueError('无法读取分析回执；保留原 job ID')
+    code=Path(__file__).with_name('extension_process.py').read_text()
+    result=ex.ssh(runtime['alias'],'set -e\ncd '+remote_paths.shell_path(directory)+'\n'+python+' -c '+shlex.quote(code)+' inspect .',timeout=30)
+    if result.get('exit_code')!=0: raise ValueError('无法读取原分析回执：'+result.get('stderr','')[-800:]+'；保留原目录，不重新执行')
     return json.loads(result['stdout'])
 
 

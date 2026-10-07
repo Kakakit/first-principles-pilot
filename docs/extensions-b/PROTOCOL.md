@@ -10,7 +10,7 @@
 4. 在“扩展管理”填复制目录的绝对路径，点击“导入并启用”；也可导入包含唯一清单的 ZIP。
 5. 在结构页或所选结果旁选择扩展并运行。缺依赖会保留安装记录并列出模块；主体不会重建环境或升级软件。
 
-模板中的 `protocol/` 和主体 `resources/extension-protocol/` 提供 manifest、request、result 的 Draft 7 schema。当前包限普通文件、1000 项、20 MiB，至少含一个 fixture。模块依赖写 Python 导入名，如 `spglib`；版本约束和算法许可应由扩展自己的 README/依赖文件说明。
+模板中的 `protocol/` 和主体 `resources/extension-protocol/` 提供 manifest、request、result 与可选 presentation 的 Draft 7 schema。当前包限普通文件、1000 项、20 MiB，至少含一个 fixture。模块依赖写 Python 导入名，如 `spglib`；版本约束和算法许可应由扩展自己的 README/依赖文件说明。
 
 ## 清单：`extension.manifest.json`
 
@@ -27,6 +27,7 @@
 | `execution` | 支持 `local`、`ssh`、`scheduler`，以及 CLI 超时；可选 `preferred_location`（默认本机，须为支持位置） |
 | `dependencies` | doctor 要检查的 Python 模块 |
 | `options_schema`、`ui_schema` | object JSON Schema 与 RJSF 展示设置；只接受本 schema 内 `$ref` |
+| `presentation`（可选） | `{entrypoint:"scripts/presentation.py"}`，包内独立展示整理 CLI；旧扩展缺省使用基础表格/曲线 |
 | `outputs`、`fixtures` | table/curve/image/file 输出能力，以及可用于独立检查的包内输入 |
 
 主体按清单筛选阶段和来源；缺文件、证据或环境时显示具体原因。“不适用”与“缺依赖”分别记录。默认角色要求每个来源提供候选文件；`required=false` 允许部分或全部来源缺少该角色，最终组合由扩展 check 判断。明确选择的无效文件不能回退；可选角色空字符串表示本次不提供。
@@ -83,7 +84,7 @@ doctor → check → run 全程使用同一解释器。创建分析时冻结实�
 - `POST /api/extension-host/packages/{id}/doctor` 可接收 `{location:"local"}` 或 `{location:"ssh",alias:"source-server"}`（也支持 scheduler）。返回 runtime 和 doctor；无请求体的旧调用仍检查所选本地默认/覆盖环境。
 - check、preview、analyses 可携带 `runtime_python`；与当前解析路径不符时拒绝旧选择。远端预览继续绑定整个运行配置；本地预览也可返回 preview_id，提交时若携带则核对冻结绑定。旧本地直接运行请求保持兼容。
 
-脚本顺序为 doctor→check→run，记录 doctor.json/check.json、日志和原子 exit.json；doctor/check 最多 30/60 秒，run 使用清单超时，超时停止子进程组并写退出码 124。调度器另受用户 walltime 限制。SSH 连接等待最多 900 秒；连接中断或调度器提前终止而没有结束回执时记 UNKNOWN，只核对原目录/精确 job ID，不重投。缺依赖、输入不适用、非零退出分别记 FAILED、NOT_APPLICABLE、FAILED。
+脚本顺序为 doctor→check→run，记录 doctor.json/check.json、日志和原子 exit.json；doctor/check 最多 30/60 秒，run 使用清单超时，超时停止子进程组并写退出码 124。调度器另受用户 walltime 限制。SSH 直接运行先在原分析目录独占保留 launch.once，再由选定 Python 启动脱离连接的持久监督进程；仅短时等待启动回执，后续按 PID、启动时钟与系统启动标记核对精确进程，排除 PID 复用。超时停止该监督树并写退出回执。连接中断不会重跑。旧分析缺少 exit.json 时，仅在成功 CLI 回执的 result_file 精确对应原目录且结果协议有效时恢复结果，记录 wrapper_exit_recorded=false，不补造退出码；其他情况保留 UNKNOWN。调度器提前终止且没有足够结束证据也保持 UNKNOWN，只核对原目录/精确 job ID，不重投。缺依赖、输入不适用、非零退出分别记 FAILED、NOT_APPLICABLE、FAILED。
 
 每个分析返回 analysis_id，通过独立 API 读取状态/历史/产物。文件锁和派发前持久状态防止 API/worker 重复执行；scheduler 在途与 UNKNOWN 占计算的同一额度。恢复读取原 job.id、exit.json 和精确队列状态；qstat/squeue 消失或 exit 0 单独都不能证明分析产物有效。小产物经受控脚本逐文件回传，超过 10 MiB 的产物留在远端并显示路径。
 
@@ -94,3 +95,19 @@ doctor → check → run 全程使用同一解释器。创建分析时冻结实�
 前端薄接 [react-jsonschema-form 6.11.0](https://rjsf-team.github.io/react-jsonschema-form/docs/quickstart/)（Apache-2.0），按需加载表单；后端使用 [jsonschema 4.25.1](https://github.com/python-jsonschema/jsonschema/blob/v4.25.1/pyproject.toml)（MIT，Python 3.9）。两者按锁定版本使用，不自建表单/JSON Schema 引擎。用户扩展自己的算法许可须随包保存。
 
 TB2J 独立包见 [使用指南](../../resources/extensions/tb2j/README.md)，接入证据见 [TB2J 验收](TB2J_ACCEPTANCE.md)。
+
+## 可选独立交互展示
+
+旧扩展不用添加字段。新扩展可以声明 `presentation.entrypoint` 并实现：
+
+```text
+/path/to/frozen/python scripts/presentation.py render --request /absolute/presentation-request.json
+```
+
+请求标识 `fpilot.extension-presentation-request.v1`，包含 analysis_id、source_dir（已有输出只读）、output_dir（本次独立展示版本）。stdout 返回 `fpilot.extension-presentation.v1`、entry_html、assets（path/media_type），可附 data_schema。assets 必须是输出目录中的普通文件，最多 1000 项，每个不超过 10 MiB；扩展自行分片。数据含义与科学算法由包负责，宿主不解析扩展格式。
+
+首次完成可用冻结包自动生成；旧记录或手动更新采用当前启用包，保存新的展示包副本和版本，沿用原分析冻结 Python 与服务器。远端原始大数据留在原主机，宿主仅上传展示包、执行整理 CLI 并受控回传小文件，不调用分析 run。失败保留原结果及下载；并发请求共用同一生成记录。停用/卸载不能破坏已保存展示。上版保存的展示设置随更新继承，旧版本仍保留。
+
+HTML 内联脚本、样式和绘图库，以无同源权的 iframe sandbox 隔离，禁止外部连接；普通运行不依赖网络或主体组件。页面与宿主使用 `fpilot.extension-view.v1` postMessage：read-file 只读清单内 JSON，read-state/save-state 保存最大 64 KiB 有限 JSON，resize 调整高度，failed 回退基础结果，download 交付本机生成的 CSV/JSON/文本/PNG（有限内容、简单文件名，最多 64 MiB）。每条 RPC 带字符串 id，宿主验证消息来源为当前 iframe，返回 kind=response、同 id 和 value/error。扩展不调用工作台 API，也不读取宿主 DOM；原生单位、映射与计算规则不进入宿主。
+
+通用 API：POST analyses/{id}/presentation 生成；GET presentation/{version}/files/{path} 只读声明文件；GET/PUT presentation/{version}/state 读写独立展示设置。均位于 `/api/extension-host/`。设置每次保存写独立版本，不改原分析来源、选项、产物或科学状态。分析可返回 presentation、presentation_supported、last_checked_at、refresh_message、refresh_busy；界面显示核对进度、完成/错误反馈和最后核对时间。

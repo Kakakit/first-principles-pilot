@@ -77,11 +77,15 @@ def inspect_package(root):
     if key in _cache and _cache[key][0] == signature: return _cache[key][1]
     manifest = json.loads(inside(root, 'extension.manifest.json').read_text())
     required = {'schema','id','name','version','description','entrypoint','contexts','stages','sources','inputs','evidence','execution','dependencies','options_schema','ui_schema','outputs','fixtures'}
-    if not isinstance(manifest, dict) or set(manifest) != required or manifest['schema'] != PROTOCOL or not ID.fullmatch(manifest.get('id','')):
+    if not isinstance(manifest, dict) or not required <= set(manifest) or set(manifest)-required-{'presentation'} or manifest['schema'] != PROTOCOL or not ID.fullmatch(manifest.get('id','')):
         raise ValueError('扩展 v2 清单字段或 ID 无效')
     if any(not isinstance(manifest[k],str) or not manifest[k].strip() for k in ('name','version','description')):
         raise ValueError('名称、版本和说明不能为空')
     inside(root, manifest['entrypoint'])
+    if 'presentation' in manifest:
+        view=manifest['presentation']
+        if not isinstance(view,dict) or set(view)!={'entrypoint'}:raise ValueError('展示配置须声明独立 entrypoint')
+        inside(root,view['entrypoint'])
     if not isinstance(manifest['fixtures'],list) or not manifest['fixtures']: raise ValueError('扩展需提供 fixture')
     for name in manifest['fixtures']: inside(root,name)
     if not isinstance(manifest['contexts'],list) or not manifest['contexts'] or not set(manifest['contexts']) <= {'structure','attempt'}:

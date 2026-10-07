@@ -23,7 +23,7 @@ from .storage import ROOT
 from .platform_runtime import exclusive_lock, process_alive, stop_child
 
 TERMINAL={'COMPLETED','FAILED','NOT_APPLICABLE','UNKNOWN'}
-ACTIVE_REMOTE={'DISPATCHING','SUBMITTED','UNKNOWN'}
+ACTIVE_REMOTE={'DISPATCHING','SUBMITTED','RUNNING','UNKNOWN'}
 _executor=ThreadPoolExecutor(max_workers=2,thread_name_prefix='extension')
 _local_processes={};_process_lock=threading.RLock()
 _threads=set();_thread_lock=threading.RLock()
@@ -39,7 +39,14 @@ def directory(key):
 
 
 def get(key):
-    return json.loads((directory(key)/'analysis.json').read_text())
+    record=json.loads((directory(key)/'analysis.json').read_text())
+    return _presentation_record(record)
+
+
+def _presentation_record(record):
+    from . import extension_presentations as views
+    record.update(views.describe(record))
+    return record
 
 
 def save(record):
@@ -55,7 +62,7 @@ def history(project_id=None,attempt_id=None):
             if project_id and record['project_id']!=project_id:continue
             if attempt_id and not any(s.get('attempt_id')==attempt_id for s in record['sources']):continue
             if not inactive('analyses',record['id'],record):
-                rows.append(record)
+                rows.append(_presentation_record(record))
         except (OSError,ValueError,KeyError):continue
     return sorted(rows,key=lambda r:r['created_at'],reverse=True)
 
@@ -269,6 +276,11 @@ def _complete(record):
     p.atomic_json(path,result)
     record.update(state=result['status'],result=result,outputs=outputs,scientific_validation=result['scientific_validation'])
     save(record)
+    if record['state']=='COMPLETED' and record['manifest'].get('presentation'):
+        from . import extension_presentations as views
+        try:views.schedule(record['id'],frozen=True)
+        except Exception as exc:
+            record['presentation_error']=str(exc)[-1500:];save(record)
 
 
 def check(payload):
@@ -337,6 +349,8 @@ def _collect(record):
 
 def _refresh(record):
     receipt=remote.inspect(record)
+    record['last_checked_at']=now()
+    record['remote_logs']=receipt.get('logs') or {}
     if receipt.get('doctor'):
         receipt['doctor']=p.doctor_result(receipt['doctor'],record['runtime']['python'])
         record['runtime_doctor']=receipt['doctor']
@@ -345,8 +359,21 @@ def _refresh(record):
         if not __import__('re').fullmatch(r'\d+(?:\.[A-Za-z0-9_.-]+)?',job) or record.get('job_id') and record['job_id']!=job:raise ValueError('分析 job ID 回执不一致')
         record['job_id']=job
     if receipt.get('exit') is None:
+        run=receipt.get('run_receipt') or {}
+        expected=record['remote_dir'].rstrip('/')+'/outputs/result.json'
+        if run.get('schema')=='fpilot.extension-run.v2' and run.get('result_file')==expected:
+            record['check']=receipt.get('check')
+            record['verification']={'recovered_from':'successful_cli_receipt','wrapper_exit_recorded':False,'checked_at':record['last_checked_at']}
+            _collect(record)
+            if record['state']!='COMPLETED':raise ValueError('成功 CLI 回执与结果状态不一致')
+            record.pop('error',None);record['refresh_message']='已从成功 CLI 回执收集原分析结果；包装程序退出码未记录'
+            return save(record)
+        if record['location']=='ssh' and receipt.get('process_alive'):
+            record.update(state='RUNNING',remote_process=receipt.get('launch'),refresh_message='原服务器分析进程仍在运行');record.pop('error',None)
+            return save(record)
         if record['location']=='scheduler' and remote.queued(record):record['state']='SUBMITTED';record.pop('error',None)
         else:record.update(state='UNKNOWN',error='尚无程序结束回执；保留来源和 job ID，只核对，不重投')
+        record['refresh_message']='核对完成，尚无足够结束证据；未重新执行'
         return save(record)
     record['exit_code']=receipt['exit']['exit_code'];record['check']=receipt.get('check')
     if record['exit_code']==3:
@@ -357,7 +384,9 @@ def _refresh(record):
         save(record)
     elif record['exit_code']:
         record.update(state='FAILED',error='远端分析非零退出：'+str(record['exit_code'])+'；查看独立目录中的 doctor.err/check.err/stderr.log');save(record)
-    else:_collect(record)
+    else:_collect(record);record.pop('error',None)
+    record['refresh_message']='核对完成，已读取原任务结束回执'
+    save(record)
     return record
 
 
@@ -410,19 +439,19 @@ def _execute(key):
 def refresh(key):
     with lock(key) as owned:
         record=get(key)
-        if not owned:return record
-        if record['location']=='local' or record['state'] not in ('DISPATCHING','SUBMITTED','UNKNOWN'):return record
+        if not owned:return {**record,'refresh_busy':True,'refresh_message':'后台正在核对或收集这条分析，请稍后查看记录'}
+        if record['location']=='local' or record['state'] not in ACTIVE_REMOTE:return {**record,'refresh_message':'本条分析已有终态，无需重新执行'}
         if not record.get('remote_dir'):
             record.update(state='UNKNOWN',error='准备期间中断，请检查独立目录；未自动重投');return save(record)
         try:return _refresh(record)
-        except Exception as exc:record.update(state='FAILED' if record.get('exit_code') is not None else 'UNKNOWN',error=str(exc)[-2500:]);return save(record)
+        except Exception as exc:record.update(state='FAILED' if record.get('exit_code') is not None else 'UNKNOWN',last_checked_at=now(),refresh_message='本次核对未完成；原任务未重新执行',error=str(exc)[-2500:]);return save(record)
 
 
 def tick():
     count=0
     for record in history():
         if record['state'] in ('QUEUED','WAIT_RESOURCE'):schedule(record['id']);count+=1
-        elif record['location']!='local' and record['state'] in ('DISPATCHING','SUBMITTED','UNKNOWN'):
+        elif record['location']!='local' and record['state'] in ACTIVE_REMOTE:
             refresh(record['id']);count+=1
         elif record['location']=='local' and record['state']=='RUNNING':
             if not process_alive(record.get('owner_pid')):

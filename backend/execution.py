@@ -714,10 +714,10 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     return record
 
 
-def ssh(alias,command,data=None,timeout=90,stdout_limit=524288):
+def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None):
     if os.environ.get('FPILOT_SSH_MODE', 'session') == 'session':
         from .remote_transport import run
-        return run(alias,command,data,timeout,stdout_limit)
+        return run(alias,command,data,timeout,stdout_limit,mutating=mutating)
     args=['ssh',*ssh_multiplex_options(alias),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',
           '-o','StrictHostKeyChecking=yes',alias,command]
     try:

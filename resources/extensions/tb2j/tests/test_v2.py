@@ -49,6 +49,20 @@ class TB2JV2Tests(unittest.TestCase):
         result=self.cli('doctor');self.assertTrue(result['ready'],result);self.assertEqual(result['python'],sys.executable);self.assertEqual(result['version'],'0.0.0-simulation')
         broken=self.root/'broken/TB2J';broken.mkdir(parents=True);(broken/'__init__.py').write_text('raise ImportError("broken actual import")')
         missing=self.cli('doctor',env={'PYTHONPATH':str(broken.parent)});self.assertFalse(missing['ready']);self.assertIn('TB2J',missing['missing'])
+    def test_independent_presentation_keeps_precision_all_rows_and_originals(self):
+        for mode in ('spinor','collinear'):
+            root=self.root/mode;req=request(root,mode);self.cli('run',req)
+            before={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (root/'outputs').rglob('*') if p.is_file()}
+            full=json.loads((root/'outputs/exchange.json').read_text())
+            payload={'schema':'fpilot.extension-presentation-request.v1','source_dir':str(root/'outputs'),'output_dir':str(root/'view')}
+            path=root/'view-request.json';path.write_text(json.dumps(payload))
+            result=subprocess.run([sys.executable,str(BASE/'scripts/presentation.py'),'render','--request',str(path)],capture_output=True,text=True,timeout=30,env={**os.environ,'PYTHONPATH':''})
+            self.assertEqual(result.returncode,0,result.stderr);manifest=json.loads(result.stdout);self.assertEqual(manifest['schema'],'fpilot.extension-presentation.v1')
+            index=json.loads((root/'view/index.json').read_text());self.assertEqual(index['exchange_count'],len(full['exchange']));self.assertEqual(index['orbital_count'],len(full['orbital']))
+            pairs=sum([json.loads((root/'view'/part['path']).read_text()) for part in index['exchange_parts']],[])
+            self.assertEqual(pairs[0][7],full['exchange'][0]['J_meV']);self.assertEqual(pairs[0][1:3],[1,3]);self.assertIn('–'.join(sorted((full['exchange'][0]['symbol_i'],full['exchange'][0]['symbol_j']))),index['element_pairs'])
+            self.assertTrue(all((root/'view'/a['path']).stat().st_size<10*1024**2 for a in manifest['assets']))
+            self.assertEqual(before,{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (root/'outputs').rglob('*') if p.is_file()})
     def test_collinear_and_soc_hr_and_tb_preserve_originals_precision_units_and_indices(self):
         for mode in ('spinor','collinear'):
             for combination in ('hr','tb'):

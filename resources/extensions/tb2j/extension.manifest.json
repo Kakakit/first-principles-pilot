@@ -2,7 +2,7 @@
   "schema": "fpilot.extension.v2",
   "id": "tb2j",
   "name": "TB2J 交换参数与轨道分解",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "从完成的 Wannier 来源计算 J、SOC DMI/各向异性和可选轨道分解。在来源服务器直接执行 TB2J，原文件保留。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
@@ -310,5 +310,8 @@
     "tests/fixtures/v2/spinor/wannier90.win",
     "tests/fixtures/v2/spinor/wannier90.wout",
     "tests/fixtures/v2/spinor/wannier90_tb.dat"
-  ]
+  ],
+  "presentation": {
+    "entrypoint": "scripts/presentation.py"
+  }
 }

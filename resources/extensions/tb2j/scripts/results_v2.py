@@ -89,9 +89,9 @@ def parse(raw,checked,options,output):
     dump(output/'exchange.json',full);export_csv(output/'exchange.csv',rows,['atom_i','atom_j','symbol_i','symbol_j','R','distance_A','J_meV','DMI_meV','Jani_meV'])
     paths=[('exchange.json','完整高精度数据','application/json'),('exchange.csv','交换参数 CSV','text/csv')]
     if orbital:
-        export_csv(output/'orbitals.csv',orbital,['atom_i','atom_j','R','distance_A','orbital_i','orbital_j','label_i','label_j','group_i','group_j','J_meV','DMI_meV','Jani_meV']);export_csv(output/'groups.csv',groups,['atom_i','atom_j','R','distance_A','total_J_meV','matrix_sum_meV','matrix_minus_J_meV','mapped_group_sum_meV','unmapped_matrix_meV','mapped_minus_J_meV','groups']);paths += [('orbitals.csv','原始轨道矩阵与确认标签','text/csv'),('groups.csv','用户分组与总 J 差值','text/csv')]
+        export_csv(output/'orbitals.csv',orbital,['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','orbital_i','orbital_j','label_i','label_j','group_i','group_j','J_meV','DMI_meV','Jani_meV']);export_csv(output/'groups.csv',groups,['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','total_J_meV','matrix_sum_meV','matrix_minus_J_meV','mapped_group_sum_meV','unmapped_matrix_meV','mapped_minus_J_meV','groups']);paths += [('orbitals.csv','原始轨道矩阵与确认标签','text/csv'),('groups.csv','用户分组与总 J 差值','text/csv')]
     def column(key,label,unit=''):return {'key':key,'label':label,'unit':unit}
-    common=[column('atom_i','原子 i（1 起）'),column('atom_j','原子 j（1 起）'),column('R','晶格平移 R'),column('distance_A','距离','Å')]
+    common=[column('symbol_i','元素 i'),column('atom_i','原子 i（1 起）'),column('symbol_j','元素 j'),column('atom_j','原子 j（1 起）'),column('R','晶格平移 R'),column('distance_A','距离','Å')]
     cols=common+[column('J_meV','J','meV')]
     if any('DMI_meV' in r for r in rows):cols+=[column('DMI_meV','DMI [x,y,z]','meV')]
     if any('Jani_meV' in r for r in rows):cols+=[column('Jani_meV','各向异性交换 3×3','meV')]

@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 import subprocess
 import zipfile
-from . import extension_protocol as p, extension_runs as runs, extension_remote as remote, extension_environments as environments, servers
+from . import extension_protocol as p, extension_runs as runs, extension_remote as remote, extension_environments as environments, extension_presentations as views, servers
 
 router=APIRouter(prefix='/api/extension-host')
 
@@ -71,6 +71,20 @@ def analysis(key:str):return call(runs.get,key)
 
 @router.post('/analyses/{key}/refresh')
 def refresh(key:str):return call(runs.refresh,key)
+
+@router.post('/analyses/{key}/presentation')
+def presentation(key:str):return call(views.schedule,key)
+
+@router.get('/analyses/{key}/presentation/{version}/state')
+def presentation_state(key:str,version:str):return call(views.state,key,version)
+
+@router.put('/analyses/{key}/presentation/{version}/state')
+def presentation_save_state(key:str,version:str,payload:dict):return call(views.save_state,key,version,payload)
+
+@router.get('/analyses/{key}/presentation/{version}/files/{name:path}')
+def presentation_file(key:str,version:str,name:str):
+    path,media=call(views.asset,key,version,name)
+    return FileResponse(path,media_type=media,headers={'X-Content-Type-Options':'nosniff','Content-Security-Policy':"sandbox allow-scripts allow-downloads; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'"})
 
 @router.get('/analyses/{key}/files/{name:path}')
 def output(key:str,name:str):
