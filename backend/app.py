@@ -181,6 +181,14 @@ def chain_resume(run_id: str, payload: ChainAction):
         raise HTTPException(422, str(exc)) from exc
 
 
+@app.post('/api/chains/{run_id}/refresh')
+def chain_refresh(run_id: str, payload: ChainAction):
+    try:
+        return chain_runs.refresh(run_id, payload.project_id)
+    except (ValueError, KeyError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 class ScanRequest(BaseModel):
     project: dict
     scan_node_id: str

@@ -39,8 +39,10 @@ def tick(refresh=None, notify=False):
         if r['state']=='DISPATCHING':
             try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(r['dispatch_started_at'])).total_seconds()
             except (KeyError,ValueError):age=181
-            # Dispatch SSH times out at 90s. Avoid a currently live submission.
-            if age<180:continue
+            # A source copy may take 900s. Include session/receipt allowance;
+            # status reads must not classify an upload still in progress.
+            timeout=r.get('dispatch_timeout_seconds',900 if any(item.get('mode')=='reflink-or-copy' for item in r.get('source_file_plan',{}).values()) else 180)
+            if age<timeout+65:continue
         try:
             updated=refresh(r['id'])
             checked+=1

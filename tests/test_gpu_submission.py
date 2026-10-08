@@ -100,10 +100,15 @@ class GpuSubmissionTests(unittest.TestCase):
         self.assertEqual(servers.validate(self.config)['walltime'],'1000:00:00')
     def test_final_remote_guard_rejects_gpu_busy_before_any_dispatch(self):
         idle=self.render(self.probe());busy=self.probe(active=1)
-        namespace={'sys':type('Args',(),{'argv':['guard',busy['availability']['stdout']+'FPILOT_QUEUE_BEGIN\nQueue: batch\n enabled = True\n started = True\n']})(),
-                   'json':json,'p':{'parse_preflight':servers.parser.parse_preflight},'s':{'select_resources':servers.selector.select_resources,'gpu_resources':servers.selector.gpu_resources},
+        import sys,io
+        namespace={'sys':sys,'json':json,'p':{'parse_preflight':servers.parser.parse_preflight},'s':vars(servers.selector),
                    'contract':{'config':self.config,'node':'node01','cores':None,'reason':'','profile':idle['profile']}}
-        with self.assertRaisesRegex(ValueError,'GPU compute processes'):exec(fast_dispatch.CAPACITY,namespace)
+        output,error=io.StringIO(),io.StringIO()
+        with patch.object(sys,'argv',['guard',busy['availability']['stdout']+'FPILOT_QUEUE_BEGIN\nQueue: batch\n enabled = True\n started = True\n']),patch.object(sys,'stdout',output),patch.object(sys,'stderr',error):
+            with self.assertRaises(SystemExit) as result:exec(fast_dispatch.CAPACITY,namespace)
+        self.assertEqual(result.exception.code,75)
+        self.assertIn('FPILOT_CAPACITY_WAIT=1',output.getvalue())
+        self.assertIn('GPU compute processes',error.getvalue())
     def test_unknown_or_mismatched_gpu_identity_does_not_become_waiting(self):
         report=self.probe();report['preflight']['hosts'][0]['nodes'][0]['GPU_INDICES']='0';report.pop('id');report=servers._store_probe(report)
         result=self.render(report);self.assertFalse(result['resource_ready']);self.assertFalse(candidate_pool.capacity_wait(result))

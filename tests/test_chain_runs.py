@@ -396,6 +396,65 @@ class ChainRunTests(unittest.TestCase):
             submit.assert_not_called()
         self.assertEqual(chains.get(run['id'])['state'], 'BLOCKED')
 
+    def test_unknown_is_identified_by_attempt_state_despite_stale_blocker(self):
+        run=self.frozen();run['steps']=run['steps'][2:3];run['state']='BLOCKED'
+        run['steps'][0].update(state='BLOCKED',attempt_id='lost',blocker='派发前检查未通过，没有调用调度器；CPUS_FREE must be greater than zero')
+        chains.save(run)
+        with patch.object(ex,'get',return_value={'id':'lost','state':'UNKNOWN'}),patch.object(ex,'submit') as submit:
+            with self.assertRaisesRegex(ValueError,'UNKNOWN'):chains.resume(run['id'],'p')
+            submit.assert_not_called()
+
+    def test_active_chain_rejoins_recovered_original_job_without_new_dispatch(self):
+        run=self.frozen();run['steps']=run['steps'][2:3];run['state']='ACTIVE'
+        run['authorization']={'config':{'alias':'jutai-1'},'resources':{}}
+        step=run['steps'][0]
+        step.update(state='BLOCKED',attempt_id='lost',attempts=['lost'],blocker='派发前检查未通过，没有调用调度器；旧错误')
+        chains.save(run)
+        with patch.object(ex,'get',return_value={'id':'lost','state':'RUNNING','job_id':'555.node01'}),patch.object(ex,'prepare') as prepare,patch.object(ex,'submit') as submit:
+            chains.tick()
+            prepare.assert_not_called();submit.assert_not_called()
+        result=chains.get(run['id'])
+        self.assertEqual(result['steps'][0]['state'],'RUNNING')
+        self.assertIsNone(result['steps'][0]['blocker'])
+        self.assertEqual(result['steps'][0]['attempts'],['lost'])
+
+    def test_unknown_blocker_updates_without_rethrow_or_scientific_unblock(self):
+        run=self.frozen();run['steps']=run['steps'][2:3];run['state']='ACTIVE'
+        run['authorization']={'config':{'alias':'jutai-1'},'resources':{}}
+        step=run['steps'][0]
+        step.update(state='BLOCKED',attempt_id='lost',attempts=['lost'],blocker='旧容量错误',waiting_reason='旧等待原因')
+        chains.save(run)
+        with patch.object(ex,'get',return_value={'id':'lost','state':'UNKNOWN'}),patch.object(ex,'submit') as submit:
+            chains.tick();submit.assert_not_called()
+        result=chains.get(run['id'])['steps'][0]
+        self.assertIn('UNKNOWN',result['blocker'])
+        self.assertNotIn('waiting_reason',result)
+        result['blocker']='数值未收敛';result.pop('blocker_kind',None)
+        with patch.object(ex,'get',return_value={'id':'lost','state':'COMPLETED'}):
+            self.assertFalse(chains._recover_blocked_step(result))
+        self.assertEqual(result['state'],'BLOCKED')
+
+    def test_chain_refresh_only_checks_original_receipt_and_preserves_pause(self):
+        run=self.frozen();run['steps']=run['steps'][2:3];run['state']='PAUSED'
+        run['steps'][0].update(state='BLOCKED',attempt_id='lost',attempts=['lost'],blocker='旧错误')
+        chains.save(run)
+        record={'id':'lost','state':'UNKNOWN'}
+        with patch.object(ex,'get',return_value=record),patch.object(ex,'refresh',return_value=record) as refresh,patch.object(ex,'submit') as submit,patch.object(chains.servers,'capacity_probe') as probe:
+            result=chains.refresh(run['id'],'p')
+            refresh.assert_called_once_with('lost')
+            submit.assert_not_called();probe.assert_not_called()
+        self.assertEqual(result['state'],'PAUSED')
+        self.assertIn('UNKNOWN',result['steps'][0]['blocker'])
+        record['state']='DISPATCHING'
+        with patch.object(ex,'get',return_value=record),patch.object(ex,'refresh') as refresh:
+            chains.refresh(run['id'],'p');refresh.assert_not_called()
+
+    def test_chain_refresh_cannot_read_other_project_attempts(self):
+        run=self.frozen()
+        with patch.object(ex,'refresh') as refresh:
+            with self.assertRaisesRegex(ValueError,'当前项目'):chains.refresh(run['id'],'other')
+            refresh.assert_not_called()
+
     def test_orphan_prepared_attempt_is_recovered_after_restart(self):
         run = self.frozen()
         step = run['steps'][0]

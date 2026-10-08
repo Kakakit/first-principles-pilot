@@ -17,7 +17,7 @@ def prefix(record,purpose='vasp'):
     selector_source=Path(servers.selector.__file__).read_text().split('if __name__ ==',1)[0]
     code='import sys,json\np={};s={}\nexec('+repr(parser_source)+',p)\nexec('+repr(selector_source)+',s)\n'
     contract={k:record[k] for k in ('config','node','cores','reason','profile')}
-    code+='contract='+repr(contract)+'\n'+CAPACITY
+    code+='contract='+repr(contract)+'\ntry:\n    exec('+repr(CAPACITY)+')\nexcept ValueError as exc:\n    print("FPILOT_RESOURCE_BLOCKED=1",flush=True)\n    print(str(exc),file=sys.stderr)\n    sys.exit(1)\n'
     queue_command='qstat -Qf' if servers.normalize_scheduler(config['scheduler'])=='pbs' else "sinfo -h -o 'FPILOT_PARTITION=%P|%a|%l'"
     body=servers.availability_command(config)+"printf 'FPILOT_QUEUE_BEGIN\\n'\n"+queue_command
     command=("set -e\nfpilot_submitting=0\nfpilot_created=0\n"
@@ -47,9 +47,17 @@ capacity,marker,queues=text.partition('FPILOT_QUEUE_BEGIN\n')
 if not marker:raise ValueError('live queue report missing')
 observed=p['parse_preflight'](capacity)
 gpu=contract['profile'].get('resource_request') if contract['profile'].get('resource_mode')=='gpu' else None
-selection=(s['gpu_resources'](observed,contract['config']['alias'],contract['node'],gpu) if gpu else
-    s['select_resources'](observed,contract['config']['alias'],contract['node'],
-    user_override=contract['cores'],user_override_evidence=contract['reason']))
+try:
+    selection=(s['gpu_resources'](observed,contract['config']['alias'],contract['node'],gpu) if gpu else
+        s['select_resources'](observed,contract['config']['alias'],contract['node'],
+        user_override=contract['cores'],user_override_evidence=contract['reason']))
+except s['ResourceSelectionError'] as exc:
+    facts,_=s['_node'](s['_host'](observed,contract['config']['alias']),contract['node'])
+    waiting=(facts.get('STATUS') in ('BUSY','FULLY_IDLE','PARTIAL','SUSPECT_LOAD') and
+             str(exc).startswith(s['CAPACITY_BLOCKERS']))
+    print('FPILOT_CAPACITY_WAIT=1' if waiting else 'FPILOT_RESOURCE_BLOCKED=1',flush=True)
+    print(str(exc),file=sys.stderr)
+    sys.exit(75)
 expected=contract['profile'].get('ppn',contract['profile'].get('ntasks'))
 if selection['requested_cores']!=expected:raise ValueError('live capacity changed; prepare again')
 if gpu and (selection['requested_gpus']!=contract['profile']['gpus'] or selection['gpu_resource_registered']!=contract['profile']['gpu_resource_registered']):raise ValueError('GPU allocation changed; prepare again')
@@ -88,14 +96,37 @@ def source_guards(path,files):
     return '\n'.join(line for name,info in files.items() for line in source_files.guard(remote_paths.shell_path(path)+'/'+shlex.quote(name),info))+'\n'
 
 
+def clear_previous_dispatch(record):
+    # These facts belong to one send, never to a later retry of its preview.
+    for field in ('not_dispatched','note','waiting_kind','dispatch_receipt'):
+        record.pop(field,None)
+
+
+def tracking_note(record):
+    if record['state']=='UNKNOWN':
+        record.pop('not_dispatched',None)
+        record.pop('waiting_kind',None)
+        missing='未找到原 attempt 目录；' if 'FPILOT_ATTEMPT_MISSING=1' in (record.get('status_receipt') or {}).get('stdout','') else ''
+        record['note']='提交回执待核查（UNKNOWN）；'+missing+'只核对原作业，确认前不会自动重投'
+    else:
+        record.pop('note',None)
+
+
 def known_not_submitted(record,receipt):
     import re
     match=re.search(r'^FPILOT_NOT_DISPATCHED=([01])$',receipt.get('stdout',''),re.M)
-    if not match or receipt.get('exit_code') in (None,0):return False
+    not_sent=receipt.get('transport_state')=='NOT_SENT' and receipt.get('exit_code') is None
+    if not not_sent and (not match or receipt.get('exit_code') in (None,0)):return False
     project_conflict = bool(re.search(r'^FPILOT_PROJECT_CONFLICT=1$',receipt.get('stdout',''),re.M))
-    record.update(state='PREPARED' if match[1]=='0' and not project_conflict else 'FAILED',job_id=None,
+    resource_blocked='FPILOT_RESOURCE_BLOCKED=1' in receipt.get('stdout','').splitlines()
+    retryable=not_sent or (match[1]=='0' and not project_conflict and not resource_blocked)
+    record.update(state='PREPARED' if retryable else 'FAILED',job_id=None,
                   not_dispatched=True,dispatch_receipt=receipt,updated_at=ex.now(),
                   note='派发前检查未通过，没有调用调度器；'+receipt.get('stderr','')[-400:])
+    if not_sent:
+        record.update(waiting_kind='CONNECTION',note='本次派发请求未发送，等待 SSH 连接恢复后复核资源；没有调用调度器')
+    elif 'FPILOT_CAPACITY_WAIT=1' in receipt.get('stdout','').splitlines():
+        record.update(waiting_kind='CAPACITY',note='节点仍被占用或负载未恢复，等待资源释放后复核；没有调用调度器')
     with closing(ex.db()) as c:
         c.execute("DELETE FROM branch_hosts WHERE state='RESERVED' AND attempt_id=?",(record['id'],))
         c.commit()

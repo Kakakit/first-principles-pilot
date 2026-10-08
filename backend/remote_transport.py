@@ -67,6 +67,12 @@ def _interpreter(alias):
     return value
 
 
+class RequestFailure(ConnectionError):
+    def __init__(self, message, started):
+        super().__init__(message)
+        self.started = started
+
+
 class Session:
     def __init__(self, alias, lane):
         self.alias, self.lane = alias, lane
@@ -145,11 +151,20 @@ class Session:
             threading.Thread(target=read,args=(getattr(self.process,kind),kind),daemon=True).start()
 
     def _request(self, group):
+        # Only startup failure proves that no command bytes were written.
+        # Mark a write as uncertain before trying it, including partial writes.
+        try:
+            return self._send_request(group)
+        except (OSError, ValueError, TimeoutError, ConnectionError) as exc:
+            raise RequestFailure(str(exc), any(item.get('send_started') for item in group)) from exc
+
+    def _send_request(self, group):
         startup = self._start()
         identifier = uuid.uuid4().hex
         payload = json.dumps({'id': identifier, 'jobs': [item['job'] for item in group]}, separators=(',', ':')).encode()+b'\n'
         started = time.monotonic()
         view = memoryview(payload)
+        for item in group: item['send_started'] = True
         while view:
             written = self.process.stdin.write(view)
             if not written: raise ConnectionError('SSH 请求写入中断')
@@ -161,6 +176,7 @@ class Session:
             raise ConnectionError('SSH 请求回执身份不一致')
         elapsed = time.monotonic()-started
         for index, (item, receipt) in enumerate(zip(group, result['results'])):
+            receipt['transport_state'] = 'RECEIVED'
             receipt['stdout'] = base64.b64decode(receipt['stdout']).decode(errors='replace')
             receipt['stderr'] = base64.b64decode(receipt['stderr']).decode(errors='replace')
             receipt['timing'] = {'session_start_seconds': startup if index==0 else 0, 'roundtrip_seconds': elapsed,
@@ -228,8 +244,10 @@ def run(alias, command, data=None, timeout=90, stdout_limit=524288, lane='normal
     session.jobs.put({'job': job, 'future': future, 'scope': scope, 'mutating': mutating, 'queued': time.monotonic()})
     try: receipt = future.result(timeout=timeout+65)
     except Exception as exc:
+        not_sent = isinstance(exc, RequestFailure) and not exc.started
         return {'exit_code': None, 'stdout': '', 'stdout_truncated': False,
-                'stderr': 'SSH 会话失败：'+str(exc)+'；提交结果不明确时禁止自动重投'}
+                'transport_state': 'NOT_SENT' if not_sent else 'UNCERTAIN',
+                'stderr': 'SSH 会话失败：'+str(exc)+('；请求未发送' if not_sent else '；提交结果不明确时禁止自动重投')}
     if scope is not None and not mutating:
         with scope['lock']: scope['memo'][identity] = dict(receipt)
     return receipt

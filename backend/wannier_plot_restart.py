@@ -166,7 +166,9 @@ def submit(key):
         control.enforce_limits(connection, record)
         from . import branch_bindings
         branch_bindings.reserve(connection,record)
-        record.update(state='DISPATCHING', dispatch_started_at=ex.now(), final_probe_id=fresh['id'])
+        from . import fast_dispatch
+        fast_dispatch.clear_previous_dispatch(record)
+        record.update(state='DISPATCHING', dispatch_started_at=ex.now(), final_probe_id=fresh['id'], dispatch_timeout_seconds=900)
         connection.execute('UPDATE attempts SET state=?,body=? WHERE id=?', ('DISPATCHING', json.dumps(record, ensure_ascii=False), key))
         control.journal(connection, key, 'DISPATCHING', {'plot_source_attempt_id': frozen['source_attempt_id']})
         connection.commit()
@@ -230,14 +232,17 @@ cat .job-id
 '''
     try:
         receipt = ex.ssh(record['config']['alias'], command, stream.getvalue(), timeout=900)
+        if receipt.get('transport_state')=='NOT_SENT' and fast_dispatch.known_not_submitted(record,receipt):return ex.get(key)
         token = r'\d+(?:\.[A-Za-z0-9_.-]+)?' if record['scheduler'] == 'pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
         match = re.search(r'^FPILOT_JOB_ID=(' + token + r')\s*$', receipt['stdout'], re.M)
         record.update(state='SUBMITTED' if match and receipt['exit_code'] == 0 else 'UNKNOWN',
                       job_id=match.group(1).split(';', 1)[0] if match else None,
                       dispatch_receipt=receipt, updated_at=ex.now())
+        fast_dispatch.tracking_note(record)
         ex.save(record)
         return ex.get(key)
     except BaseException:
         record.update(state='UNKNOWN', updated_at=ex.now())
+        fast_dispatch.tracking_note(record)
         ex.save(record)
         raise

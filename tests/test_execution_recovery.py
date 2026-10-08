@@ -40,6 +40,40 @@ class RecoveryTests(unittest.TestCase):
         with patch.object(ex,'submit') as submit,patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'FPILOT_EXIT=0\nFPILOT_TIMING=1\nFPILOT_EDIFF=1\njob_state = C\n','stderr':''}) as ssh:
             worker.tick();self.assertEqual(ex.get('a')['state'],'COMPLETED')
             self.assertIn('qstat -f 123.node01',ssh.call_args.args[1]);submit.assert_not_called()
+
+    def test_missing_directory_does_not_prove_not_dispatched(self):
+        record=self.record('a','UNKNOWN')
+        record.update(job_id=None,not_dispatched=True,note='派发前检查未通过，没有调用调度器；旧容量错误')
+        ex.save(record)
+        with patch.object(ex,'ssh',return_value={'exit_code':3,'stdout':'FPILOT_ATTEMPT_MISSING=1\n','stderr':'missing'}),patch.object(ex,'submit') as submit:
+            result=ex.refresh('a')
+        self.assertEqual(result['state'],'UNKNOWN')
+        self.assertNotIn('not_dispatched',result)
+        self.assertIn('未找到原 attempt 目录',result['note'])
+        self.assertNotIn('旧容量错误',result['note'])
+        submit.assert_not_called()
+
+    def test_lost_ack_recovers_original_job_in_one_read(self):
+        record=self.record('a','UNKNOWN');record['job_id']=None;ex.save(record)
+        receipt={'exit_code':0,'stdout':'FPILOT_JOB_ID=555.node01\njob_state = R\n','stderr':''}
+        with patch.object(ex,'ssh',return_value=receipt) as ssh,patch.object(ex,'submit') as submit:
+            result=ex.refresh('a')
+        self.assertEqual(result['state'],'RUNNING')
+        self.assertEqual(result['job_id'],'555.node01')
+        self.assertIn('qstat -f "$fpilot_job"',ssh.call_args.args[1])
+        self.assertEqual(ssh.call_count,1)
+        submit.assert_not_called()
+
+    def test_recovered_job_marker_is_not_evaluated_as_shell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            qstat=folder/'qstat';qstat.write_text('#!/bin/sh\nprintf "job_state = R\\n"\n');qstat.chmod(0o700)
+            env=dict(os.environ,PATH=str(folder)+os.pathsep+os.environ['PATH'])
+            for marker,valid in (('555.node01\n',True),('555;$(touch unsafe)\n',False)):
+                (folder/'.job-id').write_text(marker)
+                result=subprocess.run(['bash','-c',ex.recovered_job_command('pbs')],cwd=tmp,env=env,capture_output=True)
+                self.assertEqual(b'job_state = R' in result.stdout,valid)
+                self.assertFalse((folder/'unsafe').exists())
         with patch.object(ex,'ssh') as ssh:worker.tick();ssh.assert_not_called()
 
     def test_orphan_dispatch_recovers_but_recent_dispatch_is_not_raced(self):
@@ -50,6 +84,24 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(ex.get('old')['job_id'],'555.node01')
             self.assertEqual(ex.get('recent')['state'],'DISPATCHING')
             self.assertEqual(ssh.call_count,1)
+
+    def test_long_copy_dispatch_is_not_checked_before_its_receipt_deadline(self):
+        from datetime import datetime,timedelta,timezone
+        record=self.record('copy','DISPATCHING')
+        record.update(dispatch_timeout_seconds=900,dispatch_started_at=(datetime.now(timezone.utc)-timedelta(seconds=300)).isoformat())
+        ex.save(record)
+        with patch.object(ex,'refresh') as refresh:
+            self.assertEqual(worker.tick()['checked'],0)
+            refresh.assert_not_called()
+
+    def test_recovery_refuses_a_changed_actual_ssh_target(self):
+        record=self.record('a','UNKNOWN')
+        record['settings_snapshot']={'connection':{'hostname':'original'}}
+        ex.save(record)
+        with patch('backend.site_registration.connection_identity',return_value={'hostname':'other'}),patch.object(ex,'ssh') as ssh:
+            with self.assertRaisesRegex(ValueError,'SSH 连接目标'):ex.refresh('a')
+            ssh.assert_not_called()
+        self.assertEqual(ex.get('a')['state'],'UNKNOWN')
 
     def test_unknown_counts_in_limits_and_prepared_does_not(self):
         self.record('a','UNKNOWN');target=self.record('b','PREPARED')

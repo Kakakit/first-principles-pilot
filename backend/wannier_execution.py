@@ -516,7 +516,9 @@ def submit(key):
         control.enforce_limits(c, record)
         from . import branch_bindings
         branch_bindings.reserve(c,record)
-        record.update(state='DISPATCHING', dispatch_started_at=ex.now(), final_probe_id=fresh['id'])
+        from . import fast_dispatch
+        fast_dispatch.clear_previous_dispatch(record)
+        record.update(state='DISPATCHING', dispatch_started_at=ex.now(), final_probe_id=fresh['id'], dispatch_timeout_seconds=180)
         c.execute('UPDATE attempts SET state=?,body=? WHERE id=?', ('DISPATCHING', json.dumps(record, ensure_ascii=False), key))
         control.journal(c, key, 'DISPATCHING', {'parent_attempt_id': bundle['parent_attempt_id']}); c.commit()
     scheduler = record['scheduler']
@@ -574,16 +576,18 @@ cat .job-id
         remote=fast_dispatch.prefix(record,'wannier90')+fast_dispatch.source_guards(bundle['source_path'],bundle['source_files'])+remote.replace('mkdir "$dest"','mkdir "$dest"\nfpilot_created=1').replace(submit_command+' > .job-id','fpilot_submitting=1\n'+submit_command+' > .job-id')
     try:
         receipt = ex.ssh(record['config']['alias'], remote, stream.getvalue(), timeout=180)
-        if fast and fast_dispatch.known_not_submitted(record,receipt):return ex.get(key)
+        if (fast or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return ex.get(key)
         token = r'\d+(?:\.[A-Za-z0-9_.-]+)?' if scheduler == 'pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
         match = re.search(r'^FPILOT_JOB_ID=(' + token + r')\s*$', receipt['stdout'], re.M)
         job_id = match.group(1).split(';', 1)[0] if match else None
         record.update(state='SUBMITTED' if job_id and receipt['exit_code'] == 0 else 'UNKNOWN',
                       job_id=job_id, dispatch_receipt=receipt, updated_at=ex.now())
+        fast_dispatch.tracking_note(record)
         ex.save(record)
         return ex.get(key)
     except BaseException:
         record.update(state='UNKNOWN', updated_at=ex.now())
+        fast_dispatch.tracking_note(record)
         ex.save(record)
         raise
 
@@ -592,6 +596,7 @@ def refresh(key):
     record = ex.get(key)
     if record['state'] in ('PREPARED', 'COMPLETED', 'FAILED'):
         return record
+    ex.assert_recovery_target(record)
     root = remote_paths.shell_path(ex.attempt_path(record)['shell'])
     scheduler = record['scheduler']
     seed = source_names(record['seed'])[0][:-4]
@@ -611,8 +616,12 @@ fi
         else:
             command += "squeue -h -j {} -o 'FPILOT_SLURM_LIVE=%T' || true\n".format(job)
             command += "sacct -n -P -j {} --format=JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' '$1 == \"{}\" {{print \"FPILOT_SLURM_ACCOUNT=\"$2\"|\"$3; exit}}' || true\n".format(job, record['job_id'])
+    else:
+        command += ex.recovered_job_command(scheduler)
     receipt = ex.ssh(record['config']['alias'], command, timeout=30)
     out = receipt['stdout']
+    recovered=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',out,re.M)
+    if recovered and not record.get('job_id'):record['job_id']=recovered.group(1)
     exit_match = re.search(r'^FPILOT_EXIT=(\d+)', out, re.M)
     done = re.search(r'^FPILOT_DONE=([1-9]\d*)', out, re.M) is not None
     final = re.search(r'^FPILOT_FINAL=([1-9]\d*)', out, re.M) is not None
@@ -641,6 +650,8 @@ fi
                             'localization_converged':None,
                             'dft_wannier_agreement':'NOT_EVALUATED',
                             'scientific_validation':'NOT_PERFORMED'})
+    from .fast_dispatch import tracking_note
+    tracking_note(record)
     result = ex.save(record)
     if result['state'] == 'FAILED':
         control.freeze_failure(key)

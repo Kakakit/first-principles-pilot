@@ -767,6 +767,33 @@ def pbs_history_evidence(output):
     return (int(exit_match.group(1)) if exit_match else None, bool(complete_match))
 
 
+def recovered_job_command(scheduler):
+    """Query the original receipt in the same read, with no shell evaluation."""
+    command="""if test -s .job-id; then
+  fpilot_job=$(head -c 256 .job-id | awk '/^[0-9]+([.][A-Za-z0-9_.-]+)?(;[A-Za-z0-9_.-]+)?$/ {sub(/;.*/, ""); print; exit}')
+  if test -n "$fpilot_job"; then
+    printf 'FPILOT_JOB_ID=%s\\n' "$fpilot_job"
+"""
+    if scheduler=='pbs':
+        command+='''    if qstat -f "$fpilot_job" 2>/dev/null; then :; else
+      if command -v tracejob >/dev/null 2>&1; then
+        trace=$(tracejob -n 30 "$fpilot_job" 2>/dev/null || true)
+        if printf '%s\\n' "$trace" | grep -Fq "Job: $fpilot_job"; then
+          printf 'FPILOT_PBS_TRACE_EXIT='
+          printf '%s\\n' "$trace" | sed -n -E 's/.*Exit_status=([0-9]+).*/\\1/p' | tail -1
+          printf 'FPILOT_PBS_TRACE_COMPLETE='
+          printf '%s\\n' "$trace" | grep -c 'dequeuing from .*state COMPLETE' || true
+        fi
+      fi
+    fi
+'''
+    else:
+        command+='''    squeue -h -j "$fpilot_job" -o 'FPILOT_SLURM_LIVE=%T' || true
+    sacct -n -P -j "$fpilot_job" --format=JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' -v job="$fpilot_job" '$1 == job {print "FPILOT_SLURM_ACCOUNT="$2"|"$3; exit}' || true
+'''
+    return command+'  fi\nfi\n'
+
+
 def start_watcher(key):
     record=get(key)
     try:
@@ -893,7 +920,9 @@ def submit(key):
         branch_bindings.reserve(c,record)
         changed=c.execute('UPDATE attempts SET state=? WHERE id=? AND state=?',('DISPATCHING',key,'PREPARED')).rowcount
         if not changed:c.rollback();return get(key)
-        record.update(state='DISPATCHING',dispatch_started_at=now(),final_probe_id=fresh['id'])
+        fast_dispatch.clear_previous_dispatch(record)
+        dispatch_timeout=900 if any(item['mode']=='reflink-or-copy' for item in record.get('source_file_plan',{}).values()) else 180
+        record.update(state='DISPATCHING',dispatch_started_at=now(),final_probe_id=fresh['id'],dispatch_timeout_seconds=dispatch_timeout)
         control.journal(c,key,'DISPATCHING',{'node':record['node'],'cores':record['profile'].get('ppn',record['profile'].get('ntasks'))})
         c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(record,ensure_ascii=False),key));c.commit()
     scheduler=scheduler_name(record)
@@ -943,22 +972,30 @@ cat .job-id
     if fast:
         command=fast_dispatch.prefix(record)+command.replace('mkdir "$dest"','mkdir "$dest"\nfpilot_created=1').replace(submit_command+' > .job-id','fpilot_submitting=1\n'+submit_command+' > .job-id')
     try:
-        copy_required = any(item['mode'] == 'reflink-or-copy' for item in expected_plan.values())
-        receipt=ssh(record['config']['alias'],command,stream.getvalue(),timeout=900 if copy_required else 180)
-        if fast and fast_dispatch.known_not_submitted(record,receipt):return get(key)
+        receipt=ssh(record['config']['alias'],command,stream.getvalue(),timeout=dispatch_timeout)
+        if (fast or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return get(key)
         token_pattern=r'\d+(?:\.[A-Za-z0-9_.-]+)?' if scheduler=='pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
         match=re.search(r'^FPILOT_JOB_ID=('+token_pattern+r')\s*$',receipt['stdout'],re.M)
         job_id=match.group(1).split(';',1)[0] if match else None
         record.update(dispatch_receipt=receipt,job_id=match.group(1) if match else None,
                       state='SUBMITTED' if match and receipt['exit_code']==0 else 'UNKNOWN',updated_at=now())
         record['job_id']=job_id
+        fast_dispatch.tracking_note(record)
         save(record)
         result=refresh(key) if record['job_id'] and not fast else record
         # The single local worker owns subsequent checks; a second per-attempt
         # watcher would duplicate every remote status query.
         return get(key)
     except BaseException:
-        record['state']='UNKNOWN';save(record);raise
+        record['state']='UNKNOWN';fast_dispatch.tracking_note(record);save(record);raise
+
+
+def assert_recovery_target(record):
+    saved=record.get('settings_snapshot') or {}
+    if saved.get('connection'):
+        from .site_registration import connection_identity
+        if saved['connection']!=connection_identity(record['config']['alias']):
+            raise ValueError('实际 SSH 连接目标已改变；请恢复原服务器连接后核查原作业，不会重投')
 
 
 def refresh(key):
@@ -976,9 +1013,11 @@ def refresh(key):
         if observed is None or observed == terminal:
             return record
     expected_updated_at=record.get('updated_at')
+    assert_recovery_target(record)
     paths = attempt_path(record)
     path = remote_paths.shell_path(paths['shell'])
-    command=f'''cd {path} || exit 3
+    command=f'''if ! test -d {path}; then printf 'FPILOT_ATTEMPT_MISSING=1\\n'; exit 3; fi
+cd {path} || exit 3
 if test -s .job-id; then printf 'FPILOT_JOB_ID='; cat .job-id; fi
 if test -s .exit-status; then printf 'FPILOT_EXIT='; cat .exit-status; fi
 if test -f OUTCAR; then
@@ -1006,6 +1045,8 @@ fi
             job=shlex.quote(record['job_id'])
             command+="squeue -h -j {} -o 'FPILOT_SLURM_LIVE=%T' || true\n".format(job)
             command+="sacct -n -P -j {} --format=JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' '$1 == \"{}\" {{print \"FPILOT_SLURM_ACCOUNT=\"$2\"|\"$3; exit}}' || true\n".format(job,record['job_id'])
+    else:
+        command+=recovered_job_command(scheduler)
     receipt=ssh(record['config']['alias'],command,timeout=30)
     match=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',receipt['stdout'],re.M)
     if match and not record.get('job_id'):record['job_id']=match.group(1)
@@ -1068,6 +1109,8 @@ fi
                             'scheduler_evidence_source':'tracejob' if trace_complete else 'qstat' if state_match else 'sacct' if slurm_account else None,
                             'scheduler_exit_code':slurm_account.group(2) if slurm_account else None,
                             'scientific_validation':'NOT_PERFORMED'})
+    from .fast_dispatch import tracking_note
+    tracking_note(record)
     result=save(record,expected_updated_at=expected_updated_at)
     if result['state']=='FAILED':
         servers.invalidate_runtime(record['config'])

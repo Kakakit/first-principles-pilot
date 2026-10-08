@@ -467,6 +467,34 @@ def pause(run_id, project_id):
     return save(run)
 
 
+def _attempt_blocker(attempt):
+    if attempt['state']=='UNKNOWN':
+        return 'attempt UNKNOWN；提交回执待核查，须核对原作业；不会自动重投'
+    return attempt.get('note') or 'attempt '+attempt['state']+'；须核对原作业'
+
+
+def _recover_blocked_step(step):
+    if step['state']!='BLOCKED' or not step.get('attempt_id'):return False
+    attempt=ex.get(step['attempt_id'])
+    actual=attempt['state']
+    if actual=='UNKNOWN':
+        step['blocker']=_attempt_blocker(attempt)
+        step['blocker_kind']='SUBMISSION_UNKNOWN'
+        step.pop('waiting_reason',None)
+        return False
+    unknown_block=(step.get('blocker_kind')=='SUBMISSION_UNKNOWN' or
+                   'UNKNOWN' in str(step.get('blocker')) or
+                   '派发前检查未通过，没有调用调度器' in str(step.get('blocker')))
+    # Reconcile only positive evidence for the same attempt. Failed/scientific
+    # blockers retain their existing review and retry budget.
+    if actual=='PREPARED' or (unknown_block and actual in ('SUBMITTED','QUEUED','RUNNING','HELD','EXITING','COMPLETED')):
+        step['state'],step['blocker']=actual,None
+        step.pop('blocker_kind',None)
+        step.pop('waiting_reason',None)
+        return True
+    return False
+
+
 def resume(run_id, project_id):
     run = get(run_id)
     recycle.assert_available('chains',run['id'],run)
@@ -476,25 +504,38 @@ def resume(run_id, project_id):
     was_blocked = run['state'] == 'BLOCKED'
     changed = False
     for step in run['steps']:
-        if step['state'] == 'BLOCKED' and step.get('attempt_id') and 'UNKNOWN' in str(step.get('blocker')):
+        if step['state'] == 'BLOCKED' and step.get('attempt_id'):
             actual = ex.get(step['attempt_id'])['state']
             if actual == 'UNKNOWN':
                 if was_blocked:
                     raise ValueError('仍有 UNKNOWN attempt，须先核对原作业')
                 continue
-            step['state'], step['blocker'] = actual, None
-            changed = True
+            changed = _recover_blocked_step(step) or changed
         elif (step['state'] == 'BLOCKED' and not step.get('attempt_id') and
               'UNKNOWN' not in str(step.get('blocker'))):
             step['state'] = 'RETRY_PENDING' if step['stage'] in ('relax', 'scf') and len(step['attempts']) == 1 else 'PENDING'
             step['blocker'] = None
             changed = True
-        elif step['state'] == 'BLOCKED' and step.get('attempt_id') and ex.get(step['attempt_id'])['state'] == 'PREPARED':
-            step['state'], step['blocker'] = 'PREPARED', None
-            changed = True
-    if was_blocked and (not changed or any(step['state'] == 'BLOCKED' for step in run['steps'])):
+    if was_blocked and any(step['state'] == 'BLOCKED' for step in run['steps']):
         raise ValueError('当前阻塞须创建新运行版本或人工处理')
     run['state'] = 'ACTIVE'
+    return save(run)
+
+
+def refresh(run_id, project_id):
+    """Read original attempts; never probe capacity, prepare, or submit here."""
+    run=get(run_id)
+    if run['project_id']!=project_id:raise ValueError('计算链不属于当前项目')
+    recycle.assert_available('chains',run_id,run)
+    for step in run['steps']:
+        if step.get('attempt_id') and step['state']!='DONE':
+            attempt=ex.get(step['attempt_id'])
+            if attempt['state'] in ('UNKNOWN','SUBMITTED','QUEUED','RUNNING','HELD','EXITING'):
+                ex.refresh(attempt['id'])
+    # Reload after remote reads, preserving a concurrent pause or authorization.
+    run=get(run_id)
+    for step in run['steps']:
+        _recover_blocked_step(step)
     return save(run)
 
 
@@ -607,6 +648,9 @@ def _tick_one(run_id):
     probes = {}
     capacity_context = {}
     for step in run['steps']:
+        if step['state']=='BLOCKED':
+            _recover_blocked_step(step)
+            run=save(run)
         if step['state'] in ('DONE', 'BLOCKED'):
             continue
         attempt_id = step.get('attempt_id')
@@ -636,7 +680,9 @@ def _tick_one(run_id):
                     step['final_attempt_id'] = attempt_id
             elif attempt['state'] in ('FAILED', 'UNKNOWN'):
                 step['state'] = 'BLOCKED'
-                step['blocker'] = 'attempt ' + attempt['state'] + '；须核对原作业'
+                step['blocker'] = _attempt_blocker(attempt)
+                if attempt['state']=='UNKNOWN':step['blocker_kind']='SUBMISSION_UNKNOWN'
+                step.pop('waiting_reason',None)
             elif attempt['state'] == 'PREPARED':
                 step['state'] = 'PREPARED'
             else:
@@ -748,11 +794,14 @@ def _tick_one(run_id):
             step['state'] = submitted['state']
             if submitted['state'] == 'PREPARED':
                 step['waiting_reason'] = submitted.get('note') or '派发前检查未通过，等待资源恢复；没有提交任务'
+                step['waiting_kind'] = submitted.get('waiting_kind','CAPACITY')
             else:
                 step.pop('waiting_reason', None)
+                step.pop('waiting_kind',None)
                 if submitted['state'] in ('FAILED', 'UNKNOWN'):
                     step['state'] = 'BLOCKED'
-                    step['blocker'] = submitted.get('note') or 'attempt ' + submitted['state'] + '；须核对原作业'
+                    step['blocker'] = _attempt_blocker(submitted)
+                    if submitted['state']=='UNKNOWN':step['blocker_kind']='SUBMISSION_UNKNOWN'
         except ValueError as exc:
             if any(item in str(exc) for item in ('在途任务数已达上限', '核数预算不足',
                                                  '实时资源已变化或不可用')):

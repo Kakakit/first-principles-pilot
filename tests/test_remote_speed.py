@@ -36,6 +36,34 @@ class SessionTests(unittest.TestCase):
             result=transport.run('test','sleep 1',timeout=.05,mutating=True)
             self.assertIsNone(result['exit_code']);self.assertIn('do not replay',result['stderr'])
 
+    def test_startup_failure_proves_not_sent_but_failed_write_is_uncertain(self):
+        with patch.object(transport.Session,'_start',side_effect=ConnectionError('offline')) as start:
+            result=transport.run('test','qsub task',mutating=True)
+            self.assertEqual(result['transport_state'],'NOT_SENT')
+            self.assertEqual(start.call_count,1)
+        transport.close_all()
+        def write_failure(session):
+            from unittest.mock import Mock
+            session.process=Mock()
+            session.process.stdin.write.side_effect=BrokenPipeError('write failed')
+            session.process.poll.return_value=0
+            return 0
+        with patch.object(transport.Session,'_start',write_failure):
+            result=transport.run('test','qsub task',mutating=True)
+            self.assertEqual(result['transport_state'],'UNCERTAIN')
+
+    def test_lost_result_is_uncertain_after_command_was_sent(self):
+        original=transport.Session._line
+        def lose_result(session,deadline):
+            if session.buffer or session.process is not None and getattr(session,'ready_for_test',False):
+                raise ConnectionError('result lost')
+            result=original(session,deadline)
+            session.ready_for_test=True
+            return result
+        with self.local_worker(),patch.object(transport,'_interpreter',return_value=sys.executable),patch.object(transport.Session,'_line',lose_result):
+            result=transport.run('test','printf submitted',mutating=True)
+            self.assertEqual(result['transport_state'],'UNCERTAIN')
+
 
 class CacheTests(unittest.TestCase):
     def test_cache_survives_reload_expiry_and_clear_retains_research_files(self):
@@ -116,7 +144,7 @@ class DispatchGuardTests(unittest.TestCase):
         profile={'ppn':48};config={'alias':'jutai-1','scheduler':'pbs','queue':'batch','walltime':'01:00:00','runtime_source':'script','program':'vasp_std','vasp_executable':'vasp_std'}
         record={'config':config,'node':'node01','cores':None,'reason':'','profile':profile}
         original=servers.availability_command
-        for status,free,okay in (('FULLY_IDLE',48,True),('BUSY',0,False),('FULLY_IDLE',24,False)):
+        for status,free,okay in (('FULLY_IDLE',48,True),('BUSY',0,False),('SUSPECT_LOAD',0,False),('DOWN',0,False),('FULLY_IDLE',24,False)):
             capacity=f'===== jutai-1 =====\nSCHEDULER=PBS/Torque\nNODE=node01 STATUS={status} CPUS_FREE={free} CPUS_TOTAL=48\n'
             with tempfile.TemporaryDirectory() as tmp:
                 bin=Path(tmp);qstat=bin/'qstat';qstat.write_text('#!/bin/sh\nprintf "Queue: batch\\n enabled = True\\n started = True\\n resources_max.walltime = 24:00:00\\n"\n');qstat.chmod(0o700)
@@ -127,6 +155,22 @@ class DispatchGuardTests(unittest.TestCase):
                 self.assertEqual(result.returncode==0,okay,result.stderr)
                 self.assertEqual(b'FPILOT_MUTATION' in result.stdout,okay)
                 if not okay:self.assertIn(b'FPILOT_NOT_DISPATCHED=0',result.stdout)
+                if status in ('BUSY','SUSPECT_LOAD'):
+                    self.assertIn(b'FPILOT_CAPACITY_WAIT=1',result.stdout)
+                    self.assertNotIn(b'Traceback',result.stderr)
+                if status=='DOWN':self.assertIn(b'FPILOT_RESOURCE_BLOCKED=1',result.stdout)
+
+    def test_connection_wait_requires_positive_not_sent_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp,patch.object(execution,'ROOT',Path(tmp)),patch.object(execution,'save'):
+            with execution.db() as db:
+                db.execute('CREATE TABLE IF NOT EXISTS branch_hosts(project_id,scope,alias,state,attempt_id)')
+            for transport_state,known in (('NOT_SENT',True),('UNCERTAIN',False),(None,False)):
+                record={'id':'a'}
+                receipt={'exit_code':None,'stdout':'','stderr':'offline','transport_state':transport_state}
+                self.assertEqual(fast_dispatch.known_not_submitted(record,receipt),known)
+                if known:
+                    self.assertEqual(record['state'],'PREPARED')
+                    self.assertEqual(record['waiting_kind'],'CONNECTION')
 
 
 if __name__=='__main__':unittest.main()
@@ -149,9 +193,18 @@ class SingleDispatchTests(unittest.TestCase):
                 'remote_project_path_absolute':'/home/u/230269265lht/material-projects/p','input_audit':{}}
             with execution.db() as db:db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,'PREPARED',json.dumps(record)))
             files={n:b'test\n' for n in ('INCAR','POSCAR','KPOINTS','POTCAR')}
+            waiting={'exit_code':75,'stdout':'FPILOT_CAPACITY_WAIT=1\nFPILOT_NOT_DISPATCHED=0\n','stderr':'busy'}
+            offline={'exit_code':None,'stdout':'','stderr':'offline','transport_state':'NOT_SENT'}
             receipt={'exit_code':0,'stdout':'FPILOT_JOB_ID=123.mock\n','stderr':''}
-            with patch.object(execution,'bundle',return_value=({'stage':'scf'},files)),patch.object(execution,'ssh',return_value=receipt) as ssh,patch.object(execution,'start_watcher'),patch.object(servers,'capacity_probe') as probe:
-                result=execution.submit(key);self.assertEqual(result['state'],'SUBMITTED');self.assertEqual(ssh.call_count,1);probe.assert_not_called()
+            with patch.object(execution,'bundle',return_value=({'stage':'scf'},files)),patch.object(execution,'ssh',side_effect=[waiting,offline,receipt]) as ssh,patch.object(execution,'start_watcher'),patch.object(servers,'capacity_probe') as probe:
+                wait=execution.submit(key);self.assertEqual(wait['state'],'PREPARED');self.assertEqual(wait['waiting_kind'],'CAPACITY')
+                wait=execution.submit(key);self.assertEqual(wait['state'],'PREPARED');self.assertEqual(wait['waiting_kind'],'CONNECTION')
+                def sent(*args,**kwargs):
+                    pending=execution.get(key)
+                    self.assertNotIn('not_dispatched',pending);self.assertNotIn('note',pending)
+                    return receipt
+                ssh.side_effect=sent
+                result=execution.submit(key);self.assertEqual(result['state'],'SUBMITTED');self.assertEqual(ssh.call_count,3);probe.assert_not_called()
                 self.assertIn('FPILOT_QUEUE_BEGIN',ssh.call_args.args[1]);self.assertIn('fpilot_submitting=1',ssh.call_args.args[1])
-                execution.submit(key);self.assertEqual(ssh.call_count,1)
+                execution.submit(key);self.assertEqual(ssh.call_count,3)
                 self.assertEqual(branch_bindings.inspect('p',['n'])['state'],'BOUND')
