@@ -3,8 +3,64 @@ import platform
 from typing import Literal, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+from contextlib import asynccontextmanager
 
-app = FastAPI(title="First Principles Workbench", version="1.0.0")
+@asynccontextmanager
+async def lifespan(application):
+    from . import problem_records
+    try:problem_records.backfill()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception('Problem notebook backfill failed; execution state is unchanged')
+    yield
+
+
+app = FastAPI(title="First Principles Workbench", version="1.0.0",lifespan=lifespan)
+
+
+@app.get('/api/problem-records')
+def problem_list():
+    from . import problem_records
+    try:return {'records':problem_records.listing()}
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/problem-records/collect')
+def problem_collect(payload: dict):
+    from . import problem_records
+    try:return problem_records.capture(payload['source_kind'],payload['source_id'],manual=True,excerpt=payload.get('excerpt'))
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/problem-records/export')
+def problem_export(payload: dict):
+    from . import problem_records
+    from fastapi.responses import Response
+    try:
+        format=payload.get('format','json');content=problem_records.export(payload['ids'],format)
+        return Response(content,media_type='application/json' if format=='json' else 'text/markdown; charset=utf-8',headers={'Content-Disposition':'attachment; filename="problem-records.'+('json' if format=='json' else 'md')+'"'})
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/problem-records/{key}')
+def problem_detail(key: str):
+    from . import problem_records
+    try:return problem_records.get(key)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.put('/api/problem-records/{key}')
+def problem_save(key: str,payload: dict):
+    from . import problem_records
+    try:return problem_records.save(key,payload['notes'],payload.get('incar_tags',[]))
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/kpoints/suggest')
+def kpoints_suggest(payload: dict):
+    from . import kpoints
+    try:return kpoints.suggest(payload['lattice'],payload.get('kpr',0.04),payload.get('center','Gamma'),payload.get('gamma_only',False))
+    except (ValueError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
 @app.get("/api/health")

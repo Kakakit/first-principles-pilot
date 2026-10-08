@@ -107,6 +107,9 @@ def save(record, expected_updated_at=False):
         from . import branch_bindings
         branch_bindings.commit(c,record)
         c.execute('UPDATE attempts SET state=?,body=? WHERE id=?',(record['state'],json.dumps(record,ensure_ascii=False),record['id']));c.commit()
+    if record['state']=='FAILED':
+        from . import problem_records
+        problem_records.try_capture('attempts',record['id'],record)
     return record
 
 

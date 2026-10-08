@@ -166,6 +166,9 @@ def run(project_id, attempt_id, mode, ions='all', orbitals='d'):
     except Exception as exc:
         result.update(state='FAILED',error=str(exc)[:1000])
     (directory / 'analysis.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+    if result['state']=='FAILED':
+        from . import problem_records
+        problem_records.try_capture('plots',result['id'],result)
     return result
 
 

@@ -63,6 +63,9 @@ def purge(kind,key,confirm_local=False,include_children=True):
     """Explicit irreversible cleanup of one recycled local record, never remote files."""
     path=marker(kind,key)
     if confirm_local is not True or not path.is_file():raise ValueError('请先回收记录，再确认彻底清理本地数据')
+    # Retain existing failures/explicit notes before any original input is removed.
+    from . import problem_records
+    problem_records.backfill()
     if kind == 'projects':
         record=json.loads(path.read_text())
         results=[]
@@ -187,6 +190,9 @@ def is_recycled(kind, key):
 
 
 def move(kind, key, project=None):
+    if kind=='projects':
+        from . import problem_records
+        problem_records.backfill({project['id']:project} if project else None)
     path = marker(kind, key)
     project_id = None
     label = key[:12]

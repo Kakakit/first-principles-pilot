@@ -252,6 +252,7 @@ def generate(project, node_id, context=None):
             if number(values['EMIN']) >= number(values['EMAX']): errors.append('EMIN 必须小于 EMAX')
         except ValueError: pass
     options = node["data"].get("inputDraft", {})
+    kmesh_generation = None
     effective_potcar_id = options.get('potcar_id') or project.get('sharedPotcar', {}).get('id')
     effective_potcar_provenance = options.get('potcar_provenance_id') if options.get('potcar_id') else project.get('sharedPotcar', {}).get('provenance_id')
     if kind in ("bands", "dos", "vasp-wannier") and parent and parent["data"]["kind"] == "scf":
@@ -388,6 +389,9 @@ def generate(project, node_id, context=None):
             if center not in ("Gamma", "Monkhorst-Pack"):
                 raise ValueError("请明确网格中心")
             files["KPOINTS"] = "Regular mesh\n0\n" + center + "\n" + " ".join(str(int(x)) for x in grid) + "\n0 0 0\n"
+            if options.get('kmesh_info'):
+                from . import kpoints
+                kmesh_generation=kpoints.generation_info(options['kmesh_info'],[int(x) for x in grid],center)
             if values["ISMEAR"] == "-5":
                 warnings.append("四面体积分仍需实际 VASP 网格和适用性验证；网格尺寸检查不证明四面体可用")
                 if min(grid) < 2:
@@ -441,7 +445,8 @@ def generate(project, node_id, context=None):
             "generated_tags": {k: v for k, v in tags.items() if k not in values}, "stage": kind,
             "restart_required": restart_required, "source_draft": source_draft,
             "band_path_source_sha256": options.get('path_structure_hash') if kind == 'bands' else None,
-            "band_path_source_attempt_id": options.get('path_source_attempt_id') if kind == 'bands' else None}
+            "band_path_source_attempt_id": options.get('path_source_attempt_id') if kind == 'bands' else None,
+            **({'kmesh_generation':kmesh_generation} if kmesh_generation else {})}
 
 
 def freeze(project, node_id, reason, *, context=None, report=None, verification_mode='lightweight', defer_sources=False, execution_scope=None):

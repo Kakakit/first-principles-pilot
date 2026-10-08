@@ -102,17 +102,18 @@ def snapshot(key):
 
 def notes(key):
     ex.get(key)
+    from . import problem_records
+    archived=problem_records.raw(problem_records.identity('attempts',key)) if re.fullmatch(r'[a-f0-9]{32}',key) else None
+    if archived is not None:return archived['notes']
     path=ex.ROOT/'failure-notes'/(key+'.json')
     return json.loads(path.read_text()) if path.exists() else {'user_note':'','suspected_cause':'','confirmed_cause':'','confirmation_evidence':''}
 
 
 def save_notes(key,value):
     ex.get(key)
-    fields={'user_note','suspected_cause','confirmed_cause','confirmation_evidence'}
-    if not isinstance(value,dict) or set(value)!=fields or any(not isinstance(v,str) or len(v)>4000 for v in value.values()):
-        raise ValueError('备注字段必须为文本，每项不超过 4000 字符')
-    if value['confirmed_cause'].strip() and not value['confirmation_evidence'].strip():
-        raise ValueError('已确认原因必须同时填写确认依据；推测请放入疑似原因')
+    from . import problem_records
+    value=problem_records.validate_notes(value)
+    if re.fullmatch(r'[a-f0-9]{32}',key):problem_records.capture('attempts',key,manual=True,notes=value)
     write_json(ex.ROOT/'failure-notes'/(key+'.json'),value)
     return value
 
@@ -121,4 +122,6 @@ def freeze_failure(key):
     # A fixed per-attempt receipt is immutable; re-reading a terminal task adds no copies.
     path=ex.ROOT/'failure-snapshots'/(key+'.json')
     if not path.exists():write_json(path,snapshot(key))
+    from . import problem_records
+    problem_records.try_capture('attempts',key)
     return path

@@ -80,6 +80,9 @@ def catalog(attempt_id=None, listing=None):
 
 def _write_record(directory, record):
     (directory / 'analysis.json').write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
+    if record['state']=='FAILED':
+        from . import problem_records
+        problem_records.try_capture('local-analyses',record['id'],record)
     return record
 
 

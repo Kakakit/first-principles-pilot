@@ -42,6 +42,22 @@ class InputTests(unittest.TestCase):
         self.assertEqual(result['files']['KPOINTS'], 'Regular mesh\n0\nGamma\n4 4 4\n0 0 0\n')
         self.assertNotEqual(result['files']['POSCAR'], 'not a POSCAR')
 
+    def test_mesh_generation_information_is_optional_frozen_and_never_recalculates_old_grid(self):
+        from backend import kpoints
+        lattice=self.project['nodes'][0]['data']['structure']['lattice']
+        suggestion=kpoints.suggest(lattice,.04)
+        draft=self.project['nodes'][1]['data']['inputDraft']
+        draft.update(grid=' '.join(map(str,suggestion['grid'])),center=suggestion['center'],kmesh_info=json.dumps({**suggestion,'lattice':lattice,'source':{'kind':'reference','label':'导入结构'}}))
+        report=inputs.generate(self.project,'c')
+        self.assertFalse(report['errors']);self.assertEqual(report['kmesh_generation']['grid'],suggestion['grid'])
+        frozen=inputs.freeze(self.project,'c','test mesh provenance')
+        self.assertEqual(frozen['manifest']['kmesh_generation'],report['kmesh_generation'])
+        original=(inputs.ROOT/'inputs'/(frozen['id']+'.zip')).read_bytes()
+        draft.update(grid='8 8 8');draft.pop('kmesh_info')
+        updated=inputs.generate(self.project,'c');self.assertNotIn('kmesh_generation',updated)
+        self.assertIn('8 8 8',updated['files']['KPOINTS'])
+        self.assertEqual((inputs.ROOT/'inputs'/(frozen['id']+'.zip')).read_bytes(),original)
+
     def test_catalog_typed_passthrough_custom_and_restart_contract(self):
         layer=self.project['nodes'][1]['data']['parameters']
         layer['values'].update(ALGO='All',NBANDS='16',
