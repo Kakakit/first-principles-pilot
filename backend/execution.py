@@ -231,7 +231,7 @@ def source_file_plan(snapshot, incar):
         target = 'POSCAR' if name == 'CONTCAR' else name
         writable = (name == 'CHGCAR' and not charge_read_only or name == 'WAVECAR' and not wave_read_only
                     or manual_restart and name in ('CHGCAR', 'WAVECAR'))
-        mode = 'copy' if name == 'CONTCAR' else 'reflink-or-copy' if writable else 'hardlink'
+        mode = 'copy' if name in ('CONTCAR', 'POSCAR') else 'reflink-or-copy' if writable else 'hardlink'
         result[name] = {**info, 'target': target, 'mode': mode}
     return result
 

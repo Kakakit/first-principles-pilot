@@ -1,10 +1,12 @@
 import copy
+import base64
 import hashlib
 import json
 import unittest
 from unittest.mock import patch
 import test_chain_runs as fixture_module
 from backend import execution as ex, inputs, source_contracts as sources, branch_bindings as branches
+from backend.structures import parse_structure
 
 class SubmissionContracts(unittest.TestCase):
     def test_case_execution_identity_is_frozen_and_cannot_enter_single_submission(self):
@@ -69,24 +71,75 @@ class SubmissionContracts(unittest.TestCase):
                      'remote_path_absolute':'/home/user/230269265lht/material-projects/chain/flows/main/stages/02-relax/attempts/run',
                      'evidence':{'vasp_timing':True,'ediff_reached':True,'ionic_converged':True,'wrapper_exit':0}}
         with ex.db() as c:c.execute('INSERT INTO attempts VALUES(?,?,?)',('old','COMPLETED',json.dumps(self.record)))
-        self.snapshot=patch.object(sources.source_files,'snapshot',side_effect=lambda alias,path,names,ssh,mode='lightweight':{n:{'size_bytes':42,'mtime':'time','verification_mode':'metadata' if n in ('CHGCAR','WAVECAR') else 'content',**({'sha256':self.project['nodes'][0]['data']['structure']['source']['sha256']} if n=='CONTCAR' else {})} for n in names});self.snapshot.start();self.addCleanup(self.snapshot.stop)
+        _, source_files = ex.bundle(self.source_bundle, allow_dependencies=True)
+        self.actual_poscar = parse_structure('POSCAR', 'poscar', base64.b64encode(source_files['POSCAR']).decode())
+        self.snapshot=patch.object(sources.source_files,'snapshot',side_effect=lambda alias,path,names,ssh,mode='lightweight':{n:{'size_bytes':42,'mtime':'time','verification_mode':'metadata' if n in ('CHGCAR','WAVECAR') else 'content',**({'sha256':(self.actual_poscar if n=='POSCAR' else self.project['nodes'][0]['data']['structure'])['source']['sha256']} if n in ('POSCAR','CONTCAR') else {})} for n in names});self.snapshot.start();self.addCleanup(self.snapshot.stop)
         from backend import artifacts
         structure=self.project['nodes'][0]['data']['structure']
-        self.artifact=patch.object(artifacts,'preview',return_value={'structure':structure,'partial':False});self.artifact.start();self.addCleanup(self.artifact.stop)
+        self.artifact=patch.object(artifacts,'preview',side_effect=lambda key,name,*args:{'structure':self.actual_poscar if name=='POSCAR' else structure,'partial':False});self.artifact.start();self.addCleanup(self.artifact.stop)
 
     def set_source(self,node_id,mode,purpose='charge',files='charge'):
         node=next(n for n in self.project['nodes'] if n['id']==node_id)
         node['data']['sourceDraft']={'mode':mode,'purpose':purpose,'files':files,'attempt_id':'old','acknowledge_differences':True}
 
-    def test_charge_recalculation_retains_configured_poscar(self):
+    def test_charge_recalculation_uses_actual_history_poscar(self):
         self.set_source('r','self')
         frozen=inputs.freeze(self.project,'r','charge')
         contract=frozen['manifest']['source_contract']
-        self.assertEqual(contract['structure'],'configured');self.assertEqual(set(contract['roles']),{'charge'})
+        self.assertEqual(contract['structure'],'source');self.assertEqual(set(contract['roles']),{'structure','charge'})
+        self.assertEqual(contract['roles']['structure']['file'],'POSCAR')
         _,files=ex.bundle(frozen['id'],allow_dependencies=True)
         self.assertIn('POSCAR',files);self.assertIn(b'ICHARG = 1',files['INCAR'])
         plan=ex.source_file_plan(sources.materialize(contract,'one'),files['INCAR'])
         self.assertNotIn('CONTCAR',plan);self.assertEqual(plan['CHGCAR']['mode'],'reflink-or-copy')
+        self.assertEqual(plan['POSCAR']['mode'],'copy')
+        self.assertEqual(files['POSCAR'],base64.b64decode(self.actual_poscar['source']['base64']))
+
+    def test_scf_chain_restart_freezes_materialized_geometry_not_root_reference(self):
+        # The old SCF froze an unoptimized reference, then ran with relax CONTCAR.
+        old_bundle=inputs.freeze(self.project,'c','old chain SCF')['id']
+        actual=copy.deepcopy(self.project['nodes'][0]['data']['structure'])
+        from backend.structure_edit import edit_structure, geometry_hash
+        actual=edit_structure(actual,[[v*1.02 for v in row]for row in actual['lattice']],
+                              [dict(a,coordinates=a['fractional'])for a in actual['atoms']],'fractional')
+        self.actual_poscar=parse_structure('POSCAR','poscar',base64.b64encode(actual['poscar'].encode()).decode())
+        self.record.update(node_id='c',bundle_id=old_bundle,
+                           source_file_plan={'CONTCAR':{'target':'POSCAR','sha256':self.actual_poscar['source']['sha256']}})
+        with ex.db() as c:c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(self.record),'old'))
+        self.set_source('c','self',files='both')
+        report=inputs.generate(self.project,'c');unchanged=copy.deepcopy(report)
+        self.assertIn('POSCAR.reference', report['files'])
+        self.assertNotIn('POSCAR', report['files'])
+        with patch.object(ex,'ssh',side_effect=AssertionError('candidate listing must stay local')):
+            chosen=sources.resolve(self.project,'c')['candidates'][0]
+            self.assertEqual(chosen['structure_file'],'POSCAR')
+        frozen=inputs.freeze(self.project,'c','restart static',report=report)
+        self.assertEqual(report,unchanged)
+        _,files=ex.bundle(frozen['id'])
+        self.assertEqual(files['POSCAR'],base64.b64decode(self.actual_poscar['source']['base64']))
+        self.assertNotEqual(frozen['manifest']['geometry_sha256'],unchanged['geometry_sha256'])
+        self.assertEqual(frozen['manifest']['geometry_sha256'],geometry_hash(self.actual_poscar))
+        self.assertEqual(frozen['manifest']['structure_source']['volume_A3'],self.actual_poscar['volume'])
+        self.assertEqual(frozen['manifest']['source_contract']['roles']['structure']['attempt_id'],'old')
+
+    def test_missing_or_modified_history_poscar_never_falls_back_to_root(self):
+        self.set_source('r','self')
+        with patch.object(sources.source_files,'snapshot',side_effect=ValueError('POSCAR 不可读取')):
+            with self.assertRaisesRegex(ValueError,'POSCAR'):inputs.freeze(self.project,'r','missing input')
+        altered=copy.deepcopy(self.actual_poscar)
+        altered['source']['sha256']='a'*64
+        with patch('backend.artifacts.preview',return_value={'structure':altered,'partial':False}):
+            with self.assertRaisesRegex(ValueError,'POSCAR.*变化'):inputs.freeze(self.project,'r','modified input')
+        self.record['source_file_plan']={'CONTCAR':{'target':'POSCAR','sha256':'b'*64}}
+        with ex.db() as c:c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(self.record),'old'))
+        with self.assertRaisesRegex(ValueError,'POSCAR.*身份不符'):inputs.freeze(self.project,'r','unexpected input')
+
+    def test_old_configured_contract_is_materialized_without_reinterpretation(self):
+        contract={'schema':'fpilot.source-contract.v1','mode':'self','purpose':'charge','structure':'configured',
+                  'verification_mode':'lightweight','roles':{'charge':{'attempt_id':'old','alias':'one','file':'CHGCAR',
+                  'source_path':self.record['remote_path_absolute'],
+                  'metadata':{'size_bytes':42,'mtime':'time','verification_mode':'metadata'}}}}
+        self.assertEqual(set(sources.materialize(contract,'one')['files']),{'CHGCAR'})
 
     def test_continue_optimization_uses_contcar_and_explicit_wave_choice(self):
         self.set_source('r','self','continue','both')

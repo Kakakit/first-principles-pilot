@@ -278,7 +278,8 @@ def generate(project, node_id, context=None):
             current_m = dict(shared.get("moments", {}), **local.get("moments", {}))
             if any(parent_m.get(a["id"]) != current_m.get(a["id"]) for a in geometry["atoms"]):
                 warnings.append("磁矩对称性设置与上游 SCF 不一致；须审阅固定电荷来源")
-    files = {"POSCAR.reference" if dependencies else "POSCAR": geometry["poscar"]}
+    reference_geometry = dependencies or source_draft.get('mode') == 'self' and source_draft.get('purpose', 'charge') == 'charge'
+    files = {"POSCAR.reference" if reference_geometry else "POSCAR": geometry["poscar"]}
     tags = {k: str(v).strip() for k, v in values.items() if v is not None and k != "XC_FUNCTIONAL"}
     for tag in ('LWAVE', 'LCHARG', 'LASPH', 'LSORBIT', 'LNONCOLLINEAR', 'GGA_COMPAT', 'LORBMOM'):
         if tag in tags: tags[tag] = '.TRUE.' if tags[tag] == 'true' else '.FALSE.'
@@ -457,6 +458,10 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
     if verification_mode not in ('lightweight', 'full'):
         raise ValueError('文件核验策略无效')
     report = report if report is not None else generate(project, node_id, context)
+    # Freeze may replace the reference geometry with an exact historical POSCAR.
+    # Keep shared generation reports and project drafts unchanged.
+    from copy import deepcopy
+    report = deepcopy(report)
     if report['errors']:raise ValueError('请先修正输入错误：'+'; '.join(report['errors']))
     source_contract = None
     node = next(n for n in project['nodes'] if n['id'] == node_id)

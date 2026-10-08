@@ -4,6 +4,20 @@ from . import source_files
 MODES = ('new', 'self', 'upstream', 'manual')
 
 
+def structure_file(mode, purpose):
+    if mode == 'upstream' or purpose == 'continue':
+        return 'CONTCAR'
+    return 'POSCAR' if mode == 'self' else None
+
+
+def input_poscar_hash(record, manifest):
+    """A chain's actual POSCAR is its materialized source, not POSCAR.reference."""
+    for name, info in record.get('source_file_plan', {}).items():
+        if info.get('target', 'POSCAR' if name == 'CONTCAR' else name) == 'POSCAR':
+            return info.get('sha256')
+    return manifest.get('files', {}).get('POSCAR', {}).get('sha256')
+
+
 def draft(project, node_id):
     node = next(n for n in project['nodes'] if n['id']==node_id)
     value = node['data'].get('sourceDraft') or {}
@@ -71,6 +85,7 @@ def resolve(project, node_id, execution_scope=None):
             import json
             known={f['path'] for f in json.loads(listing.read_text()).get('files',[]) if f.get('size_bytes',0)>0}
             required={'CHGCAR'} if mode in ('self','manual') else {'CONTCAR'}
+            if structure_file(mode, value['purpose']):required.add(structure_file(mode, value['purpose']))
             if mode=='upstream' and value.get('read_charge',True):required.add('CHGCAR')
             if value['files']=='both':required.add('WAVECAR')
             if value['purpose']=='continue':required.add('CONTCAR')
@@ -90,13 +105,14 @@ def resolve(project, node_id, execution_scope=None):
                 for tag in ('GGA','ISPIN','LDAU','LDAUTYPE','LDAUL','LDAUU','LDAUJ','LMAXMIX','ENCUT','PREC','LSORBIT','LNONCOLLINEAR','SAXIS','GGA_COMPAT','MAGMOM'):
                     a,b=ex._incar_value(old_files['INCAR'],tag),ex._incar_value(current_report['files']['INCAR'].encode(),tag)
                     if a!=b:differences.append(f'{tag}：来源 {a or "未设置"} → 本次 {b or "未设置"}')
-                if current_report.get('geometry_sha256')!=ex.bundle(rec['bundle_id'],allow_dependencies=True)[0].get('geometry_sha256'):differences.append('配置结构与来源冻结结构不同')
+                if not structure_file(mode, value['purpose']) and current_report.get('geometry_sha256')!=ex.bundle(rec['bundle_id'],allow_dependencies=True)[0].get('geometry_sha256'):differences.append('配置结构与来源冻结结构不同')
                 if ex.hashlib.sha256(old_files['POTCAR']).hexdigest()!=current_report['potcar']['sha256']:differences.append('POTCAR 不同')
                 if value['files']=='both' and old_files.get('KPOINTS')!=current_report['files']['KPOINTS'].encode():differences.append('WAVECAR k 点不同')
             except (ValueError,KeyError,OSError):differences.append('来源输入不可核对')
         candidates.append({'id':rec['id'],'alias':rec.get('config',{}).get('alias'),'node_id':rec.get('node_id'),
                            'state':rec['state'],'job_id':rec.get('job_id'),'created_at':rec.get('created_at',''),
-                           'eligible':not reasons,'blockers':reasons,'differences':differences})
+                           'eligible':not reasons,'blockers':reasons,'differences':differences,
+                           'structure_file':structure_file(mode, value['purpose'])})
     candidates.sort(key=lambda x:(x['created_at'],x['id']),reverse=True)
     selected=value.get('attempt_id') or next((c['id'] for c in candidates if c['eligible']),None)
     chosen=next((c for c in candidates if c['id']==selected),None)
@@ -132,6 +148,8 @@ def freeze(project, node_id, report, verification_mode, execution_scope=None):
         if mode in ('self','manual') and value['purpose']=='continue':
             if report['stage']!='relax':raise ValueError('继续未完成优化仅适用于 relax')
             required.add('CONTCAR')
+        structure_name = structure_file(mode, value['purpose'])
+        if structure_name: required.add(structure_name)
         if mode=='upstream' and value.get('read_charge'):required.add('CHGCAR')
         if value['files']=='both': required.update(('CHGCAR','WAVECAR'))
         path=ex.attempt_path(rec)['shell']
@@ -141,18 +159,32 @@ def freeze(project, node_id, report, verification_mode, execution_scope=None):
             allowed={'relax':('relax',),'scf':('relax','scf'),'bands':('scf',),'dos':('scf',),'vasp-wannier':('scf',)}
             if old_manifest.get('stage') not in allowed.get(report['stage'],()):
                 raise ValueError('相连来源阶段不符合当前节点的文件合同')
-        if 'CONTCAR' in required:
+        if structure_name:
             from . import artifacts
-            observed=artifacts.preview(source_id,'CONTCAR','head',262144)
-            if observed.get('partial') or not observed.get('structure'):raise ValueError('来源 CONTCAR 不完整或不可解析')
-            if observed['structure']['source']['sha256']!=files['CONTCAR']['sha256']:raise ValueError('CONTCAR 在审查期间发生变化')
+            observed=artifacts.preview(source_id,structure_name,'head',262144)
+            if observed.get('partial') or not observed.get('structure'):raise ValueError('来源 '+structure_name+' 不完整或不可解析')
+            if observed['structure']['source']['sha256']!=files[structure_name]['sha256']:raise ValueError(structure_name+' 在审查期间发生变化')
             elements=[a['element'] for a in observed['structure']['atoms']]
             symbols=report['files'].get('POSCAR',report['files'].get('POSCAR.reference','')).splitlines()[5].split()
             counts=list(map(int,report['files'].get('POSCAR',report['files'].get('POSCAR.reference','')).splitlines()[6].split()))
-            if elements!=[symbol for symbol,count in zip(symbols,counts) for _ in range(count)]:raise ValueError('CONTCAR 原子顺序与当前输入不同')
+            if elements!=[symbol for symbol,count in zip(symbols,counts) for _ in range(count)]:raise ValueError(structure_name+' 原子顺序与当前输入不同')
+            if structure_name == 'POSCAR':
+                if input_poscar_hash(rec, old_manifest) != files['POSCAR']['sha256']:
+                    raise ValueError('来源实际 POSCAR 与该次运行保存的输入身份不符，请核对原任务；不会退回项目原始结构')
+                import base64
+                from .structure_edit import geometry_hash
+                raw = base64.b64decode(observed['structure']['source']['base64'], validate=True)
+                if ex.hashlib.sha256(raw).hexdigest() != files['POSCAR']['sha256']:
+                    raise ValueError('POSCAR 原文与结构解析身份不符')
+                report['files']['POSCAR'] = raw.decode('utf-8')
+                report['geometry_sha256'] = geometry_hash(observed['structure'])
+                report['source_sha256'] = files['POSCAR']['sha256']
+                report['structure_source'] = {'attempt_id':source_id,'job_id':rec.get('job_id'),
+                                            'file':'POSCAR','sha256':files['POSCAR']['sha256'],
+                                            'volume_A3':observed['structure']['volume']}
         old_poscar=old_files.get('POSCAR',old_files.get('POSCAR.reference',b'')).decode()
         new_poscar=report['files'].get('POSCAR',report['files'].get('POSCAR.reference',''))
-        if old_poscar.splitlines()[5:7]!=new_poscar.splitlines()[5:7]:
+        if [line.split() for line in old_poscar.splitlines()[5:7]] != [line.split() for line in new_poscar.splitlines()[5:7]]:
             raise ValueError('来源结构的元素顺序或原子数量不同，不能复用电子文件')
 
         diffs=[]
@@ -162,13 +194,13 @@ def freeze(project, node_id, report, verification_mode, execution_scope=None):
         for tag in ('GGA','ISPIN','LDAU','LDAUTYPE','LDAUL','LDAUU','LDAUJ','LMAXMIX','ENCUT','PREC','LSORBIT','LNONCOLLINEAR','SAXIS','GGA_COMPAT','MAGMOM'):
             a,b=ex._incar_value(old_files['INCAR'],tag),ex._incar_value(new_incar,tag)
             if a!=b:diffs.append(f'{tag}：来源 {a or "未设置"} → 本次 {b or "未设置"}')
-        if old_manifest.get('geometry_sha256')!=report.get('geometry_sha256'):diffs.append('本次配置结构与来源冻结结构不同')
+        if not structure_name and old_manifest.get('geometry_sha256')!=report.get('geometry_sha256'):diffs.append('本次配置结构与来源冻结结构不同')
         if 'WAVECAR' in required and old_files.get('KPOINTS')!=report['files']['KPOINTS'].encode():diffs.append('WAVECAR 的 k 点与本次不同')
         if diffs and not value.get('acknowledge_differences'):raise ValueError('来源输入存在差异，请审阅并确认：'+'；'.join(diffs))
         if report['stage']=='bands' and (report.get('band_path_source_attempt_id')!=source_id or report.get('band_path_source_sha256')!=files.get('CONTCAR',{}).get('sha256')):
             raise ValueError('能带路径必须依据所选 SCF 最终 CONTCAR 生成')
         for name,info in files.items():
-            role={'CONTCAR':'structure','CHGCAR':'charge','WAVECAR':'wavefunction'}[name]
+            role={'POSCAR':'structure','CONTCAR':'structure','CHGCAR':'charge','WAVECAR':'wavefunction'}[name]
             roles[role]={'attempt_id':source_id,'alias':rec['config']['alias'],'node_id':rec['node_id'],
                          'file':name,'source_path':path,'metadata':info,'source_bundle_id':rec['bundle_id'],'differences':diffs}
     contract={'schema':'fpilot.source-contract.v1','mode':requested_mode,'purpose':value['purpose'],'files':value['files'],
