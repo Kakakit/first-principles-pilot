@@ -73,14 +73,42 @@ class ProblemTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'确认依据'):problems.save(row['id'],{**row['notes'],'confirmed_cause':'猜测'},[])
         with self.assertRaises(ValueError):problems.save(row['id'],row['notes'],['NCORE=1'])
 
-    def test_extension_and_legacy_plot_failures_are_separate_and_success_is_not_collected(self):
-        for kind,directory in problems.SOURCE_DIRS.items():
+    def test_analysis_failures_are_not_backfilled_or_manually_collected(self):
+        for kind,directory in {'analyses':'analyses-v2','local-analyses':'analyses','plots':'plots'}.items():
             path=self.root/directory/('f'*32);path.mkdir(parents=True)
             record={'id':'f'*32,'project_id':'project','state':'FAILED','error':'analysis error','manifest':{'name':'后处理工具'},'sources':[{'attempt_id':'a'*32}]}
             (path/'analysis.json').write_text(json.dumps(record))
+            problems.try_capture(kind,record['id'],record)
+            with self.assertRaisesRegex(ValueError,'仅登记'):
+                problems.capture(kind,record['id'],record,manual=True)
         problems.backfill();rows=problems.listing()
-        self.assertEqual(len(rows),4);self.assertEqual(len({r['id'] for r in rows}),4)
-        self.assertEqual({r['category'] for r in rows},{'计算任务','后处理'})
+        self.assertEqual(len(rows),1);self.assertEqual(rows[0]['source_id'],'a'*32)
+        self.assertEqual(rows[0]['category'],'计算任务')
+
+    def test_wannier_calculations_are_included_but_other_attempt_types_are_not(self):
+        self.add('b'*32,'FAILED',kind='wannier90')
+        self.add('c'*32,'FAILED',kind='wannier90-plot')
+        other=self.add('d'*32,'FAILED',kind='analysis')
+        problems.try_capture('attempts',other['id'],other)
+        problems.backfill();rows=problems.listing()
+        self.assertEqual({r['source_id']for r in rows},{'a'*32,'b'*32,'c'*32})
+        self.assertEqual({r['program']for r in rows},{'VASP','Wannier90'})
+        with self.assertRaisesRegex(ValueError,'仅登记'):
+            problems.capture('attempts',other['id'],other,manual=True)
+
+    def test_old_analysis_notes_are_retained_but_cannot_be_listed_saved_or_exported(self):
+        task=problems.capture('attempts','a'*32)
+        key='f'*32
+        legacy={**task,'id':key,'source_kind':'analyses','source_id':'e'*32,
+                'program':'分析工具','notes':{**task['notes'],'user_note':'保留旧分析备注'}}
+        with closing(problems.db())as c:
+            c.execute('INSERT INTO problems VALUES(?,?,?,?)',(key,'analyses','e'*32,json.dumps(legacy)));c.commit()
+        self.assertEqual([r['id']for r in problems.listing()],[task['id']])
+        with self.assertRaisesRegex(ValueError,'仅登记'):problems.get(key)
+        with self.assertRaisesRegex(ValueError,'仅登记'):problems.save(key,task['notes'],[])
+        for format in ('json','markdown'):
+            with self.assertRaisesRegex(ValueError,'仅登记'):problems.export([key],format)
+        self.assertEqual(problems.raw(key),legacy)
 
     def test_notebook_failure_cannot_turn_execution_failure_into_unknown(self):
         record=ex.get('a'*32)

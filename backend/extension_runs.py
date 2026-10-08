@@ -52,9 +52,6 @@ def _presentation_record(record):
 def save(record):
     if inactive('analyses',record['id'],record):return record
     record['updated_at']=now();p.atomic_json(directory(record['id'])/'analysis.json',record)
-    if record['state']=='FAILED':
-        from . import problem_records
-        problem_records.try_capture('analyses',record['id'],record)
     return record
 
 

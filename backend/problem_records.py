@@ -9,7 +9,13 @@ from contextlib import closing
 from . import execution as ex
 
 NOTE_FIELDS = ('user_note', 'suspected_cause', 'confirmed_cause', 'confirmation_evidence')
-SOURCE_DIRS = {'analyses': 'analyses-v2', 'local-analyses': 'analyses', 'plots': 'plots'}
+def task_program(record):
+    kind = record.get('kind')
+    if kind in (None, 'vasp'):
+        return 'VASP'
+    if kind in ('wannier90', 'wannier90-plot'):
+        return 'Wannier90'
+    return None
 
 
 def db():
@@ -21,7 +27,9 @@ def db():
 
 
 def identity(kind, key):
-    if kind not in ('attempts', *SOURCE_DIRS) or not isinstance(key, str) or not re.fullmatch(r'[a-f0-9]{32}', key):
+    if kind != 'attempts':
+        raise ValueError('问题记录仅登记 VASP 和 Wannier90 计算任务，不收录分析结果')
+    if not isinstance(key, str) or not re.fullmatch(r'[a-f0-9]{32}', key):
         raise ValueError('问题来源身份无效')
     return hashlib.sha256((kind + ':' + key).encode()).hexdigest()[:32]
 
@@ -36,12 +44,7 @@ def raw(key):
 
 def source(kind, key):
     identity(kind, key)
-    if kind == 'attempts':
-        return ex.get(key)
-    path = ex.ROOT / SOURCE_DIRS[kind] / key / 'analysis.json'
-    if path.stat().st_size > 2 * 1024 * 1024:
-        raise ValueError('来源记录过大')
-    return json.loads(path.read_text())
+    return ex.get(key)
 
 
 def workspace_projects():
@@ -94,6 +97,9 @@ def excerpt_value(value):
 def capture(kind, key, record=None, *, manual=False, notes=None, excerpt=None, projects=None):
     problem_id = identity(kind, key)
     record = record or source(kind, key)
+    program = task_program(record)
+    if program is None:
+        raise ValueError('问题记录仅登记 VASP 和 Wannier90 计算任务')
     if notes is not None:
         notes = validate_notes(notes)
     snippet = excerpt_value(excerpt) if excerpt is not None else None
@@ -111,12 +117,6 @@ def capture(kind, key, record=None, *, manual=False, notes=None, excerpt=None, p
             if record.get('state') != 'FAILED' and not manual:
                 return None
             parent = record
-            if kind != 'attempts':
-                parent_id = record.get('attempt_id') or next((s.get('attempt_id') for s in record.get('sources', []) if s.get('attempt_id')), None)
-                try:
-                    parent = ex.get(parent_id) if parent_id else record
-                except ValueError:
-                    parent = record
             project_id = record.get('project_id') or parent.get('project_id')
             projects = workspace_projects() if projects is None else projects
             project = projects.get(project_id)
@@ -141,13 +141,12 @@ def capture(kind, key, record=None, *, manual=False, notes=None, excerpt=None, p
                 path = ex.ROOT / 'failure-notes' / (key + '.json')
                 if path.exists():
                     empty_notes = validate_notes(json.loads(path.read_text()))
-            manifest = record.get('manifest') or record.get('extension') or {}
             problem = {'schema': 'fpilot.problem-record.v1', 'id': problem_id, 'source_kind': kind, 'source_id': key,
                        'project_id': project_id, 'node_id': parent.get('node_id'),
                        'project_name': (project or {}).get('name') or parent.get('project_slug') or '历史项目',
                        'node_name': data.get('label') or parent.get('stage_slug') or '历史节点',
-                       'program': ('Wannier90' if parent.get('kind') == 'wannier90' else 'VASP') if kind == 'attempts' else manifest.get('name') or record.get('mode') or '后处理',
-                       'category': '计算任务' if kind == 'attempts' else '后处理', 'state': record.get('state'),
+                       'program': program,
+                       'category': '计算任务', 'state': record.get('state'),
                        'server': (record.get('config') or (record.get('runtime') or {}).get('config') or parent.get('config') or {}).get('alias') or (record.get('runtime') or {}).get('alias') or '本机',
                        'occurred_at': record.get('created_at') or ex.now(), 'collected_at': ex.now(),
                        'job_id': record.get('job_id'), 'execution_scope': parent.get('execution_scope'),
@@ -174,6 +173,7 @@ def capture(kind, key, record=None, *, manual=False, notes=None, excerpt=None, p
 
 def try_capture(kind, key, record=None):
     # Recording trouble must never change execution state or interrupt dispatch.
+    if kind != 'attempts' or record is not None and task_program(record) is None:return
     if not isinstance(key,str) or not re.fullmatch(r'[a-f0-9]{32}',key):return
     try:
         capture(kind, key, record)
@@ -187,24 +187,21 @@ def backfill(projects=None):
         with closing(ex.db()) as connection:
             records = [json.loads(row[0]) for row in connection.execute('SELECT body FROM attempts')]
         for record in records:
+            if task_program(record) is None:continue
             path = ex.ROOT / 'failure-notes' / (record['id'] + '.json')
             notes = json.loads(path.read_text()) if path.exists() else None
             if record.get('state') == 'FAILED' or notes and any(v.strip() for v in notes.values()):
                 existing = raw(identity('attempts', record['id']))
                 if existing is None or record.get('state') == 'FAILED' and existing['state'] != 'FAILED':
                     capture('attempts', record['id'], record, manual=bool(notes), projects=projects)
-    for kind, directory in SOURCE_DIRS.items():
-        filename = 'analysis.json'
-        for path in (ex.ROOT / directory).glob('*/' + filename):
-            record = json.loads(path.read_text())
-            if record.get('state') == 'FAILED' and raw(identity(kind, path.parent.name)) is None:
-                capture(kind, path.parent.name, record, projects=projects)
 
 
 def get(key):
     value = raw(key)
     if value is None:
         raise ValueError('问题记录不存在')
+    if value['source_kind'] != 'attempts' or value.get('program') not in ('VASP', 'Wannier90'):
+        raise ValueError('问题记录仅登记 VASP 和 Wannier90 计算任务；旧分析记录已保留在本机存档')
     from . import recycle
     try:
         original=source(value['source_kind'], value['source_id'])
@@ -226,11 +223,13 @@ def get(key):
 def listing():
     backfill()
     with closing(db()) as connection:
-        keys = [row[0] for row in connection.execute('SELECT id FROM problems')]
+        keys = [row[0] for row in connection.execute("SELECT id,body FROM problems WHERE source_kind='attempts'")
+                if json.loads(row[1]).get('program') in ('VASP', 'Wannier90')]
     return sorted([get(key) for key in keys], key=lambda v: v['occurred_at'], reverse=True)
 
 
 def save(key, notes, tags):
+    get(key)
     notes = validate_notes(notes)
     if not isinstance(tags, list) or len(tags) > 30 or any(not isinstance(t, str) or not re.fullmatch(r'[A-Z][A-Z0-9_]{0,49}', t) for t in tags):
         raise ValueError('关联 INCAR 参数应为大写参数名，最多 30 个')
