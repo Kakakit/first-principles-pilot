@@ -46,10 +46,13 @@ text=sys.argv[1]
 capacity,marker,queues=text.partition('FPILOT_QUEUE_BEGIN\n')
 if not marker:raise ValueError('live queue report missing')
 observed=p['parse_preflight'](capacity)
-selection=s['select_resources'](observed,contract['config']['alias'],contract['node'],
-    user_override=contract['cores'],user_override_evidence=contract['reason'])
+gpu=contract['profile'].get('resource_request') if contract['profile'].get('resource_mode')=='gpu' else None
+selection=(s['gpu_resources'](observed,contract['config']['alias'],contract['node'],gpu) if gpu else
+    s['select_resources'](observed,contract['config']['alias'],contract['node'],
+    user_override=contract['cores'],user_override_evidence=contract['reason']))
 expected=contract['profile'].get('ppn',contract['profile'].get('ntasks'))
 if selection['requested_cores']!=expected:raise ValueError('live capacity changed; prepare again')
+if gpu and (selection['requested_gpus']!=contract['profile']['gpus'] or selection['gpu_resource_registered']!=contract['profile']['gpu_resource_registered']):raise ValueError('GPU allocation changed; prepare again')
 config=contract['config']
 if config['scheduler'] in ('pbs','PBS','PBS/Torque'):
     selected=None

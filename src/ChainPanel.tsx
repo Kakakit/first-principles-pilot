@@ -1,3 +1,4 @@
+import {useSubmissionDraft} from './useSubmissionDraft';
 import {sameCapacityTarget} from './executionUi';
 import CandidateNodePool from './CandidateNodePool';
 import {poolNodes,fullNodeCandidates,capacityWait} from './candidatePool';
@@ -25,13 +26,15 @@ const api=requestJson;
 export default function ChainPanel({project,view='run',onReview,onConfigure}:{project:Project;initialNodeId:string|null;view?:'config'|'run';onReview?:()=>void;onConfigure?:()=>void}){
  const possible=useMemo(()=>chainNodes(project),[project]);
  const [confirmOpen,setConfirmOpen]=useState(false);
- const [ids,setIds]=useState<string[]>(()=>possible.map(item=>item.id));
+ const [ids,setIds]=useSubmissionDraft<string[]>('chain:'+project.id+':selection',possible.map(item=>item.id));
  const [reuseSources,setReuseSources]=useState<Record<string,string>>({}),[verificationMode,setVerificationMode]=useState('lightweight');
  const [reason,setReason]=useState(''),[preview,setPreview]=useState<Preview|null>(null);
- const [run,setRun]=useState<ChainRun|null>(null),[history,setHistory]=useState<ChainRun[]>([]);
- const [config,setConfig]=useState<ServerConfig|null>(null),[profiles,setProfiles]=useState<RegisteredProfile[]>([]);
- const [probe,setProbe]=useState<ServerProbe|null>(null),[serverPreview,setServerPreview]=useState<ServerPreview|null>(null);
- const [pool,setPool]=useState<string[]>([]);
+ const [run,setRun]=useSubmissionDraft<ChainRun|null>('chain:'+project.id+':run',null),[history,setHistory]=useState<ChainRun[]>([]);
+ const draftKey='chain:'+project.id;
+ const [projectStamp,setProjectStamp]=useSubmissionDraft(draftKey+':stamp',project.updatedAt||'');
+ const [config,setConfig]=useSubmissionDraft<ServerConfig|null>(draftKey+':config',null),[profiles,setProfiles]=useState<RegisteredProfile[]>([]);
+ const [probe,setProbe]=useSubmissionDraft<ServerProbe|null>(draftKey+':probe',null),[serverPreview,setServerPreview]=useState<ServerPreview|null>(null);
+ const [pool,setPool]=useSubmissionDraft<string[]>(draftKey+':pool',[]);
  const [scripts,setScripts]=useState<Record<string,Record<string,ServerPreview>>>({});
  const [confirmDiff,setConfirmDiff]=useState(false),[busy,setBusy]=useState(false),[busyStep,setBusyStep]=useState('');
  const [error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -50,9 +53,9 @@ export default function ChainPanel({project,view='run',onReview,onConfigure}:{pr
   if(run)setIds(chainNodes(project,run.steps.map(step=>step.node_id)).map(node=>node.id));
   setRun(null);setPreview(null);setReuseSources({});setScripts({});setConfirmDiff(false);setConfirmOpen(false);setError('');setNotice('已返回新的计算链草稿，原计划保留在历史中。');
  };
- const load=async()=>{const [server,result]=await Promise.all([api('/api/server'),api('/api/chains?project_id='+encodeURIComponent(project.id))]);setConfig(server.config);setProfiles(server.registered_profiles||[]);setHistory(result.runs||[]);};
+ const load=async()=>{const [server,result]=await Promise.all([api('/api/server'),api('/api/chains?project_id='+encodeURIComponent(project.id))]);setConfig(old=>old||server.config);setProfiles(server.registered_profiles||[]);setHistory(result.runs||[]);setRun(old=>old?(result.runs||[]).find((r:ChainRun)=>r.id===old.id)||null:null);};
  useEffect(()=>{void load().catch(e=>setError(errorMessage(e)));},[project.id]);
- useEffect(()=>{setPreview(null);setRun(null);setScripts({});},[project.updatedAt]);
+ useEffect(()=>{if(projectStamp===(project.updatedAt||''))return;setPreview(null);setRun(null);setScripts({});setProjectStamp(project.updatedAt||'');},[project.updatedAt]);
  const call=async(label:string,fn:()=>Promise<void>)=>{setBusy(true);setBusyStep(label);setError('');try{await fn();}catch(e){setError(errorMessage(e));}finally{setBusy(false);setBusyStep('');}};
  const inspect=(choices=reuseSources)=>call('正在检查计算链与逐节点输入',async()=>{const value=await api('/api/chains/preview',{project,node_ids:executionIds,source_alias:config?.alias,reuse_sources:choices,verification_mode:verificationMode});setPreview(value);setReuseSources(value.reuse_sources);setRun(null);setConfirmDiff(false);});
  const freeze=()=>call('正在冻结计算链输入与依赖规则',async()=>{if(!preview)return;const value=await api('/api/chains/freeze',{project,node_ids:executionIds,reason,expected_definition_hash:preview.definition_hash,source_alias:config?.alias,reuse_sources:preview.reuse_sources,verification_mode:verificationMode});setRun(value);setHistory(old=>[value,...old]);setScripts({});setNotice('计算链已冻结。选择候选计算节点后，整链预览脚本并授权。');});

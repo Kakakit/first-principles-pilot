@@ -42,6 +42,7 @@ export type ServerPreview = {
   script: string;
   blockers: string[];
   node_status?: string;
+  capacity_wait?: boolean;
   resource_ready: boolean;
   note: string;
   probe_id?: string;

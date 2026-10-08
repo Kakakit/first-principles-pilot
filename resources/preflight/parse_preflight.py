@@ -84,6 +84,13 @@ def _parse_host(host_name, block_text):
                 "text": stripped,
                 "fields": _parse_inline_pairs(stripped[len("SUMMARY"):].strip()),
             })
+    for line in block_text.splitlines():
+        if line.strip().startswith('GPU_NODE='):
+            gpu = _parse_inline_pairs(line)
+            matches = [node for node in nodes if node.get('NODE') == gpu.get('GPU_NODE')]
+            if len(matches) == 1:
+                matches[0].update({k: v for k, v in gpu.items() if k != 'GPU_NODE'})
+                matches[0]['GPU_IDENTITY'] = 'DIRECT_NODE'
     classification, availability, scheduler_error, error_class = _host_classification(fields)
     host = host_name or fields.get("HOST")
     result = {

@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,82 @@ from pathlib import Path
 
 class ResourceSelectionError(ValueError):
     """A preflight resource fact is missing, ambiguous, or unsafe."""
+
+
+CAPACITY_BLOCKERS = ('selected node CPUS_FREE must be greater than zero',
+                    'selected node STATUS must be FULLY_IDLE or PARTIAL',
+                    'user override cannot exceed CPUS_FREE',
+                    'GPU node is occupied', 'GPU compute processes are active',
+                    'GPU resources are allocated')
+
+
+def gpu_resources(preflight, host, selected_node, request, allow_wait=False):
+    """Whole-node allocation; MPI ranks describe execution, not reservation.
+
+    Scheduler GPU counts are authoritative. Hardware-only fallback is bounded
+    to a positively identified, directly connected compute node and reserves
+    all of its CPU slots; it never infers free GPUs from inventory alone.
+    """
+    selected_host = _host(preflight, host)
+    facts, _ = _node(selected_host, selected_node)
+    total = _integer(facts.get('CPUS_TOTAL'), 'CPUS_TOTAL')
+    ranks = _integer(request.get('mpi_ranks'), 'MPI ranks')
+    required = _integer(request.get('gpus'), 'GPU count')
+    if not 0 < ranks <= total or required <= 0:
+        raise ResourceSelectionError('GPU MPI 进程数或所需卡数超出节点资源')
+    declared = facts.get('GPUS_TOTAL') not in (None, '', 'unknown')
+    physical = facts.get('GPUS_PHYSICAL_TOTAL')
+    if declared:
+        gpu_total = _integer(facts['GPUS_TOTAL'], 'GPUS_TOTAL')
+        if physical not in (None, '', 'unknown') and _integer(physical, 'GPUS_PHYSICAL_TOTAL') != gpu_total:
+            raise ResourceSelectionError('调度器与物理 GPU 数量不一致，无法确认整节点占用')
+    else:
+        if facts.get('GPU_IDENTITY') != 'DIRECT_NODE' or physical in (None, '', 'unknown'):
+            raise ResourceSelectionError('GPU 资源未知：需要调度器登记或已确认的计算节点只读 GPU 回执')
+        gpu_total = _integer(physical, 'GPUS_PHYSICAL_TOTAL')
+    if gpu_total <= 0 or required > gpu_total:
+        raise ResourceSelectionError('脚本所需 GPU 数量超出节点总卡数')
+    if request.get('gpu_type'):
+        typed = re.search(r'(?:^|,)gres/gpu:' + re.escape(request['gpu_type']) + r'=(\d+)(?:,|$)', str(facts.get('GRES', '')))
+        if not typed or int(typed[1]) != gpu_total:
+            raise ResourceSelectionError('所选节点的 GPU 类型无法与脚本整节点请求对应')
+    devices = request.get('devices', [])
+    if devices:
+        available_ids = str(facts.get('GPU_INDICES', '')).split(',')
+        if facts.get('GPU_IDENTITY') != 'DIRECT_NODE' or not all(str(d) in available_ids for d in devices):
+            raise ResourceSelectionError('无法确认脚本固定 GPU 编号属于所选计算节点')
+        if len(devices) != required:
+            raise ResourceSelectionError('所需 GPU 数量与脚本固定设备列表不一致，请编辑适配副本')
+    blockers = []
+    try:
+        selection = select_resources(preflight, host, selected_node,
+                                     user_override=total, user_override_evidence='GPU 整节点占用')
+    except ResourceSelectionError as exc:
+        if not str(exc).startswith(CAPACITY_BLOCKERS):
+            raise
+        blockers.append(str(exc))
+        selection = {}
+    status = str(facts.get('STATUS', '')).upper()
+    if facts.get('JOBS') not in (None, '', 'none') or status in ('BUSY', 'PARTIAL', 'SUSPECT_LOAD'):
+        blockers.append('GPU node is occupied: 等待整节点空闲')
+    active = facts.get('GPU_ACTIVE_PROCESSES')
+    if active not in (None, '', 'unknown'):
+        if _integer(active, 'GPU_ACTIVE_PROCESSES') > 0:
+            blockers.append('GPU compute processes are active: 等待现有 GPU 计算结束')
+    elif not declared or facts.get('GPU_IDENTITY') == 'DIRECT_NODE':
+        raise ResourceSelectionError('GPU 活动进程检查未完成，无法确认节点空闲')
+    allocated = facts.get('GPUS_ALLOC')
+    if allocated not in (None, '', 'unknown'):
+        if _integer(allocated, 'GPUS_ALLOC') > 0:
+            blockers.append('GPU resources are allocated: 等待 GPU 资源释放')
+    elif declared and facts.get('GPU_IDENTITY') != 'DIRECT_NODE':
+        raise ResourceSelectionError('调度器 GPU 分配数量未知，无法确认整节点占用')
+    if blockers and not allow_wait:
+        raise ResourceSelectionError('; '.join(blockers))
+    return {**selection, 'requested_cores': total, 'mpi_ranks': ranks,
+            'requested_gpus': gpu_total, 'required_gpus': required,
+            'gpu_resource_registered': declared, 'devices': devices,
+            'resource_policy': 'gpu_whole_node', 'blockers': list(dict.fromkeys(blockers))}
 
 
 def _read_json(path):

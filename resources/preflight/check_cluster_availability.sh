@@ -64,6 +64,16 @@ if command -v sinfo >/dev/null 2>&1; then
       }
       return ""
     }
+    function gpu_count(tres,    entries, count, i, pair, total) {
+      count = split(tres, entries, ",")
+      total = -1
+      for (i=1; i<=count; i++) {
+        split(entries[i], pair, "=")
+        if (pair[1] == "gres/gpu") return pair[2] + 0
+        if (pair[1] ~ /^gres\/gpu:/) { if (total < 0) total=0; total += pair[2]+0 }
+      }
+      return total
+    }
     {
       node = value("NodeName")
       state = value("State")
@@ -74,6 +84,12 @@ if command -v sinfo >/dev/null 2>&1; then
       mem = value("RealMemory")
       parts = value("Partitions")
       gres = value("CfgTRES")
+      gpu_total = gpu_count(gres)
+      gpu_alloc = gpu_count(value("AllocTRES"))
+      if (gpu_total >= 0 && gpu_alloc < 0 && alloc == 0) gpu_alloc=0
+      gpu_free = gpu_total >= 0 && gpu_alloc >= 0 ? gpu_total-gpu_alloc : "unknown"
+      gpu_total_display = gpu_total >= 0 ? gpu_total : "unknown"
+      gpu_alloc_display = gpu_alloc >= 0 ? gpu_alloc : "unknown"
       if (node == "" || total == "") next
       total += 0
       alloc += 0
@@ -104,8 +120,8 @@ if command -v sinfo >/dev/null 2>&1; then
         busy_nodes++
       }
       available_cpus += free
-      printf "NODE=%s STATUS=%s STATE=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d LOAD=%.2f MEM_MB=%s PARTITIONS=%s GRES=%s\n", \
-        node, status, state, total, alloc, free, load, mem, parts, gres
+      printf "NODE=%s STATUS=%s STATE=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d LOAD=%.2f MEM_MB=%s PARTITIONS=%s GRES=%s GPUS_TOTAL=%s GPUS_ALLOC=%s GPUS_FREE=%s\n", \
+        node, status, state, total, alloc, free, load, mem, parts, gres, gpu_total_display, gpu_alloc_display, gpu_free
     }
     END {
       printf "SUMMARY FULLY_IDLE_NODES=%d PARTIAL_NODES=%d BUSY_NODES=%d UNAVAILABLE_NODES=%d SUSPECT_LOAD_NODES=%d FREE_CPUS=%d\n", \
@@ -156,6 +172,8 @@ elif command -v pbsnodes >/dev/null 2>&1; then
       state = "unknown"
       total = 0
       assigned = -1
+      gpu_total = "unknown"
+      gpu_assigned = "unknown"
       jobs = ""
       power = "unknown"
       mom_age = -1
@@ -170,6 +188,8 @@ elif command -v pbsnodes >/dev/null 2>&1; then
         else if (text ~ /^np[[:space:]]*=/) total = rhs(text) + 0
         else if (text ~ /^resources_available.ncpus[[:space:]]*=/) total = rhs(text) + 0
         else if (text ~ /^resources_assigned.ncpus[[:space:]]*=/) assigned = rhs(text) + 0
+        else if (text ~ /^(gpus|resources_available.ngpus)[[:space:]]*=/) gpu_total = rhs(text)
+        else if (text ~ /^resources_assigned.ngpus[[:space:]]*=/) gpu_assigned = rhs(text)
         else if (text ~ /^jobs[[:space:]]*=/) jobs = rhs(text)
         else if (text ~ /^note[[:space:]]*=/) {
           note_text = text
@@ -274,8 +294,8 @@ elif command -v pbsnodes >/dev/null 2>&1; then
       gsub(/[[:space:]]+/, "_", note_display)
       if (note_display == "") note_display = "none"
       policy_display = policy_excluded ? "YES" : "NO"
-      printf "NODE=%s STATUS=%s STATE=%s POWER=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d LOAD=%.2f MOM_AGE_SEC=%s MOM_HEALTH=%s POLICY_EXCLUDED=%s MOM_NOTE=%s JOBS=%s\n", \
-        node, status, state, power, total, assigned, free, load, mom_display, mom_health, policy_display, note_display, compact_jobs
+      printf "NODE=%s STATUS=%s STATE=%s POWER=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d LOAD=%.2f MOM_AGE_SEC=%s MOM_HEALTH=%s POLICY_EXCLUDED=%s MOM_NOTE=%s JOBS=%s GPUS_TOTAL=%s GPUS_ALLOC=%s\n", \
+        node, status, state, power, total, assigned, free, load, mom_display, mom_health, policy_display, note_display, compact_jobs, gpu_total, gpu_assigned
       if (free > 0) {
         chunk = node ":ppn=" free
         exact_spec = exact_spec == "" ? chunk : exact_spec "+" chunk

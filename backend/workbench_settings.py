@@ -1,6 +1,7 @@
 """Machine-scoped defaults; prepared attempts keep their original snapshots."""
 import json
 import os
+import re
 from pathlib import Path
 from .storage import ROOT
 
@@ -28,6 +29,14 @@ def assert_current(saved):
         if saved['connection']!=connection_identity(saved['alias']):raise ValueError('实际 SSH 连接目标已改变，请重新准备/授权；没有提交')
         return
     if saved and saved != snapshot(saved['alias'],saved['program']):
+        current = snapshot(saved['alias'],saved['program'])
+        # A recorded local repair affects new drafts only. Old explicit configs
+        # still pass the independent frozen-script and live-target guards.
+        path = ROOT/'defaults-migrations.json'
+        if path.exists():
+            migrations = json.loads(path.read_text()).get('transitions', [])
+            if any(saved == item.get('before') and current == item.get('after') for item in migrations):
+                return
         raise ValueError('服务器运行时或默认脚本设置已变化，请重新准备或冻结授权；没有提交')
 
 
@@ -43,8 +52,11 @@ def save(value):
         if template:
             item=job_templates.get_template(template)
             if item.get('alias')!=config['alias']:raise ValueError('默认脚本必须属于当前主机')
+            if item.get('scheduler')!=servers.normalize_scheduler(config['scheduler']):raise ValueError('默认脚本调度器须与所选服务器一致')
             if item.get('program') not in (program,'gpu_vasp' if program=='vasp_std' else program):raise ValueError('默认脚本分类须与所选程序一致')
             if not config['queue'] and item.get('resources',{}).get('queue'):config['queue']=item['resources']['queue']
+            named_programs = set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', item['original_text']))
+            if program == 'wannier90' and named_programs: raise ValueError('脚本正文启动 VASP，不能设为 Wannier90 默认脚本')
         previous['runtimes'][key]=config
         previous['defaults'][key]=template
     if 'history_limit' in value:
@@ -56,3 +68,31 @@ def save(value):
     temp.write_text(json.dumps(previous,ensure_ascii=False,indent=2))
     os.replace(temp,ROOT/'workbench-settings.json')
     return previous
+
+
+def repair_new_draft_defaults(updates):
+    """Explicit local maintenance; keep legacy snapshots intact, never submit.
+
+    Ordinary UI saves do not create compatibility transitions. A later edit
+    must match neither endpoint and therefore invalidates the old preparation.
+    """
+    from .execution_control import write_json
+    previous=read();path=ROOT/'defaults-migrations.json'
+    prior_migrations=json.loads(path.read_text()) if path.exists() else {'version':1,'transitions':[]}
+    before={}
+    try:
+        for value in updates:
+            alias=value['runtime']['alias'];program=value.get('program','vasp_std')
+            before[(alias,program)] = {'alias':alias,'program':program,'runtime':previous['runtimes'].get(alias+':'+program),'template_id':previous['defaults'].get(alias+':'+program)}
+            save(value)
+        migrations=json.loads(json.dumps(prior_migrations))
+        for (alias,program),old in before.items():
+            current=snapshot(alias,program)
+            if old != current:
+                migrations['transitions'].append({'before':old,'after':current})
+        write_json(path,migrations)
+    except Exception:
+        write_json(ROOT/'workbench-settings.json',previous)
+        write_json(path,prior_migrations)
+        raise
+    return read()

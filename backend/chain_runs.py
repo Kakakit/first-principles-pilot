@@ -380,6 +380,7 @@ def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, a
                                        'profile': rendered['profile'],
                                        'script_sha256': hashlib.sha256(rendered['script'].encode()).hexdigest()})
         checked[key] = {'vasp_executable': node_config['vasp_executable'],
+                        **({'resource_request':choice['resource_request']} if choice.get('resource_request') else {}),
                         **({'template_id':node_config['template_id'],'runtime_source':'script'} if node_config.get('runtime_source')=='script' and node_config.get('template_id') else {}),
                         'candidates': checked_candidates}
     from .workbench_settings import snapshot as settings_snapshot
@@ -393,6 +394,8 @@ def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, a
 
 
 def _node_config(config, choice):
+    if choice.get('resource_request'):
+        config = {**config, 'resource_request': choice['resource_request']}
     executable = PurePosixPath(choice.get('vasp_executable') or config['vasp_executable']).name
     if executable not in ('vasp_std', 'vasp_ncl'):
         raise ValueError('逐节点程序仅支持 vasp_std 或 vasp_ncl')
@@ -404,6 +407,13 @@ def _node_config(config, choice):
         template=config.get('template_id') if servers.program_name(config)==executable else settings['defaults'].get(config['alias']+':'+executable)
     if template:return servers.with_script(config,template,executable)
     if config.get('runtime_source')=='script':raise ValueError('请为 '+executable+' 选择该服务器的已导入脚本')
+    # Authorized registered steps carry an explicit executable; defaults must
+    # never rewrite that historical contract or an initialized registered draft.
+    explicit = choice.get('vasp_executable', '')
+    if explicit.startswith('/'):
+        return {**config, 'vasp_executable': explicit, 'runtime_source': 'registered'}
+    if config.get('runtime_source') == 'registered' and PurePosixPath(config['vasp_executable']).name == executable:
+        return config
     saved=settings['runtimes'].get(config['alias']+':'+executable,{})
     if saved:
         return {**config,**saved,'name':config['name'],'queue':config['queue'],'walltime':config['walltime']}
@@ -719,7 +729,7 @@ def _tick_one(run_id):
                 message = control.redact(str(exc))[:1000]
                 if message.startswith('资源检查未通过：') and _capacity_wait({
                     'blockers': message.split('：', 1)[1].split('; '),
-                    'node_status': rendered.get('node_status')}):
+                    'node_status': 'BUSY'}):
                     step['waiting_reason'] = message
                 else:
                     step['state'] = 'BLOCKED'

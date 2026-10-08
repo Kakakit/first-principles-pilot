@@ -404,6 +404,10 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
         save(batch)
         return waiting['state'] in control.ACTIVE and waiting['state']!='UNKNOWN'
     except Exception as exc:
+        if waiting['state']=='PENDING' and str(exc).startswith('资源检查未通过：'):
+            blockers=str(exc).split('：',1)[1].split('; ')
+            if candidate_pool.capacity_wait({'node_status':'BUSY','blockers':blockers}):
+                batch['waiting_reason']=control.redact(str(exc))[:1000];save(batch);return False
         if waiting['attempt_id']: waiting['state']=ex.get(waiting['attempt_id'])['state']
         if waiting['state']=='PREPARED' and str(exc).startswith(('在途任务数已达上限','每主机在途核数预算不足')):
             batch['waiting_reason']=str(exc);save(batch);return False

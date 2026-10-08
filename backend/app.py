@@ -31,6 +31,8 @@ def capabilities():
         "remote_path_schema": "fpilot.remote-attempt-path",
         "legacy_remote_paths": False,
         "job_template_import": True,
+        "gpu_submission": True,
+        "gpu_resource_policy": "whole_node",
         "persistent_worker": True,
         "execution_limits": True,
         "failure_snapshot": True,

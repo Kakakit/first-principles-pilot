@@ -1,3 +1,4 @@
+import {useSubmissionDraft} from './useSubmissionDraft';
 import {sameCapacityTarget} from './executionUi';
 import {DeleteRecord} from './RecordCleanup';
 import HistoryList from './HistoryList';
@@ -24,9 +25,10 @@ function relativeValues(values:Record<string,string>,fermi:number){return Object
 const api=requestJson;
 export default function WannierPanel({project,initialNodeId,embedded=false,view,onReview,onConfigure}:{project:Project;initialNodeId:string|null;embedded?:boolean;view?:'config'|'run';onReview?:()=>void;onConfigure?:()=>void}){
   const nodes=project.nodes.filter(item=>item.data.kind==='wannier90');
-  const [frozen,setFrozen]=useState(''),[frozenRows,setFrozenRows]=useState<{id:string;seed:string;alias:string;input_reason:string;created_at:string}[]>([]),[confirmOpen,setConfirmOpen]=useState(false);
+  const submissionKey='wannier:'+project.id+':'+initialNodeId;
+  const [frozen,setFrozen]=useSubmissionDraft(submissionKey+':frozen',''),[frozenRows,setFrozenRows]=useState<{id:string;seed:string;alias:string;input_reason:string;created_at:string}[]>([]),[confirmOpen,setConfirmOpen]=useState(false);
   const [nodeId,setNodeId]=useState(nodes.some(item=>item.id===initialNodeId)?initialNodeId||'':nodes[0]?.id||'');
-  const [config,setConfig]=useState<ServerConfig|null>(null);
+  const [config,setConfig]=useSubmissionDraft<ServerConfig|null>(submissionKey+':config',null);
   const [profiles,setProfiles]=useState<RegisteredProfile[]>([]);
   const [attempts,setAttempts]=useState<Attempt[]>([]);
   const [scripts,setScripts]=useState<Script[]>([]);
@@ -34,7 +36,7 @@ export default function WannierPanel({project,initialNodeId,embedded=false,view,
   const [parameterDraft,setParameterDraft]=useState<Record<string,string>>({});
   const [appliedParameters,setAppliedParameters]=useState<Record<string,string>>({});
   const [templates,setTemplates]=useState<{id:string;name:string;alias:string;program:string}[]>([]);
-  const [probe,setProbe]=useState<ServerProbe|null>(null);
+  const [probe,setProbe]=useSubmissionDraft<ServerProbe|null>(submissionKey+':probe',null);
   const [preview,setPreview]=useState<ServerPreview|null>(null);
   const [source,setSource]=useState<Source|null>(null);
   const [energyReference,setEnergyReference]=useState<EnergyReference|null>(null);
@@ -48,12 +50,12 @@ export default function WannierPanel({project,initialNodeId,embedded=false,view,
   const [bandDirty,setBandDirty]=useState(false);
   const [seeds,setSeeds]=useState<string[]>([]);
   const [seed,setSeed]=useState('');
-  const [computeNode,setComputeNode]=useState('');
-  const [cores,setCores]=useState('');
-  const [resourceReason,setResourceReason]=useState('');
+  const [computeNode,setComputeNode]=useSubmissionDraft(submissionKey+':computeNode','');
+  const [cores,setCores]=useSubmissionDraft(submissionKey+':cores','');
+  const [resourceReason,setResourceReason]=useSubmissionDraft(submissionKey+':resourceReason','');
   const [inputReason,setInputReason]=useState('');
   const [win,setWin]=useState('');
-  const [templateId,setTemplateId]=useState('');
+  const [templateId,setTemplateId]=useSubmissionDraft(submissionKey+':templateId','');
   const [prepared,setPrepared]=useState<Attempt&{script:string;bundle_id:string;note:string}|null>(null);
   const [busy,setBusy]=useState(false);
   const [busyStep,setBusyStep]=useState('');
@@ -88,7 +90,7 @@ export default function WannierPanel({project,initialNodeId,embedded=false,view,
   const load=async()=>{
     const results=await Promise.allSettled([api('/api/server'),api(`/api/execution?project_id=${encodeURIComponent(project.id)}`),api('/api/wannier90/scripts'),api('/api/job-templates'),api('/api/wannier90/parameters')]);
     const [server,history,choices,saved,parameters]=results;
-    if(server.status==='fulfilled'){setConfig({...server.value.config,name:'wannier90'});setProfiles(server.value.registered_profiles||[]);}
+    if(server.status==='fulfilled'){setConfig(old=>old||{...server.value.config,name:'wannier90'});setProfiles(server.value.registered_profiles||[]);}
     if(history.status==='fulfilled')setAttempts(history.value);
     if(choices.status==='fulfilled')setScripts(choices.value);
     if(saved.status==='fulfilled')setTemplates(saved.value);

@@ -10,9 +10,9 @@ def capacity_wait(rendered):
     # waiting for a clean live observation; never submit through this gate.
     if rendered.get('node_status') not in ('BUSY', 'FULLY_IDLE', 'PARTIAL', 'SUSPECT_LOAD'):
         return False
-    prefixes = ('selected node CPUS_FREE must be greater than zero',
-                'selected node STATUS must be FULLY_IDLE or PARTIAL',
-                'user override cannot exceed CPUS_FREE')
+    if 'capacity_wait' in rendered:
+        return rendered['capacity_wait'] is True
+    prefixes = servers.selector.CAPACITY_BLOCKERS
     return bool(blockers) and all(str(item).startswith(prefixes) for item in blockers)
 
 
@@ -65,10 +65,16 @@ def select(config, probe, candidates, occupied=(), render=None):
         except ValueError as exc:
             invalid.append(c['node']+'：'+str(exc))
             continue
+        if (value.get('profile', {}).get('resource_mode') == 'gpu' or c.get('profile', {}).get('resource_mode') == 'gpu') and (
+                value.get('profile') != c['profile'] or not value.get('script') or
+                hashlib.sha256(value['script'].encode()).hexdigest() != c['script_sha256']):
+            invalid.append(c['node']+'：资源或脚本已偏离授权预览')
+            continue
         # These contracts use one whole node per job. Local receipts also hold
         # the node while the scheduler's next capacity snapshot catches up.
         if c['node'] in occupied or capacity_wait(value):
-            waiting.append(c['node'] + ('（调度器空闲但负载未恢复，等待复检）'
+            gpu_detail = '；'.join(str(b) for b in value.get('blockers', []) if str(b).startswith(('GPU ', 'GPU node')))
+            waiting.append(c['node'] + ('（'+gpu_detail+'）' if gpu_detail else '（调度器空闲但负载未恢复，等待复检）'
                                        if value.get('node_status') == 'SUSPECT_LOAD' else ''))
             continue
         if not value['resource_ready']:

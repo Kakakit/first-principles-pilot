@@ -230,7 +230,7 @@ def default_config():
 
 
 def validate(config):
-    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates') if config.get(k)}
+    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates','resource_request') if config.get(k)}
     config = {k: config.get(k, '') for k in DEFAULT}
     config.update(extra)
     if config.get('remote_workspace_root'):
@@ -265,7 +265,7 @@ def validate(config):
     if scheduler == 'slurm' and not script_mode:
         if not re.fullmatch(r'[A-Za-z0-9_.+-]+/[A-Za-z0-9_.+-]+',config.get('module','')) or config.get('launcher') != 'mpirun':
             raise ValueError('Slurm 模块和启动器必须来自已登记运行时')
-    if not re.fullmatch(r'\d{2,3}:[0-5]\d:[0-5]\d',config['walltime']) or seconds(config['walltime']) <= 0:
+    if not re.fullmatch(r'\d{2,8}:[0-5]\d:[0-5]\d',config['walltime']) or seconds(config['walltime']) <= 0:
         raise ValueError('walltime 需为正的 HH:MM:SS')
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,120}',config['name']):raise ValueError('作业名称只允许英文、数字、点、横线和下划线')
     if config['queue'] or not script_mode:
@@ -287,9 +287,20 @@ def with_script(config, template_id, program=None):
 
 
 def selected_template(config):
+    if config.get('runtime_source') == 'registered': return None
     if config.get('template_id'):return config['template_id']
     from .workbench_settings import read
     return read()['defaults'].get(config['alias']+':'+program_name(config))
+
+
+def resource_request(config):
+    from . import gpu_requests, job_templates
+    key = selected_template(config) if config.get('runtime_source') == 'script' else None
+    record = job_templates.get_template(key, False) if key else None
+    request = gpu_requests.resolve(config, record)
+    if request and not key:
+        raise ValueError('GPU 提交需要选择当前程序的已导入脚本')
+    return request
 
 
 def profile(config,node,ppn):
@@ -409,8 +420,14 @@ def availability_command(config):
     text=CHECKER.read_text()
     body=text.split("<<'REMOTE_CHECK'",1)[1].split('\n',1)[1].split('\nREMOTE_CHECK',1)[0]
     excluded='node06' if config['alias']=='jutai-1' else ''
+    from .remote_transport import _interpreter
+    try: interpreter = _interpreter(config['alias'])
+    except ValueError: interpreter = 'python3'
+    gpu_source = (RESOURCES/'preflight/gpu_node_facts.py').read_text()
+    gpu_command = ('if command -v nvidia-smi >/dev/null 2>&1; then\n'
+                   + shlex.quote(interpreter) + ' -c ' + shlex.quote(gpu_source) + ' || true\nfi\n')
     return ("printf '\\n===== %s =====\\n' "+shlex.quote(config['alias'])+'\n'
-            +'(\nMOM_MAX_AGE=300\nUNTRACKED_LOAD_THRESHOLD=1.0\nEXCLUDED_NODES='+shlex.quote(excluded)+'\n'+body+'\n)\n')
+            +'(\nMOM_MAX_AGE=300\nUNTRACKED_LOAD_THRESHOLD=1.0\nEXCLUDED_NODES='+shlex.quote(excluded)+'\n'+body+'\n)\n' + gpu_command)
 
 
 def _probe_parts(config, commands):
@@ -578,9 +595,12 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     nodes=[n for h in report['preflight']['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==node]
     if len(nodes)!=1:raise ValueError('请选择本次诊断中的节点')
     facts=nodes[0]; blockers=[]; selection=None
+    gpu = resource_request(config)
     try:
-        selection=selector.select_resources(report['preflight'],config['alias'],node,
-                    user_override=cores,user_override_evidence=reason)
+        selection=(selector.gpu_resources(report['preflight'],config['alias'],node,gpu,allow_wait=True)
+                   if gpu else selector.select_resources(report['preflight'],config['alias'],node,
+                    user_override=cores,user_override_evidence=reason))
+        blockers.extend(selection.get('blockers', []))
         ppn=selection['requested_cores']
     except ValueError as exc:
         blockers.append(str(exc))
@@ -620,6 +640,11 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
         blockers.append('运行时路径或调度器诊断未通过')
     if report['availability']['exit_code']!=0: blockers.append('容量诊断异常')
     p=profile(config,node,ppn)
+    if gpu and selection:
+        p.update(resource_mode='gpu', mpi_ranks=gpu['mpi_ranks'], gpus=selection['requested_gpus'],
+                 required_gpus=gpu['gpus'], gpu_resource_registered=selection['gpu_resource_registered'],
+                 resource_request=gpu, allocation='whole_node')
+        if gpu.get('gpu_type'): p['gpu_type'] = gpu['gpu_type']
     renderer=pbs.render_script if scheduler=='pbs' else slurm.render_script
     script='' if config.get('runtime_source')=='script' else renderer(p)
     if purpose=='vasp' or config.get('runtime_source')=='script':
@@ -632,6 +657,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
             script=selected['rendered_text'] or selected['script_text']
         elif config.get('runtime_source')=='script':blockers.append('请先选择当前程序的已导入脚本')
     return {'script':script,'profile':p,'resource_selection':selection,'blockers':blockers,
+            'capacity_wait': bool(blockers) and all(str(v).startswith(selector.CAPACITY_BLOCKERS) for v in blockers),
             'node_status':facts.get('STATUS'),
             'resource_ready':not blockers,'submission_enabled':False,'probe_id':probe_id,
             'note':'资源与脚本预览已生成。提交前仍需绑定冻结输入、完成输入审查，并再次检查所选节点容量。'}

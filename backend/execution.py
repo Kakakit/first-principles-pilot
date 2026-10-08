@@ -36,12 +36,17 @@ def script_name(scheduler):
 
 
 def template_resources(profile):
-    return {'name':profile['name'], 'queue':profile.get('queue',profile.get('partition')),
+    result = {'name':profile['name'], 'queue':profile.get('queue',profile.get('partition')),
             'node':profile['node'], 'ppn':profile.get('ppn',profile.get('ntasks')),
             'walltime':profile['walltime']}
+    if profile.get('resource_mode') == 'gpu':
+        result.update(mpi_ranks=profile['mpi_ranks'], gpus=profile['gpus'],
+                      gpu_resource_registered='yes' if profile['gpu_resource_registered'] else 'no')
+        if profile.get('gpu_type'): result['gpu_type'] = profile['gpu_type']
+    return result
 
 
-def validate_parallel(incar, ranks):
+def validate_parallel(incar, ranks, gpu=False):
     parallel = {name: int(match.group(1)) for name in ('KPAR', 'NCORE')
                 if (match := re.search(r'^\s*' + name + r'\s*=\s*(\d+)\s*$', incar, re.M))}
     if not parallel:
@@ -51,6 +56,8 @@ def validate_parallel(incar, ranks):
     kpar, ncore = parallel.get('KPAR', 1), parallel.get('NCORE', 1)
     if kpar < 1 or ncore < 1:
         raise ValueError('KPAR/NCORE 必须是正整数')
+    # VASP's OpenACC GPU port resets NCORE to 1; preserve the input as evidence.
+    if gpu: ncore = 1
     if ranks % kpar or ranks // kpar % ncore:
         raise ValueError(f'KPAR={kpar}、NCORE={ncore} 与本次 MPI 核数 {ranks} 不整除')
 
@@ -592,7 +599,8 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     elif restart_mode or restart_reason:
         raise ValueError('续算参数缺少来源 attempt')
     validate_parallel(files.get('INCAR', b'').decode('utf-8', errors='replace'),
-                      rendered['profile'].get('ppn', rendered['profile'].get('ntasks')))
+                      rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
+                      gpu=rendered['profile'].get('resource_mode') == 'gpu')
     restart_policy=None
     dependency=None
     if manifest.get('dependencies') and not restart and not chain_source and not contract:
@@ -621,6 +629,8 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         audit=servers.pbs.audit_inputs(temp,profile='relax' if manifest['stage']=='relax' else 'static',executable=executable_name)
     audit=_review_input_audit(audit,dependency or (chain_source if chain_source_kind == 'dependency' else None),
                               ({**role_source,'mode':'both' if 'WAVECAR' in role_source['files'] else 'charge'} if role_source else restart or (chain_source if chain_source and 'WAVECAR' in chain_source['files'] else None)),manifest['stage'])
+    if rendered['profile'].get('resource_mode') == 'gpu' and _incar_value(files['INCAR'], 'NCORE') not in (None, '', '1'):
+        audit.setdefault('warnings', []).append('GPU 模式按 VASP OpenACC 的 NCORE=1 检查 MPI/KPAR；原 INCAR 未修改，实际 GPU 程序能力仍需核对')
     storage_source = role_source or chain_source or restart or dependency
     storage_plan = source_file_plan(storage_source, files['INCAR'])
     identity = remote_paths.readable_identity(manifest, project)
@@ -817,11 +827,19 @@ def submit(key):
     if record['state']!='PREPARED':return record
     from .workbench_settings import assert_current
     assert_current(record.get('settings_snapshot'))
+    # Reject a locally changed frozen script before any remote read.
+    snapshot = record.get('template_snapshot')
+    if snapshot and (record['script'] != with_exit_trap(snapshot['rendered_text'])
+                     or hashlib.sha256(record['script'].encode()).hexdigest() != record['script_sha256']):
+        raise ValueError('冻结模板脚本不一致；没有提交')
     # Fresh resource probe before every dispatch; unchanged rendered resources required.
     from . import fast_dispatch
     fast=fast_dispatch.enabled(record)
     fresh={'id':record['probe_id']} if fast else servers.capacity_probe(record['config'])
-    checked={'resource_ready':True,'profile':record['profile']} if fast else servers.preview(record['config'],fresh['id'],record['node'],record['cores'],record['reason'])
+    checked_config = record['config']
+    if not record.get('template_snapshot') and not checked_config.get('runtime_source'):
+        checked_config = {**checked_config, 'runtime_source': 'registered'}
+    checked={'resource_ready':True,'profile':record['profile']} if fast else servers.preview(checked_config,fresh['id'],record['node'],record['cores'],record['reason'])
     if not checked['resource_ready'] or checked['profile']!=record['profile']:
         raise ValueError('实时资源已变化或不可用，请重新准备；没有提交')
     if record.get('template_snapshot'):

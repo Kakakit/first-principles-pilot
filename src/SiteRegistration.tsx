@@ -26,13 +26,13 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
       }
       const result=await requestJson('/api/sites',value);
       onRegistered(result.config,result.registered_profiles);window.dispatchEvent(new Event('fpilot:settings-changed'));
-      setMessage(value.python?'服务器已登记。下一步在下方导入可用脚本，按程序分类保存；提交页可以直接选择。':'服务器基本信息已保存；还需填写可用的服务器 Python，才能进行节点查询。');
+      setMessage(value.python?'服务器已登记。下一步在服务器详情中导入可用脚本，按程序分类保存；提交页可以直接选择。':'服务器基本信息已保存；还需填写可用的服务器 Python，才能进行节点查询。');
     }catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
   }
   const isWindows=navigator.userAgent.includes('Windows');
   const validHost=/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(newHost.alias)&&/^[A-Za-z0-9_.:-]+$/.test(newHost.host)&&/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(newHost.user)&&/^[0-9]+$/.test(newHost.port)&&Number(newHost.port)>=1&&Number(newHost.port)<=65535;
   const snippet=`Host ${newHost.alias}\n    HostName ${newHost.host}\n    User ${newHost.user}\n    Port ${newHost.port}\n    IdentityFile ~/.ssh/id_ed25519_fpilot\n    IdentitiesOnly yes\n    AddKeysToAgent yes\n${navigator.userAgent.includes('Mac')?'    UseKeychain yes\n':''}    ServerAliveInterval 60\n`;
-  return <section className="input-submit-card site-registration"><h3>首次配置自己的服务器</h3>
+  return <section className="input-submit-card site-registration"><h3>添加服务器</h3>
     <p>已有 SSH 别名和能在该服务器运行的任务脚本即可。环境脚本、MPI 和程序位置沿用导入脚本。</p>
     <fieldset disabled={busy}>
       <h4>1 · 连接服务器</h4>
@@ -62,7 +62,7 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
         <label>服务器已有 Python 绝对路径<input value={form.python} onChange={e=>field('python',e.target.value)} placeholder="自动发现；找不到时填写"/></label>
         {form.runtime_source==='registered'&&([['vasp_executable','VASP 常规程序绝对路径'],['ncl_executable','VASP SOC 程序绝对路径（可选）'],...(form.scheduler==='pbs'?[['mpi_executable','MPI 启动器绝对路径'],['environment_script','环境脚本绝对路径']]:[['module','module/version']])] as [keyof typeof initial,string][]).map(([key,label])=><label key={key}>{label}<input value={form[key]} onChange={e=>field(key,e.target.value)}/></label>)}
       </details>
-      <h4>3 · 保存后导入脚本</h4><p>下方脚本库支持上传或粘贴，选择普通 VASP、SOC/非共线或 Wannier90 分类。登记和连接通过只说明配置可用，实际计算证据在运行记录中查看。</p>
+      <p>保存连接后进入服务器详情，再导入这台服务器的任务脚本。连接测试不提交计算任务。</p>
       <button className="button primary" disabled={!form.alias} onClick={()=>void run('register')}>登记并使用</button>
     </fieldset>
     {busy&&<p role="status">正在检查服务器配置…</p>}{message&&<p role="status">{message}</p>}
