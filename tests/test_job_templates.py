@@ -50,15 +50,20 @@ class JobTemplateTests(unittest.TestCase):
         self.assertEqual(rendered['parent_hash'],record['script_hash'])
         self.assertEqual(job_templates.get_template(record['id'])['original_text'],PBS)
 
-    def test_mixed_pbs_resources_survive_and_ncl_requires_explicit_script(self):
+    def test_mixed_pbs_resources_survive_and_ncl_reuses_original(self):
         original=SAFE_PBS.replace('nodes=node01:ppn=48','nodes=node01:ppn=48,mem=96gb,walltime=01:00:00')
         record=job_templates.import_template(original,'jutai-1','vasp_std','user')
         config={'scheduler':'pbs','runtime_source':'script','program':'vasp_std'}
         result=job_templates.render_template(record['id'],RESOURCES,alias='jutai-1',config=config)
         self.assertTrue(result['submission_supported'],result['execution_blockers'])
         self.assertIn('nodes=node02:ppn=16,mem=96gb,walltime=00:10:00',result['rendered_text'])
-        bad=job_templates.render_template(record['id'],RESOURCES,alias='jutai-1',config={**config,'program':'vasp_ncl'})
-        self.assertFalse(bad['submission_supported']);self.assertIn('/opt/vasp/vasp_std',bad['rendered_text'])
+        converted=job_templates.render_template(record['id'],RESOURCES,alias='jutai-1',config={**config,'program':'vasp_ncl'})
+        self.assertTrue(converted['submission_supported'],converted['execution_blockers'])
+        self.assertIn('/opt/vasp/vasp_ncl',converted['rendered_text'])
+        self.assertEqual(converted['original_text'],original)
+        self.assertEqual(converted['program_adaptation']['target_program'],'vasp_ncl')
+        self.assertIn('-mpirun',converted['program_diff'])
+        self.assertEqual(job_templates.get_template(record['id'])['original_text'],original)
         ncl=job_templates.import_template(original.replace('vasp_std','vasp_ncl'),'jutai-1','vasp_ncl','user',parent_id=record['id'])
         self.assertTrue(job_templates.render_template(ncl['id'],RESOURCES,alias='jutai-1',config={**config,'program':'vasp_ncl'})['submission_supported'])
 

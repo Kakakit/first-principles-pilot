@@ -405,6 +405,11 @@ def _node_config(config, choice):
     template=choice.get('template_id') or templates.get(executable)
     if not template and config.get('runtime_source')=='script':
         template=config.get('template_id') if servers.program_name(config)==executable else settings['defaults'].get(config['alias']+':'+executable)
+        if not template and config.get('template_id'):
+            from . import job_templates
+            record=job_templates.get_template(config['template_id'],False)
+            if record['alias']==config['alias'] and record['scheduler']==servers.normalize_scheduler(config['scheduler']) and job_templates.fits_program(record,executable):
+                template=record['id']
     if template:return servers.with_script(config,template,executable)
     if config.get('runtime_source')=='script':raise ValueError('请为 '+executable+' 选择该服务器的已导入脚本')
     # Authorized registered steps carry an explicit executable; defaults must

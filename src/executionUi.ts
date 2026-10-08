@@ -40,6 +40,8 @@ export type ServerProbe = {
 
 export type ServerPreview = {
   script: string;
+  program_adaptation?: {source_program:string;target_program:string;target_command:string} | null;
+  program_diff?: string;
   blockers: string[];
   node_status?: string;
   capacity_wait?: boolean;

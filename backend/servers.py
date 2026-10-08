@@ -647,6 +647,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
         if gpu.get('gpu_type'): p['gpu_type'] = gpu['gpu_type']
     renderer=pbs.render_script if scheduler=='pbs' else slurm.render_script
     script='' if config.get('runtime_source')=='script' else renderer(p)
+    selected = None
     if purpose=='vasp' or config.get('runtime_source')=='script':
         template_id=selected_template(config)
         if template_id:
@@ -657,6 +658,8 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
             script=selected['rendered_text'] or selected['script_text']
         elif config.get('runtime_source')=='script':blockers.append('请先选择当前程序的已导入脚本')
     return {'script':script,'profile':p,'resource_selection':selection,'blockers':blockers,
+            'program_adaptation':selected.get('program_adaptation') if selected else None,
+            'program_diff':selected.get('program_diff','') if selected else '',
             'capacity_wait': bool(blockers) and all(str(v).startswith(selector.CAPACITY_BLOCKERS) for v in blockers),
             'node_status':facts.get('STATUS'),
             'resource_ready':not blockers,'submission_enabled':False,'probe_id':probe_id,

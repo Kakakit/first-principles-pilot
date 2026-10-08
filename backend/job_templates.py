@@ -155,15 +155,24 @@ def get_template(key, include_script=True):
     from .gpu_requests import hints
     request = hints(text, record['program'], values)
     if request: record['resource_request'] = request
-    named = set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(text))))
+    from .vasp_variants import capabilities, inspect
+    actual = inspect(execution_text(text)).get('program')
+    named = {actual} if actual else set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(text))))
     expected = 'vasp_std' if record['program'] == 'gpu_vasp' else record['program']
     if named and (expected == 'wannier90' or expected in ('vasp_std','vasp_ncl') and expected not in named):
         record['program_conflict'] = '原稿明确启动 ' + '/'.join(sorted(named)) + '，与保存分类不一致'
+    record['compatible_programs'] = capabilities(execution_text(text), record['program']) if not record.get('program_conflict') else []
     from .verified_templates import SOURCES
     evidence = next((item[4] for item in SOURCES if item[0] == record['alias'] and item[2] == record['script_hash']), None)
     record['verification_status'] = ('candidate' if evidence.startswith('CANDIDATE') else 'historical') if evidence else 'user_imported'
     if include_script: record['original_text'] = text
     return record
+
+
+def fits_program(record, program):
+    return (not record.get('program_conflict') and
+            (record['program'] == program or program == 'vasp_std' and record['program'] == 'gpu_vasp'
+             or program in record.get('compatible_programs', [])))
 
 
 def list_templates():
@@ -312,6 +321,17 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     gpu_mode = bool(values.get('mpi_ranks'))
     if gpu_mode and rendered: rendered = render_gpu_ranks(rendered, values['mpi_ranks'])
     script_mode=bool(config and config.get('runtime_source')=='script')
+    program_adaptation, variant_blockers, variant_diff = None, [], ''
+    expected = (servers.program_name(config) if config else None) or record['program']
+    original_program = 'vasp_std' if record['program'] == 'gpu_vasp' else record['program']
+    if rendered and (script_mode or record.get('adapter_version') == 2) and expected in ('vasp_std','vasp_ncl') and original_program != expected:
+        if fits_program(record, expected):
+            from .vasp_variants import adapt
+            before_variant = rendered
+            rendered, program_adaptation, variant_blockers = adapt(rendered, expected)
+            variant_diff = ''.join(difflib.unified_diff(before_variant.splitlines(True), rendered.splitlines(True), fromfile='resource-preview', tofile='program-preview'))
+        else:
+            variant_blockers.append('此原稿无法明确切换至 {}；请选择对应脚本，或明确程序启动命令后保存副本'.format(expected))
     if rendered and config and not script_mode and record.get('adapter_version')!=2 and PurePosixPath(config.get('vasp_executable','')).name == 'vasp_ncl':
         standard = str(PurePosixPath(config['vasp_executable']).with_name('vasp_std'))
         registered_standard=servers.select_profile(selected)['vasp_executable']
@@ -319,7 +339,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
         rendered = re.sub(r'(?<![A-Za-z0-9_/])vasp_std(?![A-Za-z0-9_])',
                           config['vasp_executable'], rendered)
     runtime_ok = bool(rendered)
-    execution_blockers = list(blockers)
+    execution_blockers = list(blockers) + variant_blockers
     warnings=['脚本正文由用户管理；预览和实时资源检查仍需完成']
     if script_mode or record.get('adapter_version')==2:
         # Preserve arbitrary environment setup; reject only concrete mapping/exit conflicts.
@@ -365,12 +385,11 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
         elif re.search(r'(?m)^\s*#PBS\s+-l\s+.*(?:select=|nodes=[2-9][0-9]*:)',execution_original) or (not gpu_mode and re.search(r'(?m)^\s*#PBS\s+-l\s+.*gpus=', execution_original)):
             execution_blockers.append('PBS select/多节点/GPU 资源不属于当前单节点核数映射；请保存匹配的适配副本')
         if config and (script_mode or record.get('adapter_version')==2):
-            expected=servers.program_name(config) or record['program']
-            compatible=record['program']==expected or expected=='vasp_std' and record['program']=='gpu_vasp'
+            compatible=fits_program(record,expected)
             if not compatible:execution_blockers.append('脚本分类 {} 与本次程序 {} 不一致，请选择对应脚本'.format(record['program'],expected))
-            named=set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(execution_original))))
+            named=set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(rendered or execution_original))))
             if expected in ('vasp_std','vasp_ncl') and named and expected not in named:
-                execution_blockers.append('脚本正文明确启动 {}，本次需要 {}；不会自动替换程序命令'.format('/'.join(sorted(named)),expected))
+                execution_blockers.append('脚本正文明确启动 {}，本次需要 {}；无法明确适配，请保存对应副本'.format('/'.join(sorted(named)),expected))
             if expected == 'wannier90' and named:
                 execution_blockers.append('脚本正文明确启动 VASP，与 Wannier90 分类不一致，请导入对应原稿')
     execution_blockers=list(dict.fromkeys(execution_blockers))
@@ -379,6 +398,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
                 scheduler=record['scheduler'], program=record['program'], source=record['source'], original_hash=record['script_hash'],
                 parent_id=record.get('parent_id'), parent_hash=record.get('parent_hash'), original_text=record['original_text'],
                 rendered_text=rendered, script_text=rendered or record['original_text'], resources=values,
+                program_adaptation=program_adaptation, program_diff=variant_diff,
                 line_endings_normalized=execution_original != record['original_text'],
                 blockers=blockers, execution_blockers=execution_blockers, warnings=warnings,
                 submission_supported=not execution_blockers, runtime_matches_registry=runtime_ok,

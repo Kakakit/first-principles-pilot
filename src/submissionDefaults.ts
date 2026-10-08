@@ -7,7 +7,8 @@ export function runtimeFor(config:ServerConfig,profiles:RegisteredProfile[],sett
  delete next.template_id;delete next.script_templates;
  delete next.resource_request;
  if(settings.runtimes[alias+':'+program]?.resource_request)next.resource_request=settings.runtimes[alias+':'+program].resource_request;
- const template=settings.defaults[alias+':'+program];
+ // An explicitly saved registered ncl runtime takes precedence over a std fallback.
+ const template=settings.defaults[alias+':'+program]||(program==='vasp_ncl'&&!settings.runtimes[alias+':'+program]?settings.defaults[alias+':vasp_std']:undefined);
  if(template)return {...next,runtime_source:'script',vasp_executable:program,template_id:template};
  if(profile?.runtime_source==='script'||settings.runtimes[alias+':'+program]?.runtime_source==='script')return {...next,runtime_source:'script',vasp_executable:program};
  return {...next,runtime_source:'registered'};

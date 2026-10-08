@@ -53,7 +53,7 @@ def save(value):
             item=job_templates.get_template(template)
             if item.get('alias')!=config['alias']:raise ValueError('默认脚本必须属于当前主机')
             if item.get('scheduler')!=servers.normalize_scheduler(config['scheduler']):raise ValueError('默认脚本调度器须与所选服务器一致')
-            if item.get('program') not in (program,'gpu_vasp' if program=='vasp_std' else program):raise ValueError('默认脚本分类须与所选程序一致')
+            if not job_templates.fits_program(item,program):raise ValueError('默认脚本须支持所选程序，且原稿分类正确')
             if not config['queue'] and item.get('resources',{}).get('queue'):config['queue']=item['resources']['queue']
             named_programs = set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', item['original_text']))
             if program == 'wannier90' and named_programs: raise ValueError('脚本正文启动 VASP，不能设为 Wannier90 默认脚本')
