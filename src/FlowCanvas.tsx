@@ -4,7 +4,9 @@ import type {Step,Project} from './model';
 import {catalog,canConnect} from './model';
 import {statusLabel} from './statusLabels';
 import {useAppearance} from './useAppearance';
-import {useLayoutEffect,useRef} from 'react';
+import {useLayoutEffect,useRef,useState} from 'react';
+import {measuredCanvasNodes,updateCanvasMeasurements} from './canvasState';
+import type {CanvasMeasurements} from './canvasState';
 import {Activity,Atom,Box,GitBranch,Layers,MoreHorizontal} from 'lucide-react';
 const icons={structure:Box,relax:Atom,scf:Activity,bands:GitBranch,dos:Layers,'vasp-wannier':Atom,wannier90:Atom,scan:Layers};
 export type CaseFlowNode=Node<{label:string;state:string},'case'>;
@@ -39,17 +41,20 @@ const multiSelectionKeys=['Meta','Control'];
 export default function FlowCanvas({project,nodes,edgeId=null,onChange,onSelectionChange,onNodeClick,onEdgeClick,onPaneClick,onConnect,onDragStart,mode='edit'}:{project:Project;nodes:(Step|CaseFlowNode)[];edgeId?:string|null;onChange?:(nodes:Step[])=>void;onSelectionChange?:(ids:string[])=>void;onNodeClick:(id:string)=>void;onEdgeClick?:(id:string)=>void;onPaneClick?:()=>void;onConnect?:(c:Connection)=>void;onDragStart?:()=>void;mode?:'edit'|'chain-select'}){
  const {theme}=useAppearance();
  const editing=mode==='edit',dragging=useRef(false);
+ const [measurements,setMeasurements]=useState<CanvasMeasurements>(()=>({projectId:project.id,dimensions:new Map()}));
+ const renderNodes=measuredCanvasNodes(nodes,project.id,measurements);
  const selectedIds=nodes.filter(node=>node.selected).map(node=>node.id);
  const beginDrag=()=>{if(!dragging.current){dragging.current=true;onDragStart?.();}};
  const endDrag=()=>{dragging.current=false;};
  const changeNodes=(changes:NodeChange<Step|CaseFlowNode>[])=>{
+  if(changes.some(change=>change.type==='dimensions'))setMeasurements(previous=>updateCanvasMeasurements(previous,project.id,nodes,changes));
   if(!editing)return;
   const selectionChanges=changes.filter(change=>change.type==='select');
   if(selectionChanges.length)onSelectionChange?.(applyNodeChanges(selectionChanges,nodes).filter(node=>node.selected&&project.nodes.some(item=>item.id===node.id)).map(node=>node.id));
-  const positions=changes.filter(change=>change.type==='position'&&change.position&&project.nodes.some(node=>node.id===change.id)) as NodeChange<Step>[];
+  const positions=changes.filter(change=>change.type==='position'&&change.position&&Number.isFinite(change.position.x)&&Number.isFinite(change.position.y)&&project.nodes.some(node=>node.id===change.id)) as NodeChange<Step>[];
   if(positions.length)onChange?.(applyNodeChanges(positions,project.nodes));
  };
- return <ReactFlow key={project.id} colorMode={theme.appearance} nodes={nodes} edges={project.edges.map(edge=>({...edge,selected:editing&&edge.id===edgeId,style:{stroke:theme.colors.canvasEdge,strokeWidth:1.7}}))} nodeTypes={nodeTypes} onNodesChange={changeNodes}
+ return <ReactFlow key={project.id} colorMode={theme.appearance} nodes={renderNodes} edges={project.edges.map(edge=>({...edge,selected:editing&&edge.id===edgeId,style:{stroke:theme.colors.canvasEdge,strokeWidth:1.7}}))} nodeTypes={nodeTypes} onNodesChange={changeNodes}
   nodesDraggable={editing} nodesConnectable={editing} edgesReconnectable={editing} elementsSelectable={editing} nodesFocusable={editing} edgesFocusable={editing}
   selectNodesOnDrag={false}
   selectionKeyCode={editing?'Shift':null} multiSelectionKeyCode={editing?multiSelectionKeys:null}
