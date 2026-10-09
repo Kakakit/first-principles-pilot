@@ -33,6 +33,6 @@ class BandPathTests(unittest.TestCase):
             result=app.attempt_band_path('attempt',app.AttemptBandPathRequest(project_id='p'))
             self.assertEqual(result['source_attempt_id'],'attempt')
             self.assertEqual(result['structure_hash'],structure['source']['sha256'])
-            preview.assert_called_once_with('attempt','CONTCAR','head',262144)
+            preview.assert_called_once_with('attempt','POSCAR','head',262144,True)
             with self.assertRaises(HTTPException):
                 app.attempt_band_path('attempt',app.AttemptBandPathRequest(project_id='other'))

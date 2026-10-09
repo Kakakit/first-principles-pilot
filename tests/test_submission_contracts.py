@@ -74,6 +74,8 @@ class SubmissionContracts(unittest.TestCase):
         _, source_files = ex.bundle(self.source_bundle, allow_dependencies=True)
         self.actual_poscar = parse_structure('POSCAR', 'poscar', base64.b64encode(source_files['POSCAR']).decode())
         self.snapshot=patch.object(sources.source_files,'snapshot',side_effect=lambda alias,path,names,ssh,mode='lightweight':{n:{'size_bytes':42,'mtime':'time','verification_mode':'metadata' if n in ('CHGCAR','WAVECAR') else 'content',**({'sha256':(self.actual_poscar if n=='POSCAR' else self.project['nodes'][0]['data']['structure'])['source']['sha256']} if n in ('POSCAR','CONTCAR') else {})} for n in names});self.snapshot.start();self.addCleanup(self.snapshot.stop)
+        header=patch.object(sources.source_files,'structure_header',side_effect=lambda *a:self.actual_poscar['poscar'].encode());header.start();self.addCleanup(header.stop)
+        wave=patch.object(sources.source_files,'wave_header',return_value={'nkpoints':32,'nbands':8,'spin_channels':1,'encut_eV':400});wave.start();self.addCleanup(wave.stop)
         from backend import artifacts
         structure=self.project['nodes'][0]['data']['structure']
         self.artifact=patch.object(artifacts,'preview',side_effect=lambda key,name,*args:{'structure':self.actual_poscar if name=='POSCAR' else structure,'partial':False});self.artifact.start();self.addCleanup(self.artifact.stop)
@@ -154,7 +156,7 @@ class SubmissionContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'没有可用来源'):inputs.freeze(self.project,'c','invalid')
 
     def test_latest_eligible_is_local_only_and_freeze_never_reselects(self):
-        self.set_source('c','upstream');node=self.project['nodes'][2];node['data']['sourceDraft'].pop('attempt_id')
+        self.set_source('c','upstream');self.project['nodes'][2]['data']['sourceDraft']['read_charge']=True;node=self.project['nodes'][2];node['data']['sourceDraft'].pop('attempt_id')
         newer={**self.record,'id':'new','created_at':'2026-10-02'}
         with ex.db() as c:c.execute('INSERT INTO attempts VALUES(?,?,?)',('new','COMPLETED',json.dumps(newer)))
         with patch.object(ex,'ssh',side_effect=AssertionError('candidate listing must not use SSH')):

@@ -327,6 +327,10 @@ def _audit_incar(tags, duplicates, malformed, profile, executable):
     lnoncollinear = _tag_bool(tags, "LNONCOLLINEAR") is True
     lspiral = _tag_bool(tags, "LSPIRAL") is True
     lc = _tag_bool(tags, "LCALCPOL") is True
+    if lc and (_tag_int(tags, "NCORE") or 1) != 1:
+        errors.append("LCALCPOL PEAD requires NCORE = 1; edit the input and freeze a new version")
+    if lc and "NPAR" in tags and "NCORE" in tags:
+        errors.append("LCALCPOL cannot specify both NPAR and NCORE")
     if profile == "relax" and (_tag_int(tags, "NSW") or 0) <= 0:
         errors.append("relax profile requires NSW > 0")
     if profile == "static" and (_tag_int(tags, "NSW") or 0) > 0:

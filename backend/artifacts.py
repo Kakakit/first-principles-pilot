@@ -95,7 +95,7 @@ done < <(find . -xdev -type f -print0)
     files.sort(key=lambda item: (item['category'], item['path']))
     result = {'attempt_id': key, 'host': record['config']['alias'], 'root': root,
             'files': files, 'truncated': 'FPILOT_TRUNCATED=1' in receipt.get('stdout', ''),
-            'limit': MAX_ENTRIES, 'refreshed_at': datetime.now(timezone.utc).isoformat(),
+            'limit': MAX_ENTRIES, 'observed_state': record['state'], 'source_identity': _identity(record), 'refreshed_at': datetime.now(timezone.utc).isoformat(),
             'remote_mutation': False}
     cache = ROOT / 'artifact-cache' / (key + '.json')
     cache.parent.mkdir(parents=True, exist_ok=True)
@@ -106,17 +106,31 @@ done < <(find . -xdev -type f -print0)
     return result
 
 
+def _identity(record):
+    return {'alias': record['config']['alias'], 'root': _root(record),
+            'bundle_id': record.get('bundle_id'), 'job_id': record.get('job_id')}
+
+
+def cached_listing(record):
+    """Only a complete observation of this terminal run proves missing files."""
+    try:
+        result = json.loads((ROOT / 'artifact-cache' / (record['id'] + '.json')).read_text())
+        if (result.get('attempt_id') == record['id'] and not result.get('truncated')
+                and record['state'] in ('COMPLETED', 'FAILED')
+                and result.get('observed_state') == record['state']
+                and result.get('source_identity') == _identity(record)
+                and result.get('refreshed_at')):
+            return result
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
+
+
 def listing(key):
-    cache = ROOT / 'artifact-cache' / (key + '.json')
-    if cache.is_file():
-        try:
-            result = json.loads(cache.read_text(encoding='utf-8'))
-            record = execution.get(key)
-            if result.get('attempt_id') == key and (record['state'] in ('COMPLETED', 'FAILED') or
-                time.time() - datetime.fromisoformat(result['refreshed_at']).timestamp() < 15):
-                return {**result, 'cached': True}
-        except (OSError, ValueError, KeyError):
-            pass
+    record = execution.get(key)
+    result = cached_listing(record)
+    if result:
+        return {**result, 'cached': True, 'verification_status': 'VERIFIED'}
     return refresh(key)
 
 
@@ -164,16 +178,16 @@ def _oszicar(text):
     return points[-2000:]
 
 
-def preview(key, relative, mode='tail', limit=MAX_PREVIEW_BYTES):
+def preview(key, relative, mode='tail', limit=MAX_PREVIEW_BYTES, force=False):
     record = execution.get(key)
     relative = _relative(relative)
     limit = max(1, min(int(limit), MAX_PREVIEW_BYTES))
     cache = None
     if record['state'] in ('COMPLETED', 'FAILED'):
-        snapshot = listing(key)
+        snapshot = refresh(key) if force else listing(key)
         identity = f"{key}|{relative}|{mode}|{limit}|{snapshot['refreshed_at']}"
         cache = ROOT / 'artifact-cache' / 'previews' / (hashlib.sha256(identity.encode()).hexdigest() + '.json')
-        if cache.is_file():
+        if not force and cache.is_file():
             try:
                 return {**json.loads(cache.read_text(encoding='utf-8')), 'cached': True}
             except (OSError, ValueError):

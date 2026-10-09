@@ -752,18 +752,18 @@ class AttemptBandPathRequest(BaseModel):
 def attempt_band_path(key: str, payload: AttemptBandPathRequest):
     """Generate an editable path from the completed SCF's actual final cell."""
     try:
-        from . import artifacts, execution
+        from . import artifacts, execution, source_contracts
         record = execution.get(key)
         if record.get('project_id') != payload.project_id or record.get('state') != 'COMPLETED':
             raise ValueError('请选择当前项目已完成的 SCF attempt')
         manifest, _ = execution.bundle(record['bundle_id'], allow_dependencies=True)
-        if manifest.get('stage') != 'scf' or (record.get('evidence') or {}).get('ediff_reached') is not True:
+        if manifest.get('stage') != 'scf' or not source_contracts.electronic(record.get('evidence') or {}):
             raise ValueError('来源需要已确认电子收敛的 SCF')
-        preview = artifacts.preview(key, 'CONTCAR', 'head', 262144)
+        preview = artifacts.preview(key, 'POSCAR', 'head', 262144, True)
         if preview.get('partial') or not preview.get('structure'):
-            raise ValueError('SCF 最终 CONTCAR 不完整或无法解析')
+            raise ValueError('SCF 实际 POSCAR 不完整或无法解析')
         return {**band_path.generate(preview['structure']), 'source_attempt_id': key,
-                'source_job_id': record.get('job_id'), 'source_host': record['config']['alias']}
+                'source_job_id': record.get('job_id'), 'source_host': record['config']['alias'], 'source_file': 'POSCAR'}
     except (ValueError, OSError, KeyError, TypeError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -1548,6 +1548,56 @@ def calculation_sources(payload: SourceRequest):
     from . import source_contracts
     try:return source_contracts.resolve(payload.project,payload.node_id,payload.execution_scope)
     except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+class SourceRefreshRequest(SourceRequest):
+    attempt_id: str
+
+
+@app.post('/api/calculation-sources/refresh')
+def calculation_source_refresh(payload: SourceRefreshRequest):
+    from . import source_contracts, artifacts
+    try:
+        selection = source_contracts.resolve(payload.project, payload.node_id, payload.execution_scope)
+        if payload.attempt_id not in {c['id'] for c in selection['candidates']}:
+            raise ValueError('所选运行不属于本节点可审核的来源')
+        artifacts.refresh(payload.attempt_id)
+        return source_contracts.resolve(payload.project, payload.node_id, payload.execution_scope)
+    except (ValueError, KeyError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+class ChainDraftRequest(BaseModel):
+    project: dict
+
+
+@app.post('/api/chains/{key}/draft-differences')
+def chain_draft_differences(key: str, payload: ChainDraftRequest):
+    from . import source_contracts, chain_runs
+    try:
+        run = chain_runs.get(key)
+        if run['project_id'] != payload.project['id']:
+            raise ValueError('计算链不属于当前项目')
+        effective, _ = chain_runs._workflow_project(payload.project, run['node_ids'])
+        differences = []
+        for step in run['steps']:
+            if not any(n['id'] == step['node_id'] for n in effective['nodes']):
+                differences.append({'node_id': step['node_id'], 'label': step['label'], 'field': '节点', 'frozen': '存在', 'draft': '已移除'})
+                continue
+            result = source_contracts.draft_differences(effective, step['node_id'], step['bundle_id'])
+            differences.extend({**item, 'node_id': step['node_id'], 'label': step['label']} for item in result['differences'])
+        return {'run_id': key, 'differences': differences}
+    except (ValueError, KeyError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/inputs/{key}/draft-differences')
+def input_draft_differences(key: str, payload: SourceRequest):
+    from . import source_contracts
+    try:
+        return source_contracts.draft_differences(payload.project, payload.node_id, key)
+    except (ValueError, KeyError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
 
 @app.post('/api/branch-binding')
 def branch_binding(payload: SourceRequest):

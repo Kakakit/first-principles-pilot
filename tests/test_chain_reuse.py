@@ -74,7 +74,7 @@ class ReuseTests(unittest.TestCase):
         project = copy.deepcopy(self.project)
         project['nodes'][1]['data']['parameters']['values']['ENCUT'] = '500'
         report = self.preview(project=project)
-        self.assertFalse(report['ready'])
+        self.assertTrue(report['ready'])  # structure-only inheritance ignores electronic changes
         candidate = report['sources'][0]['candidates'][0]
         self.assertEqual(next(item for item in candidate['differences'] if item['field'] == 'ENCUT')['before'], '400')
         report = self.preview({'r': 'old-relax'}, project)

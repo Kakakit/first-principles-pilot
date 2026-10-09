@@ -26,11 +26,12 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'CHGCAR'):
             ex._review_input_audit({'status':'FAIL','errors':[missing]},stage='scf')
 
-    def test_lcalcpol_audit_does_not_impose_ncore_one(self):
+    def test_lcalcpol_audit_rejects_proven_pead_conflict(self):
         audit_script=Path(__file__).parents[1]/'resources/skills/calc-review/scripts/input_audit.py'
         audit_incar=runpy.run_path(str(audit_script))['_audit_incar']
         errors,_,_=audit_incar({'LCALCPOL':'.TRUE.','NCORE':'6'},[],[],'static','vasp_ncl')
-        self.assertEqual(errors,[])
+        self.assertTrue(any('PEAD' in e for e in errors))
+        self.assertEqual(audit_incar({'LCALCPOL':'.TRUE.','NCORE':'1'},[],[],'static','vasp_ncl')[0], [])
 
     def test_remote_root_policy_and_attempt_layout(self):
         self.assertEqual(remote_paths.normalize_workspace_root(), '$HOME/230269265lht')
@@ -185,6 +186,8 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(ex.save(stale)['evidence'],r['evidence'])
             self.assertEqual(ex.get('a')['state'],state)
     def setUp(self):
+        interpreter = patch('backend.remote_transport._interpreter', return_value='/usr/bin/python3')
+        interpreter.start(); self.addCleanup(interpreter.stop)
         self.temp=tempfile.TemporaryDirectory();self.old=ex.ROOT;ex.ROOT=Path(self.temp.name)
         self.config={'alias':'jutai-5'};self.profile={'node':'node02','ppn':64}
         self.files={k:b'test\n' for k in ('INCAR','POSCAR','KPOINTS','POTCAR')}

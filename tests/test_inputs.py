@@ -143,7 +143,7 @@ class InputTests(unittest.TestCase):
         report = inputs.generate(self.project, 'b')
         self.assertEqual(report['errors'], [])
         self.assertIn('ICHARG = 11', report['files']['INCAR'])
-        self.assertEqual([d['file'] for d in report['dependencies']], ['CONTCAR', 'CHGCAR'])
+        self.assertEqual([d['file'] for d in report['dependencies']], ['POSCAR', 'CHGCAR'])
         bands['data']['inputDraft']['path'] = '0 0 0'
         self.assertTrue(inputs.generate(self.project, 'b')['errors'])
 
@@ -156,7 +156,7 @@ class InputTests(unittest.TestCase):
         self.assertEqual(report['errors'],[])
         self.assertIn('EMIN = -5\n',report['files']['INCAR'])
         self.assertIn('ICHARG = 11\n',report['files']['INCAR'])
-        self.assertEqual([d['file'] for d in report['dependencies']],['CONTCAR','CHGCAR'])
+        self.assertEqual([d['file'] for d in report['dependencies']],['POSCAR','CHGCAR'])
 
     def test_project_history_isolated_before_recent_limit_and_recoverable(self):
         first=inputs.freeze(self.project,'c','project one')
@@ -188,7 +188,7 @@ class InputTests(unittest.TestCase):
         self.assertEqual(report['errors'],[])
         self.assertEqual(report['potcar_source'],'项目共享')
         self.assertIn('ICHARG = 11\n',report['files']['INCAR'])
-        self.assertEqual(report['incar_tags']['ICHARG']['source'],'节点执行合同')
+        self.assertEqual(report['incar_tags']['ICHARG']['source'],'计算来源合同')
         self.assertIn('LORBIT = 11\n',report['files']['INCAR'])
         self.assertEqual(report['incar_tags']['LORBIT']['source'],'节点执行合同')
         dos['data']['parameters']['values']['LORBIT']='10'
@@ -282,7 +282,7 @@ class InputTests(unittest.TestCase):
         self.project['edges'].append({'source': 'c', 'target': 'pol'})
         report = inputs.generate(self.project, 'pol')
         self.assertEqual(report['errors'], [])
-        self.assertEqual([item['file'] for item in report['dependencies']], ['CONTCAR', 'CHGCAR'])
+        self.assertEqual([item['file'] for item in report['dependencies']], ['POSCAR', 'CHGCAR'])
         self.assertIn('ICHARG = 1\n', report['files']['INCAR'])
         self.assertIn('ISTART = 0\n', report['files']['INCAR'])
         self.assertFalse(report['restart_required'])

@@ -8,7 +8,7 @@ from contextlib import closing
 from pathlib import Path, PurePosixPath
 
 from . import artifacts, band_path, execution as ex, execution_control as control
-from . import inputs, servers, recycle
+from . import inputs, servers, recycle, source_contracts
 from .storage import validate_workspace
 from .platform_runtime import exclusive_lock
 
@@ -147,8 +147,8 @@ def _selected(project, node_ids):
             raise ValueError('每个计算节点须有唯一直接上游')
         parent = incoming[0]
         kind, parent_kind = nodes[key]['data']['kind'], nodes[parent]['data']['kind']
-        if kind == 'scf' and parent_kind not in ('structure', 'relax', 'scf'):
-            raise ValueError('SCF 上游须为结构、relax 或 SCF')
+        if kind in ('relax', 'scf') and parent_kind not in ('structure', 'relax', 'scf'):
+            raise ValueError('relax / SCF 上游须为结构、relax 或 SCF')
         if kind in ('bands', 'dos', 'vasp-wannier') and parent_kind != 'scf':
             raise ValueError('非自洽 VASP 节点须直接依赖 SCF')
         parents[key] = parent
@@ -174,7 +174,7 @@ def _workflow_project(project, ordered):
         before = {tag: values.get(tag, shared.get(tag)) for tag in ('LWAVE', 'LCHARG')}
         if kind == 'relax':
             values['LWAVE'] = 'true'
-            needs_charge=any(e['source']==key and nodes.get(e['target'],{}).get('data',{}).get('sourceDraft',{}).get('mode')=='upstream' for e in result['edges'])
+            needs_charge = any(e['source'] == key and nodes[e['target']]['data']['kind'] in KINDS and 'CHGCAR' in source_contracts.plan(result, e['target'])['required_files'] for e in result['edges'])
             if needs_charge:values['LCHARG']='true'
             else:values.setdefault('LCHARG','false')
         elif kind == 'scf':
@@ -255,9 +255,14 @@ def _reuse(project, nodes, parents, ordered, reports, source_alias, choices, mod
                 verdict = convergence(record, nodes[parent]['data']['kind'])
                 if verdict['status'] != 'CONVERGED':
                     raise ValueError(verdict.get('reason', '未确认最终步收敛'))
-                manifest, files = ex.bundle(record['bundle_id'], allow_dependencies=True)
+                manifest, files = source_contracts.actual_inputs(record)
                 if manifest.get('node_id') != parent or manifest.get('stage') != nodes[parent]['data']['kind']:
                     raise ValueError('来源冻结输入与上游节点不符')
+                for key in ordered:
+                    if parents[key] == parent:
+                        review = source_contracts.compatibility(reports[key]['source_plan'], record, reports[key])
+                        if review['blockers']:
+                            raise ValueError('；'.join(review['blockers']))
                 from .source_files import snapshot
                 receipt = snapshot(source_alias, ex.attempt_path(record)['shell'], sorted(names), ex.ssh, mode)
                 candidate.update(eligible=True, differences=_input_differences(draft, manifest, files),
@@ -271,7 +276,8 @@ def _reuse(project, nodes, parents, ordered, reports, source_alias, choices, mod
         eligible = [item for item in candidates if item['eligible']]
         selected = next((item for item in eligible if item['attempt_id'] == choices.get(parent)), None)
         if not choices.get(parent):
-            matching=[item for item in eligible if not item['differences']]
+            consumes_electronic = any(parents[key] == parent and reports[key]['source_plan']['electronic_usage'] != 'none' for key in ordered)
+            matching=[item for item in eligible if not consumes_electronic or not item['differences']]
             selected=matching[0] if matching else None
         reason = '' if selected else ('所选历史来源当前不可用' if choices.get(parent) else
                                      '有多个来源或输入差异，请显式选择历史结果' if eligible else
@@ -320,9 +326,9 @@ def _preview(project, node_ids, source_alias=None, reuse_sources=None, verificat
                                            'sha256': '待上游完成后物化'}
                                           for item in report.get('dependencies', [])],
                       'conditional_retry': ({'source_files': ['CONTCAR', 'WAVECAR'],
-                                             'incar_diff': {'ISTART': '1', 'ICHARG': '0'}}
+                                             'incar_diff': {'ISTART': str(source_contracts.wave_start('relax', incar, True)), 'ICHARG': '0'}}
                                             if nodes[key]['data']['kind'] == 'relax' else
-                                            {'source_files': ['CONTCAR', 'WAVECAR', 'CHGCAR'],
+                                            {'source_files': ['POSCAR', 'WAVECAR', 'CHGCAR'],
                                              'incar_diff': {'ISTART': '1', 'ICHARG': '1'}}
                                             if nodes[key]['data']['kind'] == 'scf' else None),
                       'nelm': ex._incar_value(incar, 'NELM') or '60 (VASP 默认)',
@@ -352,6 +358,14 @@ def _preview(project, node_ids, source_alias=None, reuse_sources=None, verificat
         if parent not in reports:
             continue
         a, b = reports[parent], reports[key]
+        policy = b.get('source_plan')
+        if policy and policy['electronic_usage'] == 'none' and 'WAVECAR' not in policy['required_files']:
+            continue
+        if policy and a.get('files', {}).get('INCAR') and b.get('files', {}).get('INCAR'):
+            review = source_contracts.review_inputs(policy, {'INCAR': a['files']['INCAR'].encode(),
+                                                        'KPOINTS': a['files'].get('KPOINTS', '').encode(),
+                                                        'POTCAR': inputs.potcar_bytes(a['potcar']['sha256'])}, b)
+            b['errors'].extend(review['blockers'])
         old, new = a.get('files', {}).get('INCAR', '').encode(), b.get('files', {}).get('INCAR', '').encode()
         for tag in MODEL_TAGS:
             before, after = ex._incar_value(old, tag), ex._incar_value(new, tag)
@@ -608,41 +622,8 @@ def refresh(run_id, project_id):
 
 
 def convergence(record, stage):
-    """Use the final OSZICAR electronic step, not any earlier OUTCAR marker."""
-    if record['state'] != 'COMPLETED':
-        return {'status': 'UNVERIFIED', 'reason': '程序未确认正常结束'}
-    evidence = record.get('evidence') or {}
-    if evidence.get('wrapper_exit') not in (0, None) or not evidence.get('vasp_timing') or not evidence.get('output_sanity', True):
-        return {'status': 'UNVERIFIED', 'reason': '包装脚本或 VASP 结束证据不足'}
-    _, files = ex.bundle(record['bundle_id'], allow_dependencies=True)
-    incar = files['INCAR']
-    try:
-        nelm = int(ex._incar_value(incar, 'NELM') or 60)
-        nsw = int(ex._incar_value(incar, 'NSW') or 0)
-    except ValueError:
-        return {'status': 'UNVERIFIED', 'reason': '步数上限不可解析'}
-    delta_e, delta_eps, ediff = (evidence.get(k) for k in ('last_delta_e', 'last_delta_eps', 'ediff_value'))
-    electronic = (all(isinstance(x, (float, int)) for x in (delta_e, delta_eps, ediff))
-                  and abs(delta_e) <= ediff and abs(delta_eps) <= ediff)
-    step = evidence.get('last_electronic_step')
-    ionic = None
-    ionic_step = None
-    if stage == 'relax':
-        if isinstance(evidence.get('ionic_converged'), bool) and isinstance(evidence.get('last_ionic_step'), int):
-            ionic, ionic_step = evidence['ionic_converged'], evidence['last_ionic_step']
-        else:
-            ionic, ionic_step = _ionic_evidence(record)
-        if ionic is None:
-            return {'status': 'UNVERIFIED', 'reason': '离子收敛证据读取失败'}
-    if electronic and (stage == 'scf' or ionic):
-        return {'status': 'CONVERGED', 'electronic': True, 'ionic': ionic,
-                'electronic_step': step, 'ionic_step': ionic_step}
-    exhausted = (isinstance(step, int) and step >= nelm or
-                 stage == 'relax' and isinstance(ionic_step, int) and ionic_step >= nsw and nsw > 0)
-    return {'status': 'EXHAUSTED' if exhausted else 'UNVERIFIED',
-            'reason': '达到 NELM/NSW，仍未收敛' if exhausted else '未能确认最终步收敛或达到步数上限',
-            'electronic': electronic, 'ionic': ionic,
-            'electronic_step': step, 'ionic_step': ionic_step}
+    from .source_contracts import convergence as verdict
+    return verdict(record, stage)
 
 
 def _ionic_evidence(record):
@@ -662,9 +643,11 @@ def _ionic_evidence(record):
 
 def _band_bundle(run, step, source_id):
     source = ex.get(source_id)
-    preview = artifacts.preview(source_id, 'CONTCAR', 'head', 262144)
+    manifest, _ = ex.bundle(step['bundle_id'], allow_dependencies=True)
+    structure_file = manifest.get('source_plan', {}).get('structure_file', 'CONTCAR')
+    preview = artifacts.preview(source_id, structure_file, 'head', 262144, True)
     if preview.get('partial') or not preview.get('structure'):
-        raise ValueError('SCF 最终 CONTCAR 不完整，能带路径未生成')
+        raise ValueError('SCF 实际结构不完整，能带路径未生成')
     proposal = band_path.generate(preview['structure'])
     project = copy.deepcopy(run['project'])
     node = next(item for item in project['nodes'] if item['id'] == step['node_id'])
@@ -672,6 +655,7 @@ def _band_bundle(run, step, source_id):
     draft['path'] = proposal['path']
     draft['path_structure_hash'] = proposal['structure_hash']
     draft['path_source_attempt_id'] = source_id
+    draft['path_source_file'] = structure_file
     frozen = inputs.freeze(project, step['node_id'], run['reason'], verification_mode=run.get('verification_mode', 'full'),defer_sources=True)
     step['bundle_id'] = frozen['id']
     step['actual_band_path'] = {'source_attempt_id': source_id,

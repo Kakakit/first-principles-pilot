@@ -1,5 +1,6 @@
 """Exercise the shipped FeCr2O4 JSON through import, freeze, and a fake worker."""
 import hashlib
+import base64
 import json
 import shutil
 import tempfile
@@ -42,14 +43,14 @@ class FeCrRecipeChainTests(unittest.TestCase):
                 preview = chains.preview(project, selected)
                 self.assertTrue(preview['ready'], preview['steps'])
                 self.assertEqual((len(preview['steps']), preview['max_jobs']), (12, 20))
-                self.assertTrue(any(row['parent_id'] == 'a1-relax' and row['node_id'] == 'a2-scf'
+                self.assertFalse(any(row['parent_id'] == 'a1-relax' and row['node_id'] == 'a2-scf'
                                     and row['field'] == 'MAGMOM' for row in preview['mismatches']))
                 run = chains.freeze(project, selected, '模拟导入配方验收', preview['definition_hash'])
                 by_id = {step['node_id']: step for step in run['steps']}
                 for child, parent in [('a1-pol', 'a1-scf'), ('a2-pol', 'a2-scf'), ('b-pol', 'b-scf')]:
                     step = by_id[child]
                     self.assertEqual(step['parent_id'], parent)
-                    self.assertEqual([part['file'] for part in step['pending_sources']], ['CONTCAR', 'CHGCAR'])
+                    self.assertEqual([part['file'] for part in step['pending_sources']], ['POSCAR', 'CHGCAR'])
                     manifest, files = ex.bundle(step['bundle_id'], allow_dependencies=True)
                     self.assertEqual(ex._restart_policy(manifest, files)['ICHARG'], 1)
                     self.assertEqual(ex._incar_value(files['INCAR'], 'ISTART'), '0')
@@ -140,11 +141,18 @@ class FeCrRecipeChainTests(unittest.TestCase):
                               remote_workspace_root='$HOME/230269265lht',
                               remote_relative_path='material-projects/recipe-test/flows/main/stages/03-scf/attempts/source',
                               remote_path_absolute='/home/user/230269265lht/material-projects/recipe-test/flows/main/stages/03-scf/attempts/source')
-                ex.save(parent)
-                charge_hash, structure_hash = 'a' * 64, 'b' * 64
+                from backend.structures import parse_structure
+                _, parent_files = ex.bundle(parent['bundle_id'], allow_dependencies=True)
+                actual_poscar = parent_files.get('POSCAR', parent_files.get('POSCAR.reference'))
+                source_structure = parse_structure('POSCAR', 'poscar', base64.b64encode(actual_poscar).decode())
+                structure_hash = hashlib.sha256(actual_poscar).hexdigest()
+                parent['effective_input'] = {'files': {'POSCAR': {'sha256': structure_hash}}}
+                parent['evidence'] = {'vasp_timing': True, 'wrapper_exit': 0, 'ediff_reached': True}
+                with ex.db() as db:
+                    db.execute('UPDATE attempts SET body=? WHERE id=?', (json.dumps(parent), parent['id']))
                 source_receipt = {'exit_code': 0, 'stderr': '', 'stdout':
                                   'FPILOT_FILE=CHGCAR|-|42|stamp\n'
-                                  f'FPILOT_FILE=CONTCAR|{structure_hash}|80|stamp\n'}
+                                  f'FPILOT_FILE=POSCAR|{structure_hash}|80|stamp\n'}
                 root_receipt = {'exit_code': 0, 'stderr': '', 'stdout':
                                 'FPILOT_ROOT_ABS=/home/user/230269265lht\n'
                                 'FPILOT_ROOT_SNAPSHOT=1:2:3:4\n'}
@@ -157,19 +165,21 @@ class FeCrRecipeChainTests(unittest.TestCase):
                      patch.object(ex.servers.pbs, 'audit_inputs', return_value={
                          'status': 'FAIL', 'errors': ['CHGCAR required by INCAR restart settings']}), \
                      patch.object(ex, 'ssh', side_effect=receipts) as ssh, \
-                     patch.object(ex, 'start_watcher'):
+                     patch.object(ex, 'start_watcher'), \
+                     patch.object(chains.artifacts, 'preview', return_value={'partial': False, 'structure': source_structure}), \
+                     patch('backend.source_files.structure_header', return_value=actual_poscar):
                     prepared = ex.prepare.__wrapped__(finished['a1-pol']['bundle_id'],
                                           {'alias': 'fake-host', 'vasp_executable': '/bin/vasp_std',
                                            'remote_workspace_root': '$HOME/230269265lht'},
                                           'probe', 'node01', project_id=project['id'],
                                           chain_source_id=parent_id, chain_source_kind='dependency')
                     self.assertEqual(prepared['input_audit']['status'], 'PASS_WITH_REMOTE_DEPENDENCY')
-                    self.assertEqual(prepared['source_file_plan']['CONTCAR']['target'], 'POSCAR')
+                    self.assertEqual(prepared['source_file_plan']['POSCAR']['target'], 'POSCAR')
                     self.assertEqual(prepared['source_file_plan']['CHGCAR']['mode'], 'reflink-or-copy')
                     submitted = ex.submit(prepared['id'])
                 self.assertEqual(submitted['job_id'], '13.node01')
                 command = next(call.args[1] for call in ssh.call_args_list if 'qsub run.pbs' in call.args[1])
-                self.assertIn('/CONTCAR POSCAR', command)
+                self.assertIn('/POSCAR POSCAR', command)
                 self.assertIn('/CHGCAR CHGCAR', command)
                 self.assertIn('sha256sum POSCAR', command)
                 self.assertNotIn('sha256sum CHGCAR', command)

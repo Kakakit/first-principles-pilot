@@ -6,6 +6,11 @@ test('saved workflow round-trips nodes, parameters, positions and connections',(
   const w=demoWorkspace();w.projects[0].nodes[1].data.params.encut='520';w.projects[0].nodes[1].position.x=123;
   assert.deepEqual(parseWorkspace(JSON.stringify(w)),w);
 });
+test('band path keeps its actual source file through save and reload',()=>{
+  const w=demoWorkspace();
+  w.projects[0].nodes[1].data.inputDraft={path:'G 0 0 0\nX 0.5 0 0',path_source_attempt_id:'scf-result',path_source_file:'POSCAR',path_structure_hash:'actual-structure'};
+  assert.deepEqual(parseWorkspace(JSON.stringify(cleanWorkspace(w))).projects[0].nodes[1].data.inputDraft,w.projects[0].nodes[1].data.inputDraft);
+});
 test('importing backup appends independent projects without overwriting the source',()=>{
   const w=demoWorkspace(), original=structuredClone(w);const merged=mergeWorkspace(w,w);
   assert.deepEqual(w,original);assert.equal(merged.projects.length,2);

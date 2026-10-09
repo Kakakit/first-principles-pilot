@@ -280,14 +280,14 @@ class ChainRunTests(unittest.TestCase):
                       'wrapper_exit': 0, 'vasp_timing': True, 'output_sanity': True,
                       'ediff_reached': True, 'ediff_value': 1e-6,
                       'last_delta_e': 1e-7, 'last_delta_eps': 1e-7,
-                      'last_electronic_step': 8}}
+                      'last_electronic_step': 8, 'ionic_converged': True, 'last_ionic_step': 2}}
         with patch.object(ex, 'attempt_path', return_value={'shell': '/safe/attempt'}), \
              patch.object(ex, 'ssh', return_value={
                  'exit_code': 0, 'stdout': 'FPILOT_IONIC=1\nFPILOT_IONIC_STEP=2\n'}):
             result = chains.convergence(record, 'relax')
         self.assertEqual(result['status'], 'CONVERGED')
         record['evidence'].update(last_delta_e=0.01, last_delta_eps=0.01,
-                                  last_electronic_step=60)
+                                  last_electronic_step=60, ionic_converged=False, last_ionic_step=3)
         with patch.object(ex, 'attempt_path', return_value={'shell': '/safe/attempt'}), \
              patch.object(ex, 'ssh', return_value={
                  'exit_code': 0, 'stdout': 'FPILOT_IONIC=0\nFPILOT_IONIC_STEP=3\n'}):
@@ -301,14 +301,18 @@ class ChainRunTests(unittest.TestCase):
         manifest, _ = ex.bundle(scf['bundle_id'], allow_dependencies=True)
         source = {'id': 'source', 'state': 'COMPLETED', 'path_schema': 'fpilot.remote-attempt-path',
                   'config': {'alias': 'jutai-1', 'vasp_executable': '/bin/vasp_std'}, 'project_id': 'p', 'node_id': 'r',
-                  'job_id': '123.node01'}
-        good = 'FPILOT_FILE=CONTCAR|' + 'a'*64 + '|120|2026-09-30 12:00:00.000000000 +0000\n'
+                  'job_id': '123.node01', 'bundle_id': run['steps'][0]['bundle_id'],
+                  'evidence': {'vasp_timing':True,'ediff_reached':True,'ionic_converged':True,'wrapper_exit':0}}
+        structure=self.project['nodes'][0]['data']['structure']
+        sha=structure['source']['sha256']
+        good = 'FPILOT_FILE=CONTCAR|' + sha + '|120|2026-09-30 12:00:00.000000000 +0000\n'
         with patch.object(ex, 'get', return_value=source), \
              patch.object(ex, 'attempt_path', return_value={'shell': '/safe/source'}), \
-             patch.object(ex, 'ssh', return_value={'exit_code': 0, 'stdout': good}):
+             patch.object(ex, 'ssh', return_value={'exit_code': 0, 'stdout': good}), \
+             patch.object(chains.artifacts, 'preview', return_value={'partial':False,'structure':structure}):
             snapshot = ex.chain_source_snapshot(scf['bundle_id'], manifest, 'source',
                                                 'jutai-1', 'dependency')
-        self.assertEqual(snapshot['files']['CONTCAR']['sha256'], 'a'*64)
+        self.assertEqual(snapshot['files']['CONTCAR']['sha256'], sha)
         self.assertEqual(snapshot['source_job_id'], '123.node01')
         with patch.object(ex, 'get', return_value={**source, 'node_id': 'unrelated'}):
             with self.assertRaisesRegex(ValueError, '直接上游'):
@@ -317,7 +321,7 @@ class ChainRunTests(unittest.TestCase):
         with patch.object(ex, 'get', return_value=source), \
              patch.object(ex, 'attempt_path', return_value={'shell': '/safe/source'}), \
              patch.object(ex, 'ssh', return_value={'exit_code': 1, 'stdout': ''}):
-            with self.assertRaisesRegex(ValueError, '不可读'):
+            with self.assertRaisesRegex(ValueError, '不可读|来源文件'):
                 ex.chain_source_snapshot(scf['bundle_id'], manifest, 'source',
                                          'jutai-1', 'dependency')
 

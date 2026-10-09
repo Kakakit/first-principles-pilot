@@ -60,7 +60,7 @@ export function parseWorkspace(raw: string): Workspace {
       if(!Number.isInteger(n.data.stageSequence)||n.data.stageSequence<1||n.data.stageSequence>999||!text(n.data.stageSlug,48)||!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(n.data.stageSlug)||!['vasp','wannier90','scan'].includes(n.data.executionMode)||((n.data.kind==='scan')!==(n.data.executionMode==='scan'))||((n.data.kind==='wannier90')!==(n.data.executionMode==='wannier90')))throw new Error('节点执行类型或远程阶段标识无效。');
       if(n.data.structure!==undefined) {if(n.data.kind!=='structure')throw new Error('结构只能绑定输入结构节点。');validateStructure(n.data.structure);}
       if(n.data.parameters!==undefined)validateLayer(n.data.parameters);
-      if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','kmesh_info'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
+      if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
       nodeIds.add(n.id);
     }
     const edgeIds = new Set();

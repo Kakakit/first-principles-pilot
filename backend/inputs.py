@@ -198,53 +198,43 @@ def generate(project, node_id, context=None):
         if not species or species[-1] != atom["element"]:
             species.append(atom["element"])
     parent = nodes[parents[0]] if len(parents) == 1 else None
-    if parent and parent["data"]["kind"] != "structure":
-        dependencies.append({"node_id": parent["id"], "file": "CONTCAR", "status": "pending", "check": "完成性、结构与原子顺序审查后再替换 POSCAR"})
-        if kind == 'scf' and parent['data']['kind'] == 'scf':
-            dependencies.append({"node_id": parent["id"], "file": "CHGCAR", "status": "pending", "check": "读取相连 SCF 的收敛电荷并继续自洽"})
-    if kind in ("bands", "dos", "vasp-wannier"):
-        if not parent or parent["data"]["kind"] != "scf":
-            errors.append("能带 / DOS / VASP-Wannier 必须直接连接 SCF 节点")
-        else:
-            dependencies.append({"node_id": parent["id"], "file": "CHGCAR", "status": "pending", "check": "须验证 SCF 收敛、最终几何、赝势、泛函、自旋及 U / LMAXMIX 兼容性"})
-    expected_icharg = ('11' if kind in ('bands', 'dos', 'vasp-wannier') else
-                       '1' if kind == 'scf' and parent and parent['data']['kind'] == 'scf' else '2')
-    if kind in ('bands', 'dos', 'vasp-wannier'):
-        values['ICHARG'], origins['ICHARG'] = '11', '节点执行合同'
+    from . import source_contracts
     source_draft = node['data'].get('sourceDraft') or {}
-    if kind in ('bands','dos','vasp-wannier') and source_draft.get('mode') in ('new','self','manual'):
-        errors.append('本阶段必须读取已连接 SCF 的固定电荷与最终结构')
-    if source_draft.get('mode')=='new' and kind in ('relax','scf'):
-        dependencies=[d for d in dependencies if d['file']=='CONTCAR']
-        expected_icharg='2'
-        values['ICHARG']='2'
-        values['ISTART']='0'
-        origins['ICHARG']=origins['ISTART']='计算来源合同'
-    if source_draft.get('mode')=='upstream' and kind in ('relax','scf'):
-        if parent and parent['data']['kind']!='structure':
-            if not any(d['file']=='CHGCAR' for d in dependencies):
-                dependencies.append({'node_id':parent['id'],'file':'CHGCAR','status':'pending','check':'读取已连接上游的收敛电荷'})
-            if source_draft.get('files')=='both':dependencies.append({'node_id':parent['id'],'file':'WAVECAR','status':'pending','check':'显式读取已连接上游波函数'})
-            expected_icharg='1'
-            values['ICHARG']='1'
-            values['ISTART']='1' if source_draft.get('files')=='both' else '0'
-            origins['ICHARG']=origins['ISTART']='计算来源合同'
-    has_restart = source_draft.get('mode') in ('self','manual')
-    if has_restart:
-        dependencies = []
-        expected_icharg = '1'
-        values['ISTART'] = '1' if source_draft.get('files') == 'both' else '0'
-        values['ICHARG'] = '1'
-        origins['ISTART'] = origins['ICHARG'] = '计算来源合同'
-    if not has_restart and source_draft.get('mode')!='upstream' and values.get('ISTART') not in (None, '0'):
-        errors.append('ISTART 当前锁定为 0；非零值需要已核对的 WAVECAR 重启合同')
-    restart_required = kind in ('relax', 'scf') and values.get('ICHARG') == '1' and expected_icharg != '1'
-    if values.get('ICHARG') not in (None, expected_icharg) and not restart_required:
-        errors.append(f'ICHARG 当前节点锁定为 {expected_icharg}；其他值需要已核对的 CHGCAR 合同')
+    try:
+        source_plan = source_contracts.plan(project, node_id, values)
+    except ValueError as exc:
+        errors.append(str(exc))
+        return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
+    if source_plan['parent_id']:
+        for name in source_plan['required_files']:
+            dependencies.append({'node_id': source_plan['parent_id'], 'file': name, 'status': 'pending',
+                                 'check': '核对实际文件、结构顺序及对应收敛证据；冻结具体 attempt'})
+    expected_icharg = str(source_plan['initialization']['ICHARG'])
+    # Legacy drafts with ICHARG=1 but no source selection remain reviewable;
+    # preparation still requires an explicit source. New SourceDraft owns init.
+    restart_required = not source_draft and not source_plan['parent_id'] and values.get('ICHARG') == '1'
+    if not source_draft and not restart_required:
+        if values.get('ISTART') not in (None, str(source_plan['initialization']['ISTART'])):
+            errors.append('ISTART 非零需要已核对的 WAVECAR 重启合同')
+        if kind not in source_contracts.FIXED and values.get('ICHARG') not in (None, expected_icharg):
+            errors.append('ICHARG 当前节点锁定为 '+expected_icharg+'；其他值需要已核对的 CHGCAR 合同')
+    for name, value in source_plan['initialization'].items():
+        if restart_required and name == 'ICHARG':
+            continue
+        values[name], origins[name] = str(value), '计算来源合同'
     if restart_required:
         warnings.append('ICHARG=1 需要在计算配置中选择电子文件来源并重新冻结')
-    if kind == 'scf' and values.get('LCHARG') == 'false' and any(e['source'] == node_id and nodes[e['target']]['data']['kind'] in ('scf','bands','dos','vasp-wannier') for e in project['edges']):
-        errors.append('该 SCF 有读取 CHGCAR 的下游，LCHARG 必须开启')
+    if kind in ('scf', 'relax') and values.get('LCHARG') == 'false':
+        for edge in project['edges']:
+            if edge['source'] != node_id or nodes[edge['target']]['data']['kind'] not in ('relax', 'scf', *source_contracts.FIXED):
+                continue
+            try:
+                needs_charge = 'CHGCAR' in source_contracts.plan(project, edge['target'])['required_files']
+            except ValueError:
+                needs_charge = False  # child generation reports its own invalid policy
+            if needs_charge:
+                errors.append('该节点有读取 CHGCAR 的下游，LCHARG 必须开启')
+                break
     if (values.get('EMIN') is None) != (values.get('EMAX') is None):
         errors.append('EMIN 与 EMAX 必须同时设置')
     elif values.get('EMIN') is not None and values.get('EMAX') is not None:
@@ -278,7 +268,7 @@ def generate(project, node_id, context=None):
             current_m = dict(shared.get("moments", {}), **local.get("moments", {}))
             if any(parent_m.get(a["id"]) != current_m.get(a["id"]) for a in geometry["atoms"]):
                 warnings.append("磁矩对称性设置与上游 SCF 不一致；须审阅固定电荷来源")
-    reference_geometry = dependencies or source_draft.get('mode') == 'self' and source_draft.get('purpose', 'charge') == 'charge'
+    reference_geometry = bool(source_plan['structure_file'])
     files = {"POSCAR.reference" if reference_geometry else "POSCAR": geometry["poscar"]}
     tags = {k: str(v).strip() for k, v in values.items() if v is not None and k != "XC_FUNCTIONAL"}
     for tag in ('LWAVE', 'LCHARG', 'LASPH', 'LSORBIT', 'LNONCOLLINEAR', 'GGA_COMPAT', 'LORBMOM'):
@@ -427,6 +417,10 @@ def generate(project, node_id, context=None):
     except (ValueError, OSError) as exc:
         errors.append(f"POTCAR: {exc}")
     files["INCAR"] = "".join(f"{k} = {v}\n" for k, v in tags.items())
+    try:
+        source_contracts.validate_pead(files['INCAR'])
+    except ValueError as exc:
+        errors.append(str(exc))
     warnings.append("输入格式与兼容性审查不代替能量、力、k 点和磁态收敛验证")
     incar_tags = {tag: {'value': value,
                         'source': origins[tag] if tag in origins else
@@ -444,7 +438,7 @@ def generate(project, node_id, context=None):
             "parameter_catalog": {"revision": parameter_catalog.REVISION, "source": parameter_catalog.CATALOG['source'],
                                   "retrieved": parameter_catalog.CATALOG['retrieved'], "confirmed_custom_tags": sorted(confirmations)},
             "generated_tags": {k: v for k, v in tags.items() if k not in values}, "stage": kind,
-            "restart_required": restart_required, "source_draft": source_draft,
+            "restart_required": restart_required, "source_draft": source_draft, "source_plan": source_plan,
             "band_path_source_sha256": options.get('path_structure_hash') if kind == 'bands' else None,
             "band_path_source_attempt_id": options.get('path_source_attempt_id') if kind == 'bands' else None,
             **({'kmesh_generation':kmesh_generation} if kmesh_generation else {})}
@@ -463,13 +457,20 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
     from copy import deepcopy
     report = deepcopy(report)
     if report['errors']:raise ValueError('请先修正输入错误：'+'; '.join(report['errors']))
-    source_contract = None
+    from . import source_contracts
+    source_contracts.validate_pead(report['files']['INCAR'])
+    policy = report['source_plan']
     node = next(n for n in project['nodes'] if n['id'] == node_id)
-    if node['data'].get('sourceDraft') and (not defer_sources or node['data']['sourceDraft'].get('mode') in ('self','manual')):
-        from . import source_contracts
-        source_contract = source_contracts.freeze(project,node_id,report,verification_mode,execution_scope)
-    elif defer_sources:
-        source_contract = {'schema':'fpilot.source-contract.v1','mode':'planned','purpose':'charge','files':'charge','structure':'planned','roles':{},'plan_nodes':report.get('dependencies',[]),'verification_mode':verification_mode}
+    if (defer_sources or not node['data'].get('sourceDraft')) and policy['parent_id']:
+        source_contract = {'schema': 'fpilot.source-contract.v2', 'mode': 'planned',
+                           'purpose': policy['purpose'], 'files': policy['files'], 'structure': 'planned',
+                           'roles': {}, 'plan_nodes': report.get('dependencies', []),
+                           'source_plan': policy, 'initialization': policy['initialization'],
+                           'verification_mode': verification_mode}
+    elif report['restart_required']:
+        source_contract = None  # read-only legacy submission-page adapter
+    else:
+        source_contract = source_contracts.freeze(project, node_id, report, verification_mode, execution_scope)
     from . import branch_bindings
     branch_bindings.check(project,node_id,source_contract=source_contract,scope=execution_scope)
     if report["errors"]:
@@ -483,7 +484,10 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
                     status="pending-restart" if report['restart_required'] else "ready-for-execution-review" if report["ready"] else "pending-dependencies")
     if source_contract is not None:
         manifest["source_contract"] = source_contract
-        manifest["status"] = "ready-for-execution-review"
+        manifest["status"] = "pending-dependencies" if source_contract["mode"] == "planned" else "ready-for-execution-review"
+        manifest['ready'] = source_contract['mode'] != 'planned'
+        if manifest['ready']:
+            manifest['dependencies'] = [{**d, 'status': 'bound'} for d in manifest['dependencies']]
         if source_contract["structure"] == "configured" and "POSCAR.reference" in contents:
             contents["POSCAR"] = contents.pop("POSCAR.reference")
             manifest["files"]["POSCAR"] = manifest["files"].pop("POSCAR.reference")

@@ -47,6 +47,8 @@ def template_resources(profile):
 
 
 def validate_parallel(incar, ranks, gpu=False):
+    from .source_contracts import validate_pead
+    validate_pead(incar, ranks, gpu)
     parallel = {name: int(match.group(1)) for name in ('KPAR', 'NCORE')
                 if (match := re.search(r'^\s*' + name + r'\s*=\s*(\d+)\s*$', incar, re.M))}
     if not parallel:
@@ -142,14 +144,16 @@ def _bundle_cached(file_identity, key, allow_dependencies):
         dependencies=manifest.get('dependencies') or []
         if manifest.get('errors'):
             raise ValueError('该冻结包存在输入错误，不能提交')
-        if dependencies and not allow_dependencies:
+        bound = bool(manifest.get('source_contract', {}).get('schema') == 'fpilot.source-contract.v2' and manifest['source_contract']['mode'] != 'planned')
+        if dependencies and not allow_dependencies and not bound:
             raise ValueError('该冻结包尚有未满足依赖，不能作为独立任务提交')
-        if not dependencies and not manifest.get('ready'):
+        if not dependencies and not manifest.get('ready') and not bound:
             raise ValueError('该冻结包未就绪，不能提交')
         allowed=('scf','relax') if not dependencies else ('relax','scf','dos','bands','vasp-wannier')
         if manifest.get('stage') not in allowed:
             raise ValueError('该节点尚不支持提交')
-        names=('INCAR','KPOINTS','POTCAR','POSCAR.reference') if dependencies else ('INCAR','POSCAR','KPOINTS','POTCAR')
+        poscar = 'POSCAR' if 'POSCAR' in manifest.get('files', {}) else 'POSCAR.reference'
+        names = ('INCAR', 'KPOINTS', 'POTCAR', poscar)
         try:
             files={name:z.read(name) for name in names}
         except KeyError as exc:
@@ -160,6 +164,14 @@ def _bundle_cached(file_identity, key, allow_dependencies):
 
 
 def _restart_policy(manifest, files):
+    policy = manifest.get('source_plan')
+    if manifest.get('source_contract', {}).get('schema') == 'fpilot.source-contract.v2' and policy:
+        init = policy['initialization']
+        if any(_incar_value(files['INCAR'], name) != str(value) for name, value in init.items()):
+            raise ValueError('冻结初始化参数与来源文件角色不一致')
+        return {'schema': 'fpilot.vasp-restart.v2', 'stage': manifest['stage'], **init,
+                'required_files': policy['required_files'], 'uses_wavecar': 'WAVECAR' in policy['required_files'],
+                'note': '读取本次角色合同绑定的具体文件；不代表物理有效性。'}
     dependencies=manifest.get('dependencies') or []
     stage=manifest.get('stage')
     expected={'relax': {'CONTCAR'}, 'scf': {'CONTCAR', 'CHGCAR'} if any(item.get('file') == 'CHGCAR' for item in dependencies) else {'CONTCAR'}, 'dos': {'CONTCAR','CHGCAR'},
@@ -259,8 +271,10 @@ def source_file_commands(snapshot, plan):
     return '\n'.join(commands) + ('\n' if commands else '')
 
 
-def _restart_incar(raw, mode):
+def _restart_incar(raw, mode, start_override=None):
     start, charge = (1, 0) if mode == 'wave' else (1, 1) if mode == 'both' else (0, 1)
+    if start_override is not None:
+        start = start_override
     text = raw.decode('utf-8')
     for tag, value in [('ISTART', start), ('ICHARG', charge)]:
         pattern = re.compile(r'^\s*'+tag+r'\s*=.*$', re.I|re.M)
@@ -271,6 +285,45 @@ def _restart_incar(raw, mode):
 
 
 def chain_source_snapshot(bundle_id, manifest, source_id, alias, kind):
+    if manifest.get('source_contract', {}).get('schema') == 'fpilot.source-contract.v2':
+        return _v2_chain_source(bundle_id, manifest, source_id, alias, kind)
+    return _legacy_chain_source(bundle_id, manifest, source_id, alias, kind)
+
+
+def _v2_chain_source(bundle_id, manifest, source_id, alias, kind):
+    from . import source_contracts as sources
+    if kind not in ('dependency', 'scf-restart', 'relax-restart'):
+        raise ValueError('计算链来源文件合同无效')
+    source = get(source_id)
+    if source.get('config', {}).get('alias') != alias or source.get('project_id') != frozen_project(bundle_id)['id']:
+        raise ValueError('计算链来源须属于同一项目和主机')
+    policy = copy.deepcopy(manifest['source_plan'])
+    _, raw = bundle(bundle_id, allow_dependencies=True)
+    report = {**manifest, 'files': {name: value.decode() for name, value in raw.items() if name != 'POTCAR'}}
+    if kind != 'dependency':
+        stage = kind.split('-', 1)[0]
+        if stage != manifest['stage'] or source['node_id'] != manifest['node_id'] or source['state'] != 'COMPLETED':
+            raise ValueError('续算来源与当前节点或已完成状态不符')
+        start = sources.wave_start(stage, raw['INCAR'], continuing=stage == 'relax')
+        policy.update(mode='self', parent_id=None, parent_stage=None, purpose='continue' if stage == 'relax' else 'charge',
+                      structure_file='CONTCAR' if stage == 'relax' else 'POSCAR',
+                      required_files=['CONTCAR', 'WAVECAR'] if stage == 'relax' else ['POSCAR', 'CHGCAR', 'WAVECAR'],
+                      electronic_usage='none' if stage == 'relax' else 'initial',
+                      initialization={'ISTART': start, 'ICHARG': 0 if stage == 'relax' else 1})
+        report['files']['INCAR'] = _restart_incar(raw['INCAR'], 'wave' if stage == 'relax' else 'both', start).decode()
+    policy['acknowledge_differences'] = True  # reviewed in this chain's authorization
+    contract = sources.bind(policy, source, report, manifest.get('verification_mode', 'full'))
+    roles = contract['roles']
+    return {'schema': 'fpilot.chain-source.v1', 'source_attempt_id': source_id,
+            'source_path': next(iter(roles.values()))['source_path'], 'source_state': source['state'],
+            'source_job_id': source.get('job_id'), 'kind': kind,
+            'verification_mode': contract['verification_mode'], 'source_contract': contract,
+            'mode': 'wave' if kind == 'relax-restart' else 'both' if 'WAVECAR' in policy['required_files'] else 'charge',
+            'initialization': policy['initialization'], 'actual_poscar': report['files']['POSCAR'],
+            'files': {role['file']: role['metadata'] for role in roles.values()}}
+
+
+def _legacy_chain_source(bundle_id, manifest, source_id, alias, kind):
     """Only file identity and attempt lineage are binding for an approved chain."""
     required = ({'dependency': sorted({item['file'] for item in manifest.get('dependencies', [])}),
                  'relax-restart': ['CONTCAR', 'WAVECAR'],
@@ -573,8 +626,11 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     role_source = None
     restart = None
     chain_source = None
-    if contract and contract.get('mode')=='planned' and manifest.get('dependencies') and not chain_source_id:
+    if contract and contract.get('mode')=='planned' and manifest.get('dependencies') and not chain_source_id and not dependency_attempt_id:
         raise ValueError('此输入绑定计算链计划节点，请从冻结计算链运行')
+    if contract and contract.get('schema') == 'fpilot.source-contract.v2' and contract.get('mode') == 'planned' and dependency_attempt_id:
+        chain_source_id, chain_source_kind = dependency_attempt_id, 'dependency'
+        dependency_attempt_id, dependency_reason = None, ''
     if contract and not chain_source_id:
         if dependency_attempt_id or restart_attempt_id or restart_mode or restart_reason:
             raise ValueError('计算来源已冻结，请返回计算配置修改；提交页不能覆盖来源')
@@ -583,16 +639,17 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         if restart_attempt_id or dependency_attempt_id or retry_of:
             raise ValueError('计算链来源不能与手动来源或重试混用')
         chain_source = chain_source_snapshot(bundle_id, manifest, chain_source_id, config['alias'], chain_source_kind)
+        if chain_source.get('actual_poscar'):
+            files.pop('POSCAR.reference', None)
+            files['POSCAR'] = chain_source['actual_poscar'].encode()
         if manifest.get('stage') == 'bands' and chain_source_kind == 'dependency':
-            expected_hash = manifest.get('band_path_source_sha256')
-            expected_attempt = manifest.get('band_path_source_attempt_id')
-            if (expected_hash != chain_source['files'].get('CONTCAR', {}).get('sha256') or
-                    expected_attempt != chain_source_id):
-                raise ValueError('能带路径与本次 SCF 最终 CONTCAR 来源不一致')
-        if chain_source_kind == 'relax-restart':
-            files['INCAR'] = _restart_incar(files['INCAR'], 'wave')
-        elif chain_source_kind == 'scf-restart':
-            files['INCAR'] = _restart_incar(files['INCAR'], 'both')
+            structure_file = manifest.get('source_plan', {}).get('structure_file', 'CONTCAR')
+            if (manifest.get('band_path_source_sha256') != chain_source['files'].get(structure_file, {}).get('sha256') or
+                    manifest.get('band_path_source_attempt_id') != chain_source_id):
+                raise ValueError('能带路径与本次 SCF 实际结构来源不一致')
+        if chain_source_kind in ('relax-restart', 'scf-restart'):
+            files['INCAR'] = _restart_incar(files['INCAR'], 'wave' if chain_source_kind == 'relax-restart' else 'both',
+                                           chain_source.get('initialization', {}).get('ISTART'))
         restart = chain_source if chain_source_kind != 'dependency' else None
     elif restart_attempt_id:
         restart = restart_snapshot(bundle_id,manifest,files,restart_attempt_id,config['alias'],restart_mode,restart_reason)
@@ -604,6 +661,9 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     validate_parallel(files.get('INCAR', b'').decode('utf-8', errors='replace'),
                       rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
                       gpu=rendered['profile'].get('resource_mode') == 'gpu')
+    source_contracts.validate_wave_parallel(chain_source.get('source_contract') if chain_source else contract, files['INCAR'],
+                                            rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
+                                            gpu=rendered['profile'].get('resource_mode') == 'gpu')
     restart_policy=None
     dependency=None
     if manifest.get('dependencies') and not restart and not chain_source and not contract:
@@ -690,6 +750,13 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
             'remote_project_path_absolute':snapshot['absolute_path'].rstrip('/')+'/material-projects/'+identity['project_slug'],
             'path_schema':'fpilot.remote-attempt-path','script':script,'input_audit':audit,
             'source_file_plan':storage_plan,'source_contract':contract, 'role_source_snapshot':role_source,
+            'final_incar': files['INCAR'].decode(),
+            'effective_input': {'schema': 'fpilot.effective-input.v1',
+                                'files': {('POSCAR' if name == 'POSCAR.reference' else name):
+                                          {'sha256': hashlib.sha256(raw).hexdigest(), 'size_bytes': len(raw)}
+                                          for name, raw in files.items()},
+                                'initialization': {name: int(value) if value is not None else None for name in ('ISTART', 'ICHARG') for value in [_incar_value(files['INCAR'], name)]},
+                                'source_files': storage_plan},
             'execution_scope':execution_scope or identity['node_id'],'branch_scopes':binding['scopes'],
             'settings_snapshot':settings_snapshot,
             'script_sha256':hashlib.sha256(script.encode()).hexdigest(),'job_id':None,'scheduler':scheduler,
@@ -711,7 +778,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     if chain_source:
         record['chain_source_snapshot'] = chain_source
         if chain_source_kind.endswith('-restart'):
-            record['restart_policy'] = {'ISTART': 1, 'ICHARG': 0 if chain_source_kind == 'relax-restart' else 1,
+            record['restart_policy'] = {'ISTART': int(_incar_value(files['INCAR'], 'ISTART')), 'ICHARG': 0 if chain_source_kind == 'relax-restart' else 1,
                                         'required_files': sorted(chain_source['files']), 'uses_wavecar': True}
             record['final_incar'] = files['INCAR'].decode('utf-8')
         else:
@@ -719,6 +786,9 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         record['note'] = '计算链来源文件已核对并冻结哈希；提交前再次复核。'
     if template_snapshot:
         record['template_snapshot'] = template_snapshot
+    for info in storage_plan.values():
+        if info['target'] == 'POSCAR':
+            record['effective_input']['files']['POSCAR'] = {k: info[k] for k in ('sha256', 'size_bytes')}
     if retry_of:record['retry_of']=retry_of
     with closing(db()) as c:
         from .execution_control import journal
@@ -895,7 +965,7 @@ def submit(key):
         if any(fresh_chain.get(k)!=snap.get(k) for k in ('source_attempt_id','source_path','files','kind')):
             raise ValueError('计算链来源文件已变化；没有提交')
         if snap['kind'].endswith('-restart'):
-            files['INCAR']=_restart_incar(files['INCAR'],'wave' if snap['kind']=='relax-restart' else 'both')
+            files['INCAR']=_restart_incar(files['INCAR'],'wave' if snap['kind']=='relax-restart' else 'both',snap.get('initialization',{}).get('ISTART'))
             if files['INCAR'].decode('utf-8')!=record.get('final_incar'):
                 raise ValueError('计算链续算 INCAR 与准备记录不一致')
     if record.get('restart_snapshot'):
@@ -907,6 +977,14 @@ def submit(key):
         files['INCAR']=_restart_incar(files['INCAR'],snap['mode'])
         if files['INCAR'].decode('utf-8')!=record.get('final_incar'):
             raise ValueError('续算最终 INCAR 与准备记录不一致；没有提交')
+    if record.get('chain_source_snapshot', {}).get('actual_poscar'):
+        files.pop('POSCAR.reference', None)
+        files['POSCAR'] = record['chain_source_snapshot']['actual_poscar'].encode()
+    validate_parallel(files.get('INCAR', b'').decode(), record['profile'].get('mpi_ranks', record['profile'].get('ppn', record['profile'].get('ntasks'))),
+                      gpu=record['profile'].get('resource_mode') == 'gpu')
+    source_contracts.validate_wave_parallel(record.get('chain_source_snapshot', {}).get('source_contract') or record.get('source_contract'), files.get('INCAR', b''),
+                                            record['profile'].get('mpi_ranks', record['profile'].get('ppn', record['profile'].get('ntasks'))),
+                                            gpu=record['profile'].get('resource_mode') == 'gpu')
     if not fast and record.get('dependency_snapshot') and not record.get('source_contract'):
         fresh_dependency=dependency_snapshot(record['bundle_id'],manifest,files,
             record['dependency_snapshot']['upstream_attempt_id'],record['config']['alias'],
@@ -933,7 +1011,7 @@ def submit(key):
     files[job_script]=record['script'].encode()
     binding={k:record[k] for k in ('project_id','flow_id','node_id','remote_workspace_root','remote_path_absolute') if k in record}
     files['_fpilot/attempt.json']=json.dumps({'schema':'fpilot.web-attempt.v1','id':key,'stage':manifest['stage'],'bundle_id':record['bundle_id'],**binding,**{k:record[k] for k in ('scan_batch_id','scan_case_id','scan_case_table_hash','chain_run_id','chain_step_id','chain_plan_hash') if k in record}}).encode()
-    files['_fpilot/materialization.json']=json.dumps({'schema':'fpilot.web-materialization.v1','input_audit':record['input_audit'],'config':record['config'],'script_sha256':record['script_sha256'],'template_snapshot':record.get('template_snapshot'),'restart_policy':record.get('restart_policy'),'restart_snapshot':record.get('restart_snapshot'),'dependency_snapshot':record.get('dependency_snapshot'),'chain_source_snapshot':record.get('chain_source_snapshot'),'source_file_plan':record.get('source_file_plan',{}),'source_contract':record.get('source_contract'),**binding}).encode()
+    files['_fpilot/materialization.json']=json.dumps({'schema':'fpilot.web-materialization.v1','input_audit':record['input_audit'],'config':record['config'],'script_sha256':record['script_sha256'],'template_snapshot':record.get('template_snapshot'),'restart_policy':record.get('restart_policy'),'restart_snapshot':record.get('restart_snapshot'),'dependency_snapshot':record.get('dependency_snapshot'),'chain_source_snapshot':record.get('chain_source_snapshot'),'source_file_plan':record.get('source_file_plan',{}),'source_contract':record.get('source_contract'),'effective_input':record.get('effective_input'),**binding}).encode()
     if record.get('dependency_snapshot'):
         files['_fpilot/dependency.json']=json.dumps(record['dependency_snapshot'],ensure_ascii=False,sort_keys=True).encode()
     files['input-manifest.sha256']=''.join(hashlib.sha256(data).hexdigest()+'  '+name+'\n' for name,data in files.items()).encode()
@@ -1026,7 +1104,7 @@ if test -s .exit-status; then printf 'FPILOT_EXIT='; cat .exit-status; fi
 if test -f OUTCAR; then
   printf 'FPILOT_TIMING='; grep -c 'General timing and accounting informations' OUTCAR || true
   printf 'FPILOT_EDIFF='; grep -c 'aborting loop because EDIFF is reached' OUTCAR || true
-  printf 'FPILOT_IONIC='; grep -c 'reached required accuracy' OUTCAR || true
+  printf 'FPILOT_IONIC='; awk '/Iteration[[:space:]]+[0-9]+[[:space:]]*\\([[:space:]]*[0-9]+[[:space:]]*\\)/{{converged=0}} /reached required accuracy/{{converged=1}} END{{print converged+0}}' OUTCAR
 fi
 if test -f vasp.out; then
   printf 'FPILOT_MPI_SINGLETON='; grep -c 'PMI server not found' vasp.out || true
@@ -1072,7 +1150,7 @@ fi
             last_delta_e=float(numeric_match.group(3));last_delta_eps=float(numeric_match.group(4))
             ediff_numeric=abs(last_delta_e)<=ediff_value and abs(last_delta_eps)<=ediff_value
         except ValueError: pass
-    ediff=ediff_text or ediff_numeric
+    ediff=ediff_numeric if numeric_match else ediff_text
     ionic_match = re.search(r'^FPILOT_IONIC=(\d+)', out, re.M)
     ionic_step_match = re.search(r'^FPILOT_IONIC_STEP=(\d+)', out, re.M)
     trace_exit, trace_complete = pbs_history_evidence(out) if scheduler == 'pbs' else (None, False)
@@ -1103,7 +1181,7 @@ fi
                   evidence={'wrapper_exit':int(exit_match.group(1)) if exit_match else None,'vasp_timing':timing,
                             'timing_count':timing_count,'mpi_singleton_count':singleton_count,
                             'output_sanity':output_sanity,'ediff_reached':ediff,
-                            'ediff_source':'OUTCAR_MARKER' if ediff_text else 'OSZICAR_NUMERIC' if ediff_numeric else None,
+                            'ediff_source':'OSZICAR_NUMERIC' if numeric_match else 'OUTCAR_MARKER' if ediff_text else None,
                             'ediff_value':ediff_value,'last_electronic_step':last_electronic_step,
                             'last_delta_e':last_delta_e,'last_delta_eps':last_delta_eps,
                             'ionic_converged': int(ionic_match.group(1)) == 1 if ionic_match else None,
