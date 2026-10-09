@@ -19,9 +19,9 @@ app = FastAPI(title="First Principles Workbench", version="1.0.0",lifespan=lifes
 
 
 @app.get('/api/problem-records')
-def problem_list():
+def problem_list(deleted: bool = False):
     from . import problem_records
-    try:return {'records':problem_records.listing()}
+    try:return {'records':problem_records.listing(deleted=deleted)}
     except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
@@ -54,6 +54,20 @@ def problem_save(key: str,payload: dict):
     from . import problem_records
     try:return problem_records.save(key,payload['notes'],payload.get('incar_tags',[]))
     except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.delete('/api/problem-records/{key}')
+def problem_delete(key: str):
+    from . import problem_records
+    try:return problem_records.set_deleted(key, True)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/problem-records/{key}/restore')
+def problem_restore(key: str):
+    from . import problem_records
+    try:return problem_records.set_deleted(key, False)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
 @app.post('/api/kpoints/suggest')

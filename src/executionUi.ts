@@ -42,6 +42,8 @@ export type ServerPreview = {
   script: string;
   program_adaptation?: {source_program:string;target_program:string;target_command:string} | null;
   program_diff?: string;
+  script_diff?: string;
+  script_warnings?: string[];
   blockers: string[];
   node_status?: string;
   capacity_wait?: boolean;

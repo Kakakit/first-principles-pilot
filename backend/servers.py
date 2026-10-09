@@ -660,6 +660,8 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     return {'script':script,'profile':p,'resource_selection':selection,'blockers':blockers,
             'program_adaptation':selected.get('program_adaptation') if selected else None,
             'program_diff':selected.get('program_diff','') if selected else '',
+            'script_diff':selected.get('resource_diff','') if selected else '',
+            'script_warnings':selected.get('warnings',[]) if selected else [],
             'capacity_wait': bool(blockers) and all(str(v).startswith(selector.CAPACITY_BLOCKERS) for v in blockers),
             'node_status':facts.get('STATUS'),
             'resource_ready':not blockers,'submission_enabled':False,'probe_id':probe_id,

@@ -107,6 +107,11 @@ def capture(kind, key, record=None, *, manual=False, notes=None, excerpt=None, p
         connection.execute('BEGIN IMMEDIATE')
         row = connection.execute('SELECT body FROM problems WHERE id=?', (problem_id,)).fetchone()
         problem = json.loads(row[0]) if row else None
+        # Retain a tombstone so automatic hooks/backfill cannot undo deletion.
+        if problem and problem.get('deleted_at'):
+            if not manual:
+                return None
+            problem.pop('deleted_at', None)
         # A manually recorded warning may later become a confirmed task failure.
         # Refresh the failure facts once while retaining the user's annotations.
         retained = None
@@ -196,12 +201,14 @@ def backfill(projects=None):
                     capture('attempts', record['id'], record, manual=bool(notes), projects=projects)
 
 
-def get(key):
+def get(key, *, include_deleted=False):
     value = raw(key)
     if value is None:
         raise ValueError('问题记录不存在')
     if value['source_kind'] != 'attempts' or value.get('program') not in ('VASP', 'Wannier90'):
         raise ValueError('问题记录仅登记 VASP 和 Wannier90 计算任务；旧分析记录已保留在本机存档')
+    if value.get('deleted_at') and not include_deleted:
+        raise ValueError('问题记录已删除，请先在已删除记录中恢复')
     from . import recycle
     try:
         original=source(value['source_kind'], value['source_id'])
@@ -220,12 +227,31 @@ def get(key):
     return value
 
 
-def listing():
+def listing(*, deleted=False):
     backfill()
     with closing(db()) as connection:
         keys = [row[0] for row in connection.execute("SELECT id,body FROM problems WHERE source_kind='attempts'")
-                if json.loads(row[1]).get('program') in ('VASP', 'Wannier90')]
-    return sorted([get(key) for key in keys], key=lambda v: v['occurred_at'], reverse=True)
+                if json.loads(row[1]).get('program') in ('VASP', 'Wannier90')
+                and bool(json.loads(row[1]).get('deleted_at')) == deleted]
+    return sorted([get(key, include_deleted=deleted) for key in keys], key=lambda v: v['occurred_at'], reverse=True)
+
+
+def set_deleted(key, deleted):
+    get(key, include_deleted=True)
+    with closing(db()) as connection:
+        connection.execute('BEGIN IMMEDIATE')
+        row = connection.execute('SELECT body FROM problems WHERE id=?', (key,)).fetchone()
+        if not row:
+            raise ValueError('问题记录不存在')
+        value = json.loads(row[0])
+        if deleted:
+            value.setdefault('deleted_at', ex.now())
+        else:
+            value.pop('deleted_at', None)
+        value['updated_at'] = ex.now()
+        connection.execute('UPDATE problems SET body=? WHERE id=?', (json.dumps(value, ensure_ascii=False), key))
+        connection.commit()
+    return get(key, include_deleted=True)
 
 
 def save(key, notes, tags):
@@ -238,6 +264,8 @@ def save(key, notes, tags):
         row = connection.execute('SELECT body FROM problems WHERE id=?', (key,)).fetchone()
         if not row:
             raise ValueError('问题记录不存在')
+        if json.loads(row[0]).get('deleted_at'):
+            raise ValueError('问题记录已删除，请先在已删除记录中恢复')
         value = json.loads(row[0]); value.update(notes=notes, incar_tags=list(dict.fromkeys(tags)), updated_at=ex.now())
         connection.execute('UPDATE problems SET body=? WHERE id=?', (json.dumps(value, ensure_ascii=False), key))
         connection.commit()

@@ -132,5 +132,52 @@ class ProblemTests(unittest.TestCase):
         self.assertEqual(updated['excerpts'], row['excerpts'])
         self.assertEqual(len(problems.listing()), 2)
 
+    def test_delete_suppresses_backfill_and_hooks_without_deleting_task_or_notes(self):
+        row = problems.capture('attempts', 'a'*32)
+        row = problems.save(row['id'], {**row['notes'], 'user_note':'保留计算经验'}, ['NCORE'])
+        original = ex.get('a'*32)
+        deleted = problems.set_deleted(row['id'], True)
+        self.assertTrue(deleted['deleted_at'])
+        problems.backfill(); problems.try_capture('attempts', 'a'*32, original)
+        self.assertEqual(problems.listing(), [])
+        self.assertEqual(problems.listing(deleted=True)[0]['notes'], row['notes'])
+        self.assertEqual(ex.get('a'*32), original)
+        self.assertEqual(control.notes('a'*32), row['notes'])
+        with self.assertRaisesRegex(ValueError, '已删除'):problems.save(row['id'], row['notes'], [])
+        with self.assertRaisesRegex(ValueError, '已删除'):problems.export([row['id']], 'json')
+        restored = problems.set_deleted(row['id'], False)
+        self.assertNotIn('deleted_at', restored)
+        self.assertEqual(restored['evidence'], row['evidence'])
+        self.assertEqual(restored['notes'], row['notes'])
+        self.assertIn('保留计算经验', problems.export([row['id']], 'markdown'))
+        self.assertEqual(len(problems.listing()), 1)
+
+    def test_deleted_warning_stays_deleted_if_task_later_fails(self):
+        record = self.add('b'*32, 'RUNNING')
+        row = problems.capture('attempts', record['id'], manual=True)
+        problems.set_deleted(row['id'], True)
+        record.update(state='FAILED', error='late failure')
+        ex.save(record); problems.backfill()
+        self.assertNotIn(row['id'], [r['id'] for r in problems.listing()])
+        self.assertEqual(len(problems.listing(deleted=True)), 1)
+        restored = problems.capture('attempts', record['id'], manual=True)
+        self.assertEqual(restored['state'], 'FAILED')
+        self.assertNotIn('deleted_at', restored)
+
+    def test_delete_restore_api_and_default_list(self):
+        try:import httpx
+        except ImportError:self.skipTest('httpx 未安装；另用标准库进行隔离 HTTP 验收')
+        from fastapi.testclient import TestClient
+        from backend.app import app
+        row = problems.capture('attempts', 'a'*32)
+        with TestClient(app) as client:
+            self.assertEqual(client.delete('/api/problem-records/'+row['id']).status_code, 200)
+            self.assertEqual(client.get('/api/problem-records').json()['records'], [])
+            self.assertEqual(client.get('/api/problem-records?deleted=true').json()['records'][0]['id'], row['id'])
+            self.assertEqual(client.get('/api/problem-records/'+row['id']).status_code, 422)
+            self.assertEqual(client.post('/api/problem-records/'+row['id']+'/restore').status_code, 200)
+            self.assertEqual(client.get('/api/problem-records').json()['records'][0]['id'], row['id'])
+            self.assertEqual(client.delete('/api/problem-records/bad-id').status_code, 422)
+
 
 if __name__=='__main__':unittest.main()
