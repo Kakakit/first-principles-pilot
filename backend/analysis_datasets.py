@@ -164,9 +164,17 @@ def history_detail(kind, key):
         current = inside(dest, 'presentations/current.json')
         record['presentation'] = read_json(current) if current.is_file() else None
         record['presentation_supported'] = False
+        for output in record.get('outputs') or []:
+            if output.get('available'):
+                path = inside(dest / 'outputs', output['path'])
+                reason = ('本机文件缺失' if not path.is_file() else
+                          '超过 10 MiB，保留原位置' if path.stat().st_size > MAX_BYTES else '')
+                if reason:
+                    output.update(available=False, unavailable_reason=reason)
     item['analysis'] = record
     outputs = record.get('outputs') or []
-    item['files'] = ([{'path': output['path'], 'media_type': output['media_type'], 'available': output.get('available', False)} for output in outputs]
+    item['files'] = ([{'path': output['path'], 'media_type': output['media_type'], 'available': output.get('available', False),
+                      'reason': output.get('unavailable_reason', '')} for output in outputs]
                      if kind == 'v2' else [{'path': name, 'media_type': mimetypes.guess_type(name)[0] or 'text/plain',
                                            'available': inside(dest, name).is_file()} for name in outputs])
     return item
