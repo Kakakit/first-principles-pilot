@@ -11,9 +11,9 @@ from pathlib import Path
 
 from .storage import ROOT, validate_workspace
 
-KINDS = {'inputs', 'wannier-inputs', 'job-templates', 'attempts', 'projects', 'analyses', 'plots', 'local-analyses', 'chains', 'scans', 'saved-plots','comparisons'}
+KINDS = {'inputs', 'wannier-inputs', 'job-templates', 'attempts', 'projects', 'analyses', 'plots', 'local-analyses', 'chains', 'scans', 'saved-plots','comparisons','analysis-datasets'}
 
-DIRECTORIES = {'analyses':'analyses-v2','plots':'plots','local-analyses':'analyses','saved-plots':'plot-datasets','comparisons':'wannier-comparisons'}
+DIRECTORIES = {'analyses':'analyses-v2','plots':'plots','local-analyses':'analyses','saved-plots':'plot-datasets','comparisons':'wannier-comparisons','analysis-datasets':'analysis-datasets'}
 TABLES = {'attempts':'attempts','chains':'chain_runs','scans':'scan_batches'}
 
 
@@ -51,7 +51,7 @@ def _references(kind,key):
 
 
 def _record(kind,key):
-    if kind in DIRECTORIES:return json.loads((ROOT/DIRECTORIES[kind]/key/('record.json' if kind in ('saved-plots','comparisons') else 'analysis.json')).read_text())
+    if kind in DIRECTORIES:return json.loads((ROOT/DIRECTORIES[kind]/key/('record.json' if kind in ('saved-plots','comparisons','analysis-datasets') else 'analysis.json')).read_text())
     if kind in ('chains','scans'):
         item=next((r for r in _rows(TABLES[kind]) if r['id']==key),None)
         if not item:raise ValueError('记录不存在')
@@ -69,7 +69,7 @@ def purge(kind,key,confirm_local=False,include_children=True):
     if kind == 'projects':
         record=json.loads(path.read_text())
         results=[]
-        for child in ([item for item in all_items() if item['kind']!='projects' and item.get('project_id')==key] if include_children else []):
+        for child in ([item for item in all_items() if item['kind'] not in ('projects','analysis-datasets') and item.get('project_id')==key] if include_children else []):
             if marker(child['kind'],child['key']).exists():
                 results.append(purge(child['kind'],child['key'],True))
         deleted_marker(kind,key).parent.mkdir(parents=True,exist_ok=True)
@@ -292,6 +292,7 @@ def inactive(kind,key,record=None):
     try:
         if is_recycled(kind,key) or deleted_marker(kind,key).exists():return True
     except ValueError:return False
+    if kind=='analysis-datasets':return False
     project_id=(record or {}).get('project_id')
     return bool(project_id and (is_recycled('projects',project_id) or deleted_marker('projects',project_id).exists()))
 
@@ -347,6 +348,7 @@ def _project_objects(project_id):
         item=json.loads(path.read_text())
         if item.get('project_id')==project_id:yield 'wannier-inputs',path.stem
     for kind,directory in DIRECTORIES.items():
+        if kind=='analysis-datasets':continue
         for path in (ROOT/directory).glob('*/'+('record.json' if kind in ('saved-plots','comparisons') else 'analysis.json')):
             item=json.loads(path.read_text());owner=item.get('project_id')
             if not owner and item.get('attempt_id'):

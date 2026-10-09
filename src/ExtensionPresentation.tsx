@@ -2,12 +2,12 @@ import {useEffect,useRef,useState} from 'react';
 import {readJson,errorMessage} from './apiClient';
 import type {Analysis} from './extensionModel';
 const protocol='fpilot.extension-view.v1';
-export default function ExtensionPresentation({record,onFailure}:{record:Analysis;onFailure:()=>void}){
+export default function ExtensionPresentation({record,onFailure,dataBase}:{record:Analysis;onFailure:()=>void;dataBase?:string}){
  const frame=useRef<HTMLIFrameElement>(null),[html,setHtml]=useState(''),[height,setHeight]=useState(1000),[error,setError]=useState('');
  const view=record.presentation!;
- const base=`/api/extension-host/analyses/${record.id}/presentation/${view.id}`;
+ const base=`${dataBase||'/api/extension-host/analyses/'+record.id}/presentation/${view.id}`;
  const file=(name:string)=>base+'/files/'+name.split('/').map(encodeURIComponent).join('/');
- useEffect(()=>{let live=true;setHtml('');setError('');void fetch(file(view.manifest!.entry_html)).then(async response=>{if(!response.ok)throw Error('展示入口读取失败');return response.text();}).then(value=>{if(live)setHtml(value.replace(/<head>/i,`<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'">`));}).catch(e=>{if(live){setError(errorMessage(e));onFailure();}});return()=>{live=false;};},[record.id,view.id]);
+ useEffect(()=>{let live=true;setHtml('');setError('');void fetch(file(view.manifest!.entry_html)).then(async response=>{if(!response.ok)throw Error('展示入口读取失败');return response.text();}).then(value=>{if(live)setHtml(value.replace(/<head>/i,`<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'">`));}).catch(e=>{if(live){setError(errorMessage(e));onFailure();}});return()=>{live=false;};},[record.id,view.id,dataBase]);
  useEffect(()=>{
   const listener=async(event:MessageEvent)=>{
    if(event.source!==frame.current?.contentWindow||event.data?.protocol!==protocol)return;
@@ -30,6 +30,6 @@ export default function ExtensionPresentation({record,onFailure}:{record:Analysi
    }catch(e){reply(null,errorMessage(e));}
   };
   window.addEventListener('message',listener);return()=>window.removeEventListener('message',listener);
- },[record.id,view.id]);
+ },[record.id,view.id,dataBase]);
  return <div className="extension-presentation"><p className="extension-notice">扩展内置交互展示 · 版本 {view.version} · 原运行配置与产物保留</p>{error&&<p className="handoff-warning" role="alert">{error}；可查看原始结果或重新生成展示。</p>}{!html&&!error&&<p role="status">正在载入扩展展示…</p>}{html&&<iframe ref={frame} title={record.manifest.name+' · 交互结果'} srcDoc={html} sandbox="allow-scripts allow-downloads" style={{width:'100%',height,border:0}}/>}</div>;
 }

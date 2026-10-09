@@ -1534,6 +1534,8 @@ def template_preview(key: str, payload: TemplatePreview):
 # New optional extensions use one stable file protocol.
 from .extension_api import router as extension_router
 app.include_router(extension_router)
+from .analysis_dataset_api import router as analysis_dataset_router
+app.include_router(analysis_dataset_router)
 
 # Configuration and execution ownership are separate from editable workspace data.
 class SourceRequest(BaseModel):
