@@ -2,7 +2,7 @@ import {newProject,makeStep,uid} from './model';
 import type {Project,Kind} from './model';
 export type ResultAttempt={id:string;node_id?:string;execution_scope?:string;state:string;kind?:string;created_at?:string;job_id?:string|null;path_schema?:string;stage_slug?:string;remote_path_absolute?:string;remote_path?:string;bundle_id?:string;evidence?:Record<string,unknown>;config?:{alias?:string};[key:string]:unknown};
 export type FrozenInput={id?:string;stage?:string;parameters:Record<string,string>;parameter_origin?:string;species?:string[];files:Record<string,{sha256?:string}>;geometry_sha256?:string;kpoints?:string;warning?:string};
-export type Scalar={value:number;unit:string;source:{file:string;sha256?:string;host?:string;method?:string}}|null;
+export type Scalar={value:number;unit:string;source:{file:string;sha256?:string;host?:string;method?:string;line?:number}}|null;
 export type ResultSummary={attempt_id:string;state:string;evidence:Record<string,unknown>;input:FrozenInput;sources:Array<{type:string;attempt_id?:string;files:string[];reason?:string;path?:string}>;metrics:Record<string,Scalar|number|boolean|null>|null;metrics_error?:string;metrics_checked_at?:string};
 export const metricDefinitions=[['energy','总能','eV/cell'],['energy_per_atom','每原子能','eV/atom'],['magnetization','晶胞磁矩','μB/cell'],['elapsed','运行时间','s']] as const;
 export const formatValue=(value:unknown)=>typeof value==='number'&&Number.isFinite(value)?String(Number(value.toPrecision(8))):'—';

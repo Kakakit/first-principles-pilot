@@ -130,7 +130,7 @@ class ScanTests(unittest.TestCase):
         batch['state']='COMPLETE';batch['cases'][0].update(state='COMPLETED',attempt_id='done');scans.save(batch)
         record={'id':'done','project_id':'p','state':'COMPLETED','bundle_id':batch['cases'][0]['bundle_id'],
                 'config':{'alias':'jutai-1'},'evidence':{'vasp_timing':True,'ediff_reached':True,'wrapper_exit':0}}
-        output='FPILOT_SHA='+('a'*64)+'\n free  energy   TOTEN  = -12.5000 eV\n number of electron  8.0 magnetization  2.0\n Elapsed time (sec): 120.5\n'
+        output='FPILOT_SHA='+('a'*64)+'\n free  energy   TOTEN  = -12.5000 eV\n number of electron  8.0 magnetization  2.0\n Elapsed time (sec): 120.5\nFPILOT_SHA_AFTER='+('a'*64)+'\n'
         with patch.object(ex,'get',return_value=record),patch.object(ex,'attempt_path',return_value={'shell':'$HOME/230269265lht/material-projects/p/flows/main/stages/02-scf/attempts/a'}),patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':output,'stderr':''}):
             row=scan_results.compare('p',['done'])['rows'][0]
             self.assertEqual(row['metrics']['energy']['value'],-12.5)
