@@ -219,10 +219,7 @@ def chain_history(project_id: str):
 @app.get('/api/chains/{run_id}')
 def chain_get(run_id: str, project_id: str):
     try:
-        run = chain_runs.get(run_id)
-        if run['project_id'] != project_id:
-            raise ValueError('计算链不属于当前项目')
-        return run
+        return chain_runs.status(run_id, project_id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -230,7 +227,7 @@ def chain_get(run_id: str, project_id: str):
 @app.post('/api/chains/{run_id}/authorize')
 def chain_authorize(run_id: str, payload: ChainAuthorization):
     try:
-        return chain_runs.authorize(run_id, **payload.model_dump())
+        return chain_runs.authorize_and_dispatch(run_id, **payload.model_dump())
     except (ValueError, KeyError, TypeError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
 

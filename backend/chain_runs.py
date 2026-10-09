@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from . import artifacts, band_path, execution as ex, execution_control as control
 from . import inputs, servers, recycle
 from .storage import validate_workspace
+from .platform_runtime import exclusive_lock
 
 KINDS = ('relax', 'scf', 'bands', 'dos', 'vasp-wannier')
 MODEL_TAGS = ('GGA', 'ENCUT', 'PREC', 'ISPIN', 'LDAU', 'LDAUTYPE',
@@ -58,6 +59,69 @@ def get(run_id):
     if not row:
         raise ValueError('计算链运行不存在')
     return json.loads(row[0])
+
+
+def status(run_id, project_id):
+    """Local projection only: no remote reads or ledger writes."""
+    run = get(run_id)
+    if run['project_id'] != project_id:
+        raise ValueError('计算链不属于当前项目')
+    by_id = {step['node_id']: step for step in run['steps']}
+    for step in run['steps']:
+        if not step.get('attempt_id'):
+            parent = by_id.get(step.get('parent_id'))
+            if parent and parent['state'] != 'DONE' and step['state'] == 'PENDING':
+                step['waiting_kind'] = 'DEPENDENCY'
+                step['waiting_reason'] = '等待上游 '+parent['label']+' 完成并通过审核'
+            continue
+        try:
+            attempt = ex.get(step['attempt_id'])
+        except ValueError:
+            continue
+        if (attempt.get('project_id') != project_id or
+                attempt.get('chain_run_id', run_id) != run_id):
+            continue
+        step['attempt_state'] = attempt['state']
+        step['job_id'] = attempt.get('job_id')
+        if attempt.get('note') and attempt['state'] in ('PREPARED', 'UNKNOWN'):
+            step['waiting_reason'] = attempt['note']
+    return run
+
+
+def _dispatch_lock(run_id):
+    # Hash the identity so a route parameter never becomes a filesystem path.
+    return exclusive_lock(ex.ROOT/'chain-locks'/(digest(run_id)+'.lock'))
+
+
+def _update_dispatch(run_id, **fields):
+    # Pause/refresh can update the chain while a remote operation is in flight.
+    # Merge only dispatch metadata into the latest revision, never its state.
+    for _ in range(3):
+        run = get(run_id)
+        if 'initial_dispatch' not in run:
+            return run
+        run['initial_dispatch'].update(fields)
+        try:
+            return save(run)
+        except ValueError:
+            if get(run_id)['revision'] == run['revision']:
+                raise
+    return get(run_id)
+
+
+def authorize_and_dispatch(run_id, **payload):
+    request_hash = digest(payload)
+    with _dispatch_lock(run_id) as owned:
+        current = get(run_id)
+        prior = current.get('initial_dispatch', {})
+        if (current['project_id'] == payload['project_id'] and
+                prior.get('request_hash') == request_hash and current.get('authorization')):
+            return status(run_id, payload['project_id'])
+        if not owned:
+            raise ValueError('计算链正在核对或派发，请读取当前状态后重试')
+        authorize(run_id, **payload, _initial_request_hash=request_hash)
+        _dispatch_pass(run_id)
+        return status(run_id, payload['project_id'])
 
 
 def history(project_id):
@@ -333,7 +397,8 @@ def freeze(project, node_ids, reason, expected_definition_hash, source_alias=Non
     return save(run)
 
 
-def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, approved_previews):
+def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, approved_previews,
+              _initial_request_hash=None):
     run = get(run_id)
     recycle.assert_available('chains',run['id'],run)
     run.pop('local_cleanup_blocker',None)
@@ -390,6 +455,9 @@ def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, a
                             'mismatch_hash': mismatch_hash, 'config': config,
                             'resources': checked, 'max_jobs': run['max_jobs']}
     run['state'] = 'ACTIVE'
+    if _initial_request_hash:
+        run['initial_dispatch'] = {'state': 'IN_PROGRESS', 'started_at': ex.now(),
+                                   'request_hash': _initial_request_hash}
     return save(run)
 
 
@@ -639,6 +707,29 @@ def tick():
 
 
 def _tick_one(run_id):
+    with _dispatch_lock(run_id) as owned:
+        if owned:
+            return _dispatch_pass(run_id)
+
+
+def _dispatch_pass(run_id):
+    try:
+        _advance(run_id)
+    except Exception as exc:
+        current = get(run_id)
+        if current['state'] == 'ACTIVE':
+            message = control.redact(str(exc))[:1000]
+            current['last_worker_error'] = message
+            try:
+                save(current)
+            except ValueError:
+                pass
+    finally:
+        if get(run_id).get('initial_dispatch', {}).get('state') == 'IN_PROGRESS':
+            _update_dispatch(run_id, state='FINISHED', finished_at=ex.now())
+
+
+def _advance(run_id):
     run = get(run_id)
     if recycle.inactive('chains',run['id'],run) or run.get('local_cleanup_blocker'):return
     if run['state'] != 'ACTIVE':
@@ -648,6 +739,8 @@ def _tick_one(run_id):
     probes = {}
     capacity_context = {}
     for step in run['steps']:
+        if get(run_id)['state'] != 'ACTIVE':
+            return
         if step['state']=='BLOCKED':
             _recover_blocked_step(step)
             run=save(run)
@@ -700,9 +793,17 @@ def _tick_one(run_id):
             run = save(run)
             continue
         if parent and parent['state'] != 'DONE' and step['state'] != 'RETRY_PENDING':
+            step['waiting_kind'] = 'DEPENDENCY'
+            step['waiting_reason'] = '等待上游 '+parent['label']+' 完成并通过审核'
+            run = save(run)
             continue
         if not _quota_available(authorization['config']['alias']):
+            step['waiting_kind'] = 'QUOTA'
+            step['waiting_reason'] = '服务器在途任务数或核数预算已达上限，等待额度释放'
+            run = save(run)
             continue
+        step.pop('waiting_reason', None)
+        step.pop('waiting_kind', None)
         from .workbench_settings import assert_current
         try:
             assert_current(authorization.get('settings_snapshots',{}).get(step['node_id']))
