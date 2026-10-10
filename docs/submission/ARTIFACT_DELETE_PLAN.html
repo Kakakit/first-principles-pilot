@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>文件与日志：单文件删除方案</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#243347;background:#f3f6fa}body{margin:0;padding:32px 20px}main{max-width:960px;margin:auto}section{background:white;border:1px solid #dce4ee;border-radius:14px;padding:24px;margin:18px 0}h1{font-size:28px}h2{font-size:20px;margin-top:0}p,li{line-height:1.8}li{margin:8px 0}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:12px;border-bottom:1px solid #e5ebf2}button{padding:7px 12px;border:1px solid #ccd6e2;border-radius:7px;background:white}.danger{color:#b42318;border-color:#efb7b2}.note{padding:12px 16px;background:#fff7ed;border-left:4px solid #e99a37}code{overflow-wrap:anywhere}.small{color:#627087;font-size:14px}@media(max-width:600px){body{padding:16px 10px}section{padding:18px}}
+</style></head>
+<body><main>
+<h1>文件与日志：新增删除操作</h1>
+<p>在“结果与后处理 → 文件与日志”中，为所有普通文件添加“删除”。由用户逐个确认，方便清理 CHGCAR、WAVECAR 等大文件。</p>
+<p class="small">已实施的方案记录；此页面按钮仅作示意，不执行操作。<a href="ARTIFACT_DELETE_ACCEPTANCE.md">使用与验收记录</a></p>
+<section><h2>1. 界面与确认流程</h2>
+<table><thead><tr><th>文件（示意）</th><th>操作</th></tr></thead><tbody><tr><td>OUTCAR</td><td><button disabled>预览</button> <button disabled>下载</button> <button class="danger" disabled>删除</button></td></tr><tr><td>CHGCAR / WAVECAR</td><td><span class="small">沿用现有预览及下载限制</span> <button class="danger" disabled>删除</button></td></tr></tbody></table>
+<ul><li>输入、输出、检查点、证据和其他文件统一提供删除；每次只操作一个文件。</li><li>先只读核查，再展示完整路径、主机、attempt、文件大小、任务状态及下游引用。默认聚焦“取消”，明确确认“永久删除此文件”。</li><li>切换项目、节点或 attempt 后旧确认框关闭。成功后移除文件行和该文件预览，再刷新清单。</li></ul>
+<p class="note">这是永久删除，不放入同盘回收站。本机已下载副本、冻结包及历史记录保留。硬链接或仍打开的文件可能不会立即释放全部标称空间。</p></section>
+<section><h2>2. 删除条件与下游影响</h2><ul><li>活动任务禁止删除。完成、失败和 UNKNOWN 都须实时核查；无法证明停止时禁止删除，队列中查不到任务不能单独作为停止证据。</li><li>被下游引用的文件允许明确确认后删除。保留原计划与授权，后续所需文件缺失时停止；不自动换来源、重投或取消运行中的下游。</li><li>仅删除受控 attempt 内的普通文件，拒绝目录、符号链接、链接祖先和路径穿越。使用本机保存的身份绑定；远端身份标记存在时必须匹配。</li></ul></section>
+<section><h2>3. 后端接口与一致性</h2><ul><li><code>POST /api/execution/{id}/artifact-delete-preview</code>：只读核查，返回影响说明、操作 ID 及有效期 10 分钟的令牌。</li><li><code>POST /api/execution/{id}/artifact-delete</code>：匹配项目、文件、身份及明确确认；令牌至多执行一次。</li><li><code>GET /api/execution/{id}/artifact-delete/{operation_id}</code>：只读核查已删除、未删除、冲突或待核验；连接中断不自动重删。</li><li>与派发共用跨进程来源锁，执行前重查状态、引用和文件身份。大文件只核对设备号、inode、大小和精细时间，不下载内容。</li><li>保留最小回执并失效文件与来源缓存。删除成功但刷新失败时显示“已删除，文件列表待刷新”。</li></ul></section>
+<section><h2>4. 验收与交付</h2><ul><li>覆盖大小文件、全部类别、中文/空格路径、链接、越界、身份替换、过期令牌、重复请求、调度状态变化和断线恢复。</li><li>验证引用提示、下游缺文件停止、缓存失效以及历史和授权保留；浏览器使用一次性文件，真实研究项目只读核查。</li><li>完成专项与全量回归、前端检查及构建，更新检查点和验收记录，再按既有流程增量同步 GitHub。</li><li>提交标题：<strong>为文件与日志新增单文件删除，核验任务状态与下游引用</strong>。</li></ul></section>
+</main></body></html>

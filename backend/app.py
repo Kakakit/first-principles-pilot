@@ -1143,6 +1143,37 @@ class ArtifactPreview(BaseModel):
     max_bytes: int = Field(default=262144, ge=1, le=262144)
 
 
+class ArtifactDeletePreview(BaseModel):
+    project_id: str
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class ArtifactDelete(ArtifactDeletePreview):
+    token: str = Field(pattern=r'^[a-f0-9]{32}$')
+    confirmed: bool = False
+
+
+@app.post('/api/execution/{key}/artifact-delete-preview')
+def artifact_delete_preview(key: str, payload: ArtifactDeletePreview):
+    from . import artifact_delete
+    try:return artifact_delete.preview(payload.project_id, key, payload.path)
+    except (ValueError, OSError, KeyError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/execution/{key}/artifact-delete')
+def artifact_delete_confirm(key: str, payload: ArtifactDelete):
+    from . import artifact_delete
+    try:return artifact_delete.remove(payload.project_id, key, payload.path, payload.token, payload.confirmed)
+    except (ValueError, OSError, KeyError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/api/execution/{key}/artifact-delete/{operation_id}')
+def artifact_delete_status(key: str, operation_id: str, project_id: str):
+    from . import artifact_delete
+    try:return artifact_delete.status(project_id, key, operation_id)
+    except (ValueError, OSError, KeyError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
 class AnalysisRun(BaseModel):
     extension_id: str = Field(min_length=1, max_length=128)
     confirmed: bool = False
@@ -1713,3 +1744,4 @@ def site_test_connection(payload:dict):
     from . import site_registration
     try:return site_registration.test_connection(payload.get('alias'),payload.get('python',''),payload.get('remote_workspace_root'))
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
+

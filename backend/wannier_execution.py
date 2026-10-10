@@ -444,6 +444,10 @@ def _bundle(record):
     return json.loads(raw)
 
 
+from .attempt_operations import serialized_submit
+
+
+@serialized_submit
 def submit(key):
     record = ex.get(key)
     from . import recycle
@@ -736,3 +740,4 @@ def _source_singleflight(function):
 
 inspect=_source_singleflight(inspect)
 discover=_source_singleflight(discover)
+

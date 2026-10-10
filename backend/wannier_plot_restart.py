@@ -134,6 +134,10 @@ def prepare(project, source_id, band_id, proposal, probe_id, node, cores=None,
     return record
 
 
+from .attempt_operations import serialized_submit
+
+
+@serialized_submit
 def submit(key):
     record = ex.get(key)
     from . import recycle
@@ -246,3 +250,4 @@ cat .job-id
         fast_dispatch.tracking_note(record)
         ex.save(record)
         raise
+

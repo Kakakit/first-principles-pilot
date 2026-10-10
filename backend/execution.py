@@ -914,6 +914,10 @@ if ! test -e "$project_dir/.fpilot/project.json"; then printf '%s' {identity_jso
 '''
 
 
+from .attempt_operations import serialized_submit
+
+
+@serialized_submit
 def submit(key):
     from . import execution_control as control
     record=get(key)
@@ -1211,3 +1215,4 @@ def retry(key,probe_id,node,cores=None,reason=''):
 
 from .fast_prepare import batched as _batched_prepare
 prepare = _batched_prepare(prepare, 'vasp')
+
