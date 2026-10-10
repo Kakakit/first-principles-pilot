@@ -40,6 +40,27 @@ class WannierExecutionTests(unittest.TestCase):
         self.assertEqual(w90.source_names('wannier90.2')[-1],'wannier90.2.eig')
         with self.assertRaises(ValueError):w90.source_names('../wannier90')
 
+    def test_common_tags_restart_enum_and_missing_checkpoint_gate(self):
+        changes={'restart':'plot','num_cg_steps':'5','precond':'true','guiding_centres':'false','trial_step':'1.5','num_dump_cycles':'100','num_print_cycles':'1','write_tb':'true','write_u_matrices':'true','use_ws_distance':'true'}
+        result=w90.edit_win(fixture_win(),changes)
+        self.assertEqual(result['parameters']['restart'],'plot')
+        with self.assertRaisesRegex(ValueError,'restart 需要'):
+            w90.require_fresh_interface_win(result['win'])
+        w90.require_fresh_interface_win(fixture_win())
+        with self.assertRaisesRegex(ValueError,'只能是'):
+            w90.edit_win(fixture_win(),{'restart':'invalid'})
+        with self.assertRaisesRegex(ValueError,'超出允许范围'):
+            w90.edit_win(fixture_win(),{'num_dump_cycles':'0'})
+        with self.assertRaisesRegex(ValueError,'fixed_step'):
+            w90.edit_win(fixture_win(),{'trial_step':'1','fixed_step':'1'})
+
+    def test_frozen_restart_is_checked_after_frozen_win_is_restored(self):
+        project={'id':'p'}
+        frozen={'project_id':'p','node_id':'w','alias':'jutai-1','project':project,'parent_attempt_id':'v','win':fixture_win()+'\nrestart=plot\n','seed':'wannier90','input_reason':'frozen','energy_reference':None,'relative_windows':{},'band_path':None}
+        with patch('backend.recycle.assert_available'),patch.object(w90,'configuration',return_value=frozen):
+            with self.assertRaisesRegex(ValueError,'restart 需要'):
+                w90.prepare.__wrapped__(project,'w','v',{'alias':'jutai-1'},'probe','node',win=fixture_win(),frozen_id='frozen')
+
     def test_relative_windows_convert_once_to_absolute_win_values(self):
         win=fixture_win()
         changed=w90.edit_win(win,{'dis_win_min':'-3','dis_win_max':'4','dis_froz_min':'-2','dis_froz_max':'1'},fermi_eV=6.179381397)

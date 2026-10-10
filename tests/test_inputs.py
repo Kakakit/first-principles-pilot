@@ -224,6 +224,9 @@ class InputTests(unittest.TestCase):
         wannier=copy.deepcopy(self.project['nodes'][1]);wannier['id']='w';wannier['data']['kind']='vasp-wannier'
         wannier['data']['stageSlug']='vasp-wannier';wannier['data']['inputDraft'].update(projections='Si:s\nSi:p',num_wann='8')
         self.project['nodes'].append(wannier);self.project['edges'].append({'source':'c','target':'w'})
+        self.assertIn('LORBIT = 11\n',inputs.generate(self.project,'w')['files']['INCAR'])
+        wannier['data']['parameters']['values']['LORBIT']='10'
+        self.assertIn('LORBIT = 10\n',inputs.generate(self.project,'w')['files']['INCAR'])
         for spin in ('1','2'):
             self.project['parameters']['shared']['values']['ISPIN']=spin
             if spin=='2':

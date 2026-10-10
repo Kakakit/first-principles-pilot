@@ -4,6 +4,8 @@ Only parsed numerical advice crosses SSH.  The calculation files stay in place.
 """
 from __future__ import annotations
 
+from . import wannier_lineage
+
 import math
 import re
 import shlex
@@ -143,8 +145,8 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
             manifest, _ = execution.bundle(dos['bundle_id'], allow_dependencies=True)
             if (dos.get('project_id') != project['id'] or dos.get('state') != 'COMPLETED' or
                 dos.get('config', {}).get('alias') != alias or manifest.get('stage') != 'dos' or
-                (dos.get('dependency_snapshot') or {}).get('upstream_attempt_id') !=
-                    (parent.get('dependency_snapshot') or {}).get('upstream_attempt_id')):
+                wannier_lineage.scf_id(dos) !=
+                    wannier_lineage.scf_id(parent)):
                 raise ValueError('DOS 来源须为同项目、同服务器、同 SCF 来源的已完成 DOS attempt')
             dos_path = execution.attempt_path(dos)['shell']
             source_id = dos_attempt_id

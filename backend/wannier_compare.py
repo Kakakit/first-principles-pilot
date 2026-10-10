@@ -1,6 +1,8 @@
 """Independent local DFT/Wannier band comparison from explicitly selected attempts."""
 from __future__ import annotations
 
+from . import wannier_lineage
+
 import csv
 import hashlib
 import json
@@ -140,7 +142,7 @@ def _band(record, project_id, alias, scf_id):
     if (record.get('project_id') != project_id or record.get('state') != 'COMPLETED' or
         record.get('config', {}).get('alias') != alias or
         not (record.get('evidence') or {}).get('vasp_timing') or
-        (record.get('dependency_snapshot') or {}).get('upstream_attempt_id') != scf_id):
+        wannier_lineage.scf_id(record) != scf_id):
         raise ValueError('DFT 能带须为同项目、同服务器、同 SCF 来源的已完成 attempt')
     manifest, _ = execution.bundle(record['bundle_id'], allow_dependencies=True)
     if manifest.get('stage') != 'bands':
@@ -152,7 +154,7 @@ def candidates(project_id, wannier_attempt_id):
     if w90.get('project_id') != project_id:
         raise ValueError('Wannier90 attempt 不属于当前项目')
     _, parent = _w90(w90)
-    scf_id = (parent.get('dependency_snapshot') or {}).get('upstream_attempt_id')
+    scf_id = wannier_lineage.scf_id(parent)
     if not scf_id:
         raise ValueError('VASP-Wannier 来源未记录 SCF 依赖，不能确认同源能带')
     result = []
@@ -189,7 +191,7 @@ def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagno
     if w90.get('project_id') != project_id:
         raise ValueError('Wannier90 attempt 不属于当前项目')
     bundle, parent = _w90(w90)
-    scf_id = (parent.get('dependency_snapshot') or {}).get('upstream_attempt_id')
+    scf_id = wannier_lineage.scf_id(parent)
     if not scf_id:
         raise ValueError('VASP-Wannier 来源缺少 SCF 依赖')
     band = execution.get(band_attempt_id)

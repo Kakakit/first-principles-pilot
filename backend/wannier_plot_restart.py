@@ -1,6 +1,8 @@
 """Prepare a separate restart=plot attempt from an immutable Wannier90 model."""
 from __future__ import annotations
 
+from . import wannier_lineage
+
 import hashlib
 import io
 import json
@@ -26,7 +28,7 @@ def _source(project_id, source_id, band_id):
     if source.get('project_id') != project_id:
         raise ValueError('Wannier90 来源不属于当前项目')
     bundle, parent = wannier_compare._w90(source)
-    scf_id = (parent.get('dependency_snapshot') or {}).get('upstream_attempt_id')
+    scf_id = wannier_lineage.scf_id(parent)
     band = ex.get(band_id)
     wannier_compare._band(band, project_id, source['config']['alias'], scf_id)
     return source, bundle, parent
@@ -72,7 +74,7 @@ def prepare(project, source_id, band_id, proposal, probe_id, node, cores=None,
     source, bundle, parent = _source(project['id'], source_id, band_id)
     if (proposal.get('wannier_source_attempt_id') != source_id or proposal.get('band_attempt_id') != band_id or
             proposal.get('parent_attempt_id') != parent['id'] or
-            proposal.get('scf_attempt_id') != (parent.get('dependency_snapshot') or {}).get('upstream_attempt_id') or
+            proposal.get('scf_attempt_id') != wannier_lineage.scf_id(parent) or
             proposal.get('project_id') != project['id']):
         raise ValueError('补画路径与所选来源不一致')
     wannier_bands.recheck(proposal)

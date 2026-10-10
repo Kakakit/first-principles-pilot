@@ -5,14 +5,15 @@ import hashlib
 import re
 import shlex
 
+from . import wannier_lineage, artifacts, source_contracts
 from . import execution, pyw90_remote, remote_paths, wannier_execution
 
 
 def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
     parent, _ = wannier_execution._parent(project, node_id, parent_id, alias)
     band = execution.get(band_attempt_id)
-    scf_id = (parent.get('dependency_snapshot') or {}).get('upstream_attempt_id')
-    if not scf_id or (band.get('dependency_snapshot') or {}).get('upstream_attempt_id') != scf_id:
+    scf_id = wannier_lineage.scf_id(parent)
+    if not scf_id or wannier_lineage.scf_id(band) != scf_id:
         raise ValueError('DFT 能带与 VASP-Wannier 不属于同一 SCF 来源')
     if band.get('project_id') != project['id'] or band.get('config', {}).get('alias') != alias or band.get('state') != 'COMPLETED':
         raise ValueError('请选择同项目、同服务器的已完成 DFT 能带 attempt')
@@ -21,12 +22,20 @@ def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
         raise ValueError('所选 attempt 不是 DFT 能带计算')
     path = execution.attempt_path(band)['shell']
     hashes = pyw90_remote._file_hashes(alias, path, ('KPOINTS', 'POSCAR'))
-    # Both attempts must bind the same final SCF structure. The actual POSCAR
-    # hashes may differ in formatting, so compare the frozen source identity.
-    source = (band.get('dependency_snapshot') or {}).get('files', {}).get('CONTCAR', {})
-    other = (parent.get('dependency_snapshot') or {}).get('files', {}).get('CONTCAR', {})
-    if not source.get('sha256') or source['sha256'] != other.get('sha256'):
-        raise ValueError('两个来源绑定的 SCF 最终结构不同，不能自动复用能带路径')
+    # Compare actual execution POSCARs, allowing formatting/rounding changes.
+    parent_path = execution.attempt_path(parent)['shell']
+    parent_hashes = pyw90_remote._file_hashes(alias, parent_path, ('POSCAR',))
+    if hashes['POSCAR'] != parent_hashes['POSCAR']:
+        structures = []
+        for record, expected in ((band, hashes['POSCAR']), (parent, parent_hashes['POSCAR'])):
+            raw, size = artifacts._small_bytes(record, 'POSCAR', mode='head')
+            if size != len(raw) or hashlib.sha256(raw).hexdigest() != expected:
+                raise ValueError('实际 POSCAR 已变化或超出核查上限，请重新读取来源')
+            structures.append(source_contracts.structure_geometry(raw))
+        if not source_contracts.compare_geometry(*structures):
+            raise ValueError('两个来源的实际结构不同，不能自动复用能带路径')
+    source = next((info for name, info in wannier_lineage.binding(band)['files'].items()
+                   if name in ('POSCAR', 'CONTCAR') and info.get('sha256')), {})
     output = pyw90_remote._run(alias, path, ['pre', 'kpath', '--path', '.'], ('KPOINTS',))
     match = re.search(r'(?ims)^\s*begin\s+kpoint_path\s*\n(.*?)^\s*end\s+kpoint_path\s*$', output)
     candidates = match.group(1).splitlines() if match else output.splitlines()
@@ -51,7 +60,8 @@ def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
         raise ValueError('DFT 能带每段采样数无效')
     return {'project_id':project['id'], 'band_attempt_id': band_attempt_id, 'parent_attempt_id': parent_id,
             'scf_attempt_id': scf_id, 'alias': alias, 'kpoints_sha256': hashes['KPOINTS'],
-            'poscar_sha256': hashes['POSCAR'], 'structure_sha256': source['sha256'],
+            'poscar_sha256': hashes['POSCAR'], 'structure_sha256': source.get('sha256', hashes['POSCAR']),
+            'parent_poscar_sha256': parent_hashes['POSCAR'], 'parent_source_path': parent_path,
             'path_lines': lines, 'bands_num_points': points,
             'path_sha256': hashlib.sha256(('\n'.join(lines)+'\n').encode()).hexdigest(),
             'source_path': path, 'generator': 'pyw90 pre kpath'}
@@ -114,8 +124,10 @@ def recheck(proposal, force=True, max_cache_age=None):
     band = execution.get(proposal['band_attempt_id'])
     if band.get('state') != 'COMPLETED' or band.get('project_id') != proposal['project_id'] or band.get('config', {}).get('alias') != proposal['alias']:
         raise ValueError('DFT 能带来源状态或身份已变化')
-    source = (band.get('dependency_snapshot') or {})
-    if source.get('upstream_attempt_id') != proposal['scf_attempt_id'] or source.get('files', {}).get('CONTCAR', {}).get('sha256') != proposal['structure_sha256']:
+    source = wannier_lineage.binding(band)
+    if source['attempt_id'] != proposal['scf_attempt_id']:
+        raise ValueError('DFT 能带 SCF 来源已变化')
+    if not proposal.get('parent_poscar_sha256') and source['files'].get('CONTCAR', {}).get('sha256') != proposal['structure_sha256']:
         raise ValueError('DFT 能带 SCF 结构来源已变化')
     path = execution.attempt_path(band)['shell']
     if path != proposal['source_path']:
@@ -126,4 +138,14 @@ def recheck(proposal, force=True, max_cache_age=None):
     if hashes != {'KPOINTS': proposal['kpoints_sha256'], 'POSCAR': proposal['poscar_sha256']}:
         raise ValueError('DFT 能带结构或路径文件已变化，请重新生成路径')
 
+    if proposal.get('parent_poscar_sha256'):
+        parent = execution.get(proposal['parent_attempt_id'])
+        recycle.assert_available('attempts', parent['id'])
+        if (parent.get('state') != 'COMPLETED' or parent.get('project_id') != proposal['project_id'] or
+                parent.get('config', {}).get('alias') != proposal['alias'] or
+                wannier_lineage.scf_id(parent) != proposal['scf_attempt_id'] or
+                execution.attempt_path(parent)['shell'] != proposal['parent_source_path']):
+            raise ValueError('VASP-Wannier 结构来源已变化')
+        if pyw90_remote._file_hashes(proposal['alias'], proposal['parent_source_path'], ('POSCAR',)) != {'POSCAR': proposal['parent_poscar_sha256']}:
+            raise ValueError('VASP-Wannier 实际结构已变化，请重新生成路径')
     return remote_cache.write('band-path',proposal,{'validated':True})

@@ -43,17 +43,35 @@ PARAMETERS = {
     'dis_win_max': ('外窗上界', 'number', 'eV'),
     'dis_froz_min': ('冻结窗下界', 'number', 'eV'),
     'dis_froz_max': ('冻结窗上界', 'number', 'eV'),
+    'restart': ('从检查点重启（需要同一模型 .chk）', 'enum', ''),
+    'num_cg_steps': ('共轭梯度重置步数', 'integer_nonnegative', ''),
+    'precond': ('局域化预条件', 'boolean', ''),
+    'guiding_centres': ('引导中心（需要显式 projections）', 'boolean', ''),
+    'trial_step': ('线搜索试探步长（与 fixed_step 互斥）', 'positive', ''),
+    'fixed_step': ('固定步长（与 trial_step 互斥）', 'positive', ''),
+    'num_dump_cycles': ('检查点输出周期', 'integer_positive', ''),
+    'num_print_cycles': ('日志输出周期', 'integer_positive', ''),
+    'write_tb': ('输出完整紧束缚模型', 'boolean', ''),
+    'write_u_matrices': ('输出旋转矩阵', 'boolean', ''),
+    'use_ws_distance': ('插值 Wigner-Seitz 距离', 'boolean', ''),
     'write_hr': ('输出 Hamiltonian', 'boolean', ''),
     'write_xyz': ('输出 Wannier 中心（TB2J hr 所需）', 'boolean', ''),
 }
+PARAMETER_CHOICES = {'restart': ('default', 'wannierise', 'plot', 'transport')}
 WINDOW_TAGS = ('dis_win_min', 'dis_win_max', 'dis_froz_min', 'dis_froz_max')
+
+
+def require_fresh_interface_win(win):
+    document = win_contract.parse_win(win)
+    if document.occurrences('restart'):
+        raise ValueError('restart 需要同一 Wannier90 模型的 seedname.chk；VASP 接口四文件不含检查点。请使用已有模型的 restart=plot 重绘入口，或删除 restart 后准备新局域化。')
 
 
 def parameter_catalog():
     official, _ = win_contract.official_tags()
     if not set(PARAMETERS).issubset(official):
         raise ValueError('Wannier90 参数目录与官方 tag 注册表不一致')
-    return [{'tag':name, 'label':label, 'type':kind, 'unit':unit}
+    return [{'tag':name, 'label':label, 'type':kind, 'unit':unit, **({'choices': list(PARAMETER_CHOICES[name])} if name in PARAMETER_CHOICES else {})}
             for name,(label,kind,unit) in PARAMETERS.items()]
 
 
@@ -76,6 +94,10 @@ def edit_win(win, changes, fermi_eV=None):
             if value.lower() not in ('true','false','.true.','.false.'):
                 raise ValueError(name + ' 只能是 true 或 false')
             value = '.true.' if 'true' in value.lower() else '.false.'
+        elif kind == 'enum':
+            value = value.lower()
+            if value not in PARAMETER_CHOICES[name]:
+                raise ValueError(name + ' 只能是 ' + ', '.join(PARAMETER_CHOICES[name]))
         elif kind.startswith('integer'):
             if not re.fullmatch(r'[+-]?\d+', value):
                 raise ValueError(name + ' 必须是整数')
@@ -321,6 +343,7 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
         project=frozen['project']
         parent_id,win,seed,input_reason=(frozen[k] for k in ('parent_attempt_id','win','seed','input_reason'))
         energy_reference,relative_windows,band_path=(frozen[k] for k in ('energy_reference','relative_windows','band_path'))
+    require_fresh_interface_win(win)
     recycle.assert_available('projects',project['id'],{'parent_attempt_id':parent_id,'template_id':template_id})
     if not isinstance(input_reason, str) or not input_reason.strip() or len(input_reason) > 2000:
         raise ValueError('请填写本次 Wannier90 输入调整理由')
@@ -670,6 +693,7 @@ def configuration(key):
 
 
 def freeze_configuration(project,node_id,parent_id,alias,input_reason,win,seed=SEED,energy_reference=None,relative_windows=None,band_path=None):
+    require_fresh_interface_win(win)
     from . import recycle
     recycle.assert_available('projects',project['id'],{'parent_attempt_id':parent_id})
     if not isinstance(input_reason,str) or not input_reason.strip():raise ValueError('请填写输入调整理由')

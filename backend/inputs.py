@@ -124,7 +124,7 @@ def generate(project, node_id, context=None):
     for origin, layer in layers:
         for tag, value in layer.items():
             values[tag], origins[tag] = value, origin
-    if kind in ('bands', 'dos') and 'LORBIT' not in shared.get('values', {}) and 'LORBIT' not in local.get('values', {}):
+    if kind in ('bands', 'dos', 'vasp-wannier') and 'LORBIT' not in shared.get('values', {}) and 'LORBIT' not in local.get('values', {}):
         values['LORBIT'], origins['LORBIT'] = '11', '节点执行合同'
     confirmations = set(shared.get('confirmed_custom_tags', [])) | set(local.get('confirmed_custom_tags', []))
     validation_levels = {}

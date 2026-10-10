@@ -63,3 +63,9 @@ test('zero force/energy thresholds are invalid drafts; only explicit steps accep
  const p=sample().projects[0],n=p.nodes[1];n.data.parameters={preset:'basic',values:{NSW:'20',EDIFFG:'-0'}};assert.ok(checkParameters(p,n).some(i=>i.level==='error'&&i.message.includes('阈值')));
  n.data.parameters.values.EDIFFG='0';assert.equal(checkParameters(p,n).filter(i=>i.level==='error').length,0);
 });
+
+test('VASP-Wannier LORBIT default respects shared and node overrides',()=>{
+ const p=sample().projects[0],n=p.nodes[3];n.data.kind='vasp-wannier';assert.equal(effectiveParameters(p,n).LORBIT.value,'11');
+ p.parameters={version:1,shared:{values:{LORBIT:'10'}}};assert.equal(effectiveParameters(p,n).LORBIT.value,'10');
+ n.data.parameters={values:{LORBIT:'12'}};assert.equal(effectiveParameters(p,n).LORBIT.value,'12');
+});

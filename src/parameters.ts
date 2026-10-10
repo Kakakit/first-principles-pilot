@@ -42,7 +42,7 @@ export function effectiveParameters(project:Project,node:Step):Record<string,Eff
    out.ICHARG={value:source.mode==='new'?'2':'1',source:'节点执行合同'};
  }
  if(['bands','dos','vasp-wannier'].includes(node.data.kind))out.ICHARG={value:'11',source:'节点执行合同'};
- if(['bands','dos'].includes(node.data.kind)&&!Object.hasOwn(shared,'LORBIT')&&!Object.hasOwn(local,'LORBIT'))out.LORBIT={value:'11',source:'节点执行合同'};
+ if(['bands','dos','vasp-wannier'].includes(node.data.kind)&&!Object.hasOwn(shared,'LORBIT')&&!Object.hasOwn(local,'LORBIT'))out.LORBIT={value:'11',source:'节点执行合同'};
  return out;
 }
 export function upstreamStructure(project:Project,node:Step):StructureDocument|undefined {
