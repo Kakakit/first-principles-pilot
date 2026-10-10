@@ -12,7 +12,7 @@ export default function ArtifactDelete({projectId,attemptId,path,onClose,onDelet
  const dialog=useRef<HTMLDialogElement>(null),cancel=useRef<HTMLButtonElement>(null),inFlight=useRef(false),ticket=useRef(0),mounted=useRef(true);
  const signature=projectId+':'+attemptId+':'+path,active=useRef(signature);active.current=signature;
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;ticket.current++;};},[]);
- useEffect(()=>{if(path&&!busy)cancel.current?.focus();},[busy,data,path]);
+ useEffect(()=>{if(path&&!busy)cancel.current?.focus({preventScroll:true});},[busy,data,path]);
  const load=async()=>{
   if(!path||inFlight.current)return;const current=++ticket.current;setBusy(true);setError('');setNotice('');setData(null);setAttempted(false);
   try{const value:Receipt=await requestJson(`/api/execution/${attemptId}/artifact-delete-preview`,{project_id:projectId,path});if(mounted.current&&current===ticket.current&&signature===active.current){setData(value);if(value.result!=='PREVIEWED')setAttempted(true);}}
@@ -42,7 +42,7 @@ export default function ArtifactDelete({projectId,attemptId,path,onClose,onDelet
   catch(e){if(mounted.current&&signature===active.current)setError(errorMessage(e));}
   finally{inFlight.current=false;if(mounted.current&&signature===active.current)setBusy(false);}
  };
- return <dialog ref={dialog} className="history-confirm" aria-label="确认删除远端文件" onCancel={e=>{e.preventDefault();if(!busy)onClose();}}>
+ return <dialog ref={dialog} className="history-confirm" style={{maxHeight:'calc(100dvh - 48px)',overflowY:'auto',boxSizing:'border-box',width:'min(720px, calc(100vw - 40px))'}} aria-label="确认删除远端文件" onCancel={e=>{e.preventDefault();if(!busy)onClose();}}>
   <h2>永久删除此文件？</h2><p className="cleanup-record-label">{path}</p>
   <p>仅删除所选远端普通文件，无法撤销。本机冻结包、下载副本及任务历史保留。</p>
   {data&&data.path===path&&<><p>服务器：{data.alias} · 大小：{size(data.size_bytes)}</p><div className="remote-result-path"><code>{data.remote_path}</code></div><p>attempt：{data.attempt_id}<br/>任务：{statusLabel(data.state)} · job ID：{data.job_id||'待核查'} · 调度核查：{data.scheduler_state||'待核查'}</p>
