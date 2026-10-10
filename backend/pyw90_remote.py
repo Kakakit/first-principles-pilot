@@ -9,6 +9,8 @@ from . import wannier_lineage
 import math
 import re
 import shlex
+import json
+from pathlib import Path
 
 from . import execution, remote_paths, wannier_execution
 
@@ -42,6 +44,7 @@ def _run(alias, path, arguments, input_names):
     if alias not in PYTHON:
         raise ValueError('该服务器尚未登记 PyW90 解释器和独立安装目录')
     invocation = ' '.join(map(shlex.quote, arguments))
+    adapter = Path(__file__).with_name('pyw90_adapter.py').read_text(encoding='utf-8')
     links = '\n'.join('ln -s "$source_dir"/' + shlex.quote(name) +
                       ' "$scratch"/' + shlex.quote(name) for name in input_names)
     command = ('set -e\ncd ' + remote_paths.shell_path(path) + '\n'
@@ -53,7 +56,7 @@ def _run(alias, path, arguments, input_names):
                + links + '\ncd "$scratch"\n'
                'PYTHONPATH="' + PACKAGE + '" MPLBACKEND=Agg timeout 180 '
                + shlex.quote(PYTHON[alias])
-               + " -c 'from pyw90.pyw90_cli import main_cli; main_cli()' "
+               + ' -c ' + shlex.quote(adapter + '\nmain()\n') + ' '
                + invocation + '\n')
     receipt = execution.ssh(alias, command, timeout=210, stdout_limit=120000)
     if receipt['exit_code'] != 0 or receipt.get('stdout_truncated'):
@@ -154,7 +157,9 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
             dos_path = parent_path
             source_id = parent_id
         source_hashes = _file_hashes(alias, dos_path, ('vasprun.xml', 'EIGENVAL'))
-        args = ['pre', 'dos', *common]
+        # pre dos has no --efermi option. Use the parent OUTCAR's absolute
+        # range so a separate DOS source cannot silently shift the reference.
+        args = ['pre', 'dos', '--path', '.', '-e', str(emin + fermi), str(emax + fermi)]
         if seed.endswith('.2'):
             args.append('--spin-down')
         first = _run(alias, dos_path, args, ('vasprun.xml', 'EIGENVAL'))
@@ -165,15 +170,24 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
         if selected and selected.group(1).strip():
             second = _run(alias, dos_path, [*args, '--extra', selected.group(1).strip()],
                           ('vasprun.xml', 'EIGENVAL'))
+            marker = re.search(r'^FPILOT_EIGENVAL=(.+)$', second, re.M)
+            if not marker:
+                raise ValueError('PyW90 EIGENVAL 解析核验回执缺失')
+            result['eigenval'] = json.loads(marker.group(1))
             result['frozen'] = _table(second, ('dis_froz_min', 'dis_froz_max', 'percent'))
             for row in result['frozen']:
                 row['dis_froz_min'] = round(row['dis_froz_min'] - fermi, 8)
                 row['dis_froz_max'] = round(row['dis_froz_max'] - fermi, 8)
             match = re.search(r'Lowest `dis_win_max` for [^:]+:\s*(' + NUMBER + ')', second)
-            if match:
+            if match and 'There is no enough states' not in second:
                 result['minimum_outer_max'] = round(float(match.group(1)) - fermi, 8)
+        if _file_hashes(alias, dos_path, ('vasprun.xml', 'EIGENVAL')) != source_hashes:
+            raise ValueError('PyW90 分析期间 DOS 输入发生变化，请刷新来源后重新分析')
+    note = '候选数值由 PyW90 命令行给出；未自动写入 .win，也不代表局域化质量合格。'
+    if mode == 'pre' and not result['frozen']:
+        note = '分析已完成，但当前范围未生成冻结窗候选；请核对分析范围与投影选择。' + note
     return {'schema': 'fpilot.pyw90-advice.v1', 'mode': mode, 'seed': seed,
             'source_attempt_id': source_id, 'source_hashes': source_hashes,
             'fermi_eV': fermi, 'relative_range_eV': [emin, emax],
             'pyw90_version': '1.0.7', 'advice': result,
-            'note': '候选数值由 PyW90 命令行给出；未自动写入 .win，也不代表局域化质量合格。'}
+            'note': note}

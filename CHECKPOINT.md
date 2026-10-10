@@ -1,5 +1,12 @@
 # 当前开发交接 · 2026-10-10
 
+## 2026-10-10：PyW90 pre dos 自旋与 SOC 解析修复
+
+用进程内 pymatgen 适配修复 PyW90 1.0.7 的双自旋 EIGENVAL 拆块、能带通道混排和下自旋 PDOS 默认上自旋问题。SOC/非共线读取实际单通道能带，默认 spinor 投影数乘二；截断或格式不符明确阻止。统一使用 VASP-Wannier OUTCAR 能量参考，输入前后身份核对，空候选与态数不足占位值明确区分。
+
+62 项相关后端（1 跳过）、5 项前端、类型与构建通过；真实上下自旋 DOS 与 SOC 单通道完整分析、正式页面验收通过。原研究文件与安装包保留，未写入 .win 或提交计算。详见 [验收与规则](docs/submission/PYW90_PREDOS_ACCEPTANCE.md)。
+
+
 ## 2026-10-10：Wannier 参数与旧链能带来源
 
 vasp-wannier 在无显式覆盖时默认 LORBIT=11；修复旧链 SCF 绑定漏读和路径只检查 CONTCAR 的问题，改为核对实际 POSCAR 并保留旧冻结路径适配。Cr2FeO4 的 25279 能带已恢复可选，真实 PyW90 提取 9 段路径成功。参数目录扩展至 24 项，含 restart 枚举及检查点要求；普通接口缺 .chk 时阻止冻结/准备，已有 restart=plot 重绘保留。
@@ -174,4 +181,3 @@ Python 360 项、前端 64 项、类型检查和生产构建通过。空白独�
 方案和验收见 docs/submission/SETUP_AND_SCRIPT_PLAN.md、SETUP_AND_SCRIPT_ACCEPTANCE.md。运行 ZIP 未重发，新设备从最新源码构建/打包；Windows 原生与具体真实任务仍需相应验收和授权。
 
 同步始终基于远端 main 的准确父提交，只发布筛选过的源码/说明。不上传工作区数据、POTCAR、SSH 配置/密钥、私人服务器脚本或旧本地 Git 历史，不强推。详细规则见 docs/GITHUB.md、docs/DEVELOPMENT.md。
-
