@@ -793,6 +793,9 @@ def _advance(run_id):
             assert_current(authorization.get('settings_snapshots',{}).get(step['node_id']))
         except ValueError as exc:
             step['state']='BLOCKED';step['blocker']=str(exc);run=save(run);continue
+        from .project_sync import locally_executable
+        if not locally_executable(run['project_id']):
+            return
         resource = authorization['resources'][step['node_id']]
         node_config = _node_config(authorization['config'], resource)
         if step['state'] != 'PREPARED':

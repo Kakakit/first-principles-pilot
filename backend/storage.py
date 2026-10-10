@@ -127,7 +127,17 @@ class WorkspaceStore:
         return {'revision': revision, 'workspace': w, 'path': str(self.root)}
 
     def save(self, workspace, expected_revision, reason='autosave'):
+        if (self.root / 'project-sync').exists():
+            from .project_sync import draft_gate
+            with draft_gate(self.root, workspace):
+                return self._save(workspace, expected_revision, reason)
+        return self._save(workspace, expected_revision, reason)
+
+    def _save(self, workspace, expected_revision, reason):
         validate_workspace(workspace)
+        if (self.root / 'project-sync').exists():
+            from .project_sync import assert_draft_edits
+            assert_draft_edits(self.root, workspace)
         packed = copy.deepcopy(workspace)
         for p in packed['projects']:
             for n in p['nodes']:

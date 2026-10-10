@@ -327,6 +327,8 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
     if any(c['state']=='UNKNOWN' for c in batch['cases']):
         batch['state']='BLOCKED';batch['blocker']='UNKNOWN case 须核对原 job ID；未重投';save(batch);return False
     if batch['state'] in ('BLOCKED','PAUSED'): save(batch);return False
+    from .project_sync import locally_executable
+    if not locally_executable(batch['project_id']):return False
     waiting=next((c for c in batch['cases'] if c['state'] in ('PENDING','PREPARED')),None)
     if not waiting:
         if all(c['state'] in ('COMPLETED','FAILED') for c in batch['cases']): batch['state']='COMPLETE'

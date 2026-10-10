@@ -66,5 +66,12 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
   const serialized=JSON.stringify(cleanWorkspace(workspace));
   useEffect(()=>{if(!ready||serialized===saved.current)return;setStatus('有修改待保存');const t=setTimeout(()=>void flush(),600);return()=>clearTimeout(t);},[serialized,ready,flush]);
   useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(ready&&JSON.stringify(cleanWorkspace(latest.current))!==saved.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[ready]);
-  return {ready,status,error,path,flush,reload:()=>setRetry(n=>n+1)};
+  const exclusive=async<T,>(action:()=>Promise<T>):Promise<T>=>{
+    await flush(true);
+    if(paused.current)throw new Error('草稿尚未保存，不能开始接续。');
+    paused.current=true;setReady(false);
+    try{return await action();}
+    finally{setRetry(n=>n+1);}
+  };
+  return {ready,status,error,path,flush,exclusive,reload:()=>setRetry(n=>n+1)};
 }

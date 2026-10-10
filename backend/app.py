@@ -18,6 +18,61 @@ async def lifespan(application):
 app = FastAPI(title="First Principles Workbench", version="1.0.0",lifespan=lifespan)
 
 
+@app.get('/api/project-sync/hosts')
+def sync_hosts():
+    from . import project_sync
+    return project_sync.hosts()
+
+
+@app.get('/api/project-sync/catalog')
+def sync_catalog(alias: str):
+    from . import project_sync
+    try:return project_sync.catalog(alias)
+    except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/sync')
+def sync_status(project_id: str, check: bool = False):
+    from . import project_sync
+    try:return project_sync.status(project_id, check)
+    except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/api/projects/{project_id}/sync/versions')
+def sync_versions(project_id: str, alias: str):
+    from . import project_sync
+    try:return project_sync.versions(project_id, alias)
+    except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/projects/{project_id}/sync/preview')
+def sync_preview(project_id: str, payload: dict):
+    from . import project_sync
+    try:return project_sync.preview(project_id, payload['alias'], payload['direction'], payload.get('version'))
+    except (ValueError, OSError, KeyError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/projects/{project_id}/sync/transfer')
+def sync_transfer(project_id: str, payload: dict):
+    from . import project_sync
+    try:return project_sync.transfer(project_id, payload['preview_id'], payload.get('choose_server') is True)
+    except (ValueError, OSError, KeyError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/projects/{project_id}/sync/recover')
+def sync_recover(project_id: str):
+    from . import project_sync
+    try:return project_sync.recover(project_id)
+    except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/projects/{project_id}/sync/refresh')
+def sync_refresh(project_id: str):
+    from . import project_sync
+    try:return project_sync.refresh(project_id)
+    except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
 @app.get('/api/problem-records')
 def problem_list(deleted: bool = False):
     from . import problem_records

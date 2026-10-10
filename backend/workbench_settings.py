@@ -26,7 +26,8 @@ def assert_current(saved):
     # Legacy preparations retain their original contract.
     if saved and saved.get('version')==2:
         from .site_registration import connection_identity
-        if saved['connection']!=connection_identity(saved['alias']):raise ValueError('实际 SSH 连接目标已改变，请重新准备/授权；没有提交')
+        from .project_sync import continuation_connection
+        if not continuation_connection(saved['connection'],connection_identity(saved['alias']),saved['alias']):raise ValueError('实际 SSH 连接目标已改变，请重新准备/授权；没有提交')
         return
     if saved and saved != snapshot(saved['alias'],saved['program']):
         current = snapshot(saved['alias'],saved['program'])

@@ -1079,7 +1079,8 @@ def assert_recovery_target(record):
     saved=record.get('settings_snapshot') or {}
     if saved.get('connection'):
         from .site_registration import connection_identity
-        if saved['connection']!=connection_identity(record['config']['alias']):
+        from .project_sync import continuation_connection
+        if not continuation_connection(saved['connection'],connection_identity(record['config']['alias']),record['config']['alias']):
             raise ValueError('实际 SSH 连接目标已改变；请恢复原服务器连接后核查原作业，不会重投')
 
 

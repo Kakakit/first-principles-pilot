@@ -49,8 +49,10 @@ def serialized_submit(function):
         from . import execution
         record = execution.get(key)
         try:
-            with locked({key} | source_ids(record)):
-                return function(key, *args, **kwargs)
+            from .project_sync import dispatch_guard
+            with dispatch_guard(record):
+                with locked({key} | source_ids(record)):
+                    return function(key, *args, **kwargs)
         except AttemptBusy:
             # Keep an authorized PREPARED task waiting; a brief read-only preview
             # must not turn an unrelated chain into BLOCKED or dispatch twice.
