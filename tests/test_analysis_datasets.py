@@ -52,6 +52,27 @@ class AnalysisDatasetTests(unittest.TestCase):
             (dest / 'outputs/table.csv').write_text('value,unit\n1,eV\n')
         return dest
 
+    def test_comparison_registers_old_record_independently_and_survives_removal(self):
+        record={'schema':'fpilot.wannier-band-comparison.v1','id':'e'*32,'project_id':self.project['id'],
+                'wannier_attempt_id':self.attempt['id'],'band_attempt_id':self.attempt['id'],'created_at':self.record['created_at'],
+                'files':['comparison.png','comparison.svg','curves.csv'],'sources':[{'attempt_id':self.attempt['id']}],
+                'fermi_eV':6.1,'energy_window_eV':[-4,4],'absolute_windows':{'dis_win_max':10}}
+        path=datasets.source_path('comparison',record['id']);path.parent.mkdir(parents=True);path.write_text(json.dumps(record))
+        for file in record['files']:(path.parent/file).write_text('saved fixture')
+        bundle={'win':'dis_win_max = 12\n','energy_reference':{'fermi_eV':6.1},'absolute_windows':{'dis_win_max':10},'relative_windows':{'dis_win_max':3.9},'win_sha256':'actual-text'}
+        raw=json.dumps(bundle).encode();key=hashlib.sha256(raw).hexdigest()
+        (self.root/'wannier-bundles').mkdir();(self.root/'wannier-bundles'/(key+'.json')).write_bytes(raw)
+        self.attempt['bundle_id']=key
+        with sqlite3.connect(self.root/'execution.sqlite3') as db:db.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(self.attempt),self.attempt['id']))
+        saved=datasets.register('comparison',record['id'],'named overlay','note')
+        self.assertEqual(saved['analysis'],record);self.assertEqual(saved['title'],'named overlay')
+        self.assertEqual(len(saved['files']),4);self.assertEqual(saved['source_attempt_ids'],[self.attempt['id']])
+        self.assertEqual(saved['comparison_context']['absolute_windows'],{'dis_win_max':12})
+        self.assertAlmostEqual(saved['comparison_context']['relative_windows']['dis_win_max'],5.9)
+        self.assertTrue(datasets.register('comparison',record['id'])['duplicate'])
+        shutil.rmtree(path.parent);self.assertTrue(datasets.get(saved['id'])['source_deleted'])
+        self.assertEqual(datasets.output(saved['id'],'curves.csv')[0].read_text(),'saved fixture')
+
     def test_manual_catalog_has_names_without_registering_or_running(self):
         rows = datasets.available()
         self.assertEqual(len(rows), 1)

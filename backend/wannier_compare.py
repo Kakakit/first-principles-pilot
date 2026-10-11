@@ -184,12 +184,13 @@ def _pull(record, name, directory):
             'size_bytes': len(raw)}
 
 
-def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagnostic=False):
+def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagnostic=False, title=None):
     if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (emin, emax)) or not -100 <= emin < emax <= 100:
         raise ValueError('能量范围无效')
     w90 = execution.get(wannier_attempt_id)
     if w90.get('project_id') != project_id:
         raise ValueError('Wannier90 attempt 不属于当前项目')
+    if title is not None and (not isinstance(title,str) or not title.strip() or len(title)>500):raise ValueError('叠图标题须为 1–500 字')
     bundle, parent = _w90(w90)
     scf_id = wannier_lineage.scf_id(parent)
     if not scf_id:
@@ -248,8 +249,12 @@ def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagno
         if normalize(wannier.labels) != normalize(dft[index].labels):
             raise ValueError('DFT 与 Wannier90 的高对称路径标签不一致，不能叠加')
         mapped = remap_channel_to_ticks(wannier, dft[index])
+        from matplotlib import font_manager
+        available={font.name for font in font_manager.fontManager.ttflist}
+        family=next((name for name in ('PingFang SC','Noto Sans CJK SC','Microsoft YaHei','Arial Unicode MS','SimHei','WenQuanYi Zen Hei') if name in available),None)
+        title_font=font_manager.FontProperties(family=family) if family else None
         plot_compare([dft[index]], [wannier], directory / 'comparison', emin, emax,
-                     ['.png', '.svg'], 'DFT–Wannier band comparison')
+                     ['.png', '.svg'], title.strip() if title else 'DFT–Wannier band comparison',title_font=title_font)
         with (directory / 'curves.csv').open('w', newline='') as stream:
             writer = csv.writer(stream)
             writer.writerow(['method', 'spin', 'band', 'k_index', 'path_x_A^-1', 'energy_relative_eV'])
@@ -269,10 +274,12 @@ def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagno
         except (ValueError, OSError) as exc:
             pyw90 = {'status': 'FAILED', 'reason': str(exc)[:500]}
         receipt = {'schema': 'fpilot.wannier-band-comparison.v1', 'id': identifier,
-                   'project_id': project_id, 'wannier_attempt_id': wannier_attempt_id,
+                   'project_id': project_id, 'title':title.strip() if title else None, 'wannier_attempt_id': wannier_attempt_id,
                    'wannier_plot_attempt_id': output_record['id'] if output_record['id'] != wannier_attempt_id else None,
                    'band_attempt_id': band_attempt_id, 'scf_attempt_id': scf_id,
                    'seed': seed, 'fermi_eV': fermi, 'energy_window_eV': [emin, emax],
+                   **wannier_execution.window_metadata(bundle),
+                   'energy_reference':bundle.get('energy_reference',{}),'win_sha256':bundle.get('win_sha256'),'input_reason':bundle.get('input_reason'),
                    'sources': sources, 'files': ['comparison.png', 'comparison.svg', 'curves.csv'],
                    'pyw90_diagnostic': pyw90,'prepare_seconds':prepare_seconds,
                    'remote_requests':sum(e.get('ssh_requests',0) for e in timings),'timings':timings,

@@ -19,6 +19,7 @@ type Props={
   onSharedPotcar:NonNullable<Parameters<typeof InputPanel>[0]['onSharedPotcar']>;
   onNumWann:(nodeId:string,value:string)=>void;
   onProjections:(nodeId:string,value:string)=>void;
+  onWannierDraft:(nodeId:string,key:string,value:import('./wannierDraft').WannierDraft)=>void;
   onWindowChange:(value:WindowDraft)=>void;onWindowAdopt:(value:WindowAdoption)=>void;
   onScanDraft:NonNullable<Parameters<typeof ScanPanel>[0]['onDraft']>;
   onReview:(bundleId?:string)=>void;onConfigure:()=>void;onResults:(nodeId?:string)=>void;
@@ -33,7 +34,7 @@ export default function CalculationWorkspace(props:Props) {
   // Keep the configuration mounted while reviewing a run: channel drafts and
   // review state belong to this exact project/node, not a new page instance.
   if(view==='run'&&!visitedRun)setVisitedRun(true);
-  if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
+  if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   if(node.data.kind==='scan')return <ScanPanel onWindowChange={props.onWindowChange} onWindowAdopt={props.onWindowAdopt} onSource={value=>props.onSource(nodeId,value)} project={project} scanNode={node} onDraft={props.onScanDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   return <div className="calculation-workspace">
     <div hidden={view!=='config'} className="configuration-body">

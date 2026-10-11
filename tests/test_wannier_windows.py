@@ -88,6 +88,46 @@ class WindowTests(unittest.TestCase):
             case.update(attempt_id=attempt,state='COMPLETED')
         batch['state']='COMPLETE';return scans.save(batch)
 
+    def draft_preview(self,search,win=None):
+        bundle={**self.bundle,'win':win or WIN}
+        draft={'parent_id':bundle['parent_attempt_id'],'alias':'jutai-1','seed':'wannier90','win':bundle['win'],'energy_reference':self.reference}
+        with patch.object(w90,'configuration_draft',return_value=bundle):
+            return scans.preview(self.project,'scan','w',mode=windows.MODE,window_search=search,source_draft=draft)
+
+    def test_draft_any_boundary_and_full_candidate_errors(self):
+        report=self.draft_preview({'boundary':'dis_win_min','values':[-3,1,2]})
+        self.assertEqual(report['schema'],'fpilot.wannier90-window-scan.v2')
+        self.assertIsNone(report['source_frozen_id']);self.assertEqual(len(report['cases']),3)
+        self.assertEqual(report['cases'][0]['counts']['outer_counts'],[3,3])
+        self.assertFalse(report['ready']);self.assertTrue(report['cases'][1]['errors'])
+        for c in report['cases']:self.assertEqual(c['relative_windows']['dis_win_max'],3)
+
+    def test_draft_missing_defaults_and_frozen_activation(self):
+        source='\n'.join(line for line in WIN.splitlines() if not line.startswith('dis_'))+'\n'
+        report=self.draft_preview({'boundary':'dis_win_max','values':[3]},source)
+        case=report['cases'][0];self.assertTrue(report['ready']);self.assertFalse(case['counts']['frozen_enabled'])
+        self.assertEqual(case['absolute_windows']['dis_win_min'],-2)
+        self.assertIsNone(case['absolute_windows']['dis_froz_max'])
+        self.assertEqual(case['counts']['frozen_counts'],[0,0])
+        with self.assertRaisesRegex(ValueError,'先设置'):self.draft_preview({'boundary':'dis_froz_min','values':[-1]},source)
+
+    def test_draft_ranges_bound_and_prepare_immutable_cases(self):
+        from backend.wannier_scan_drafts import values
+        self.assertEqual(values({'start':-1,'end':-2,'step':-0.5}),[-1,-1.5,-2])
+        for search in ({'start':0,'end':100,'step':1},{'values':[float('nan')]},{'start':1,'end':0,'step':1}):
+            with self.assertRaises(ValueError):values(search)
+        bundle=self.bundle;draft={'parent_id':bundle['parent_attempt_id'],'alias':'jutai-1','seed':'wannier90','win':WIN,'energy_reference':self.reference}
+        search={'boundary':'dis_froz_max','values':[0.5,1]}
+        with patch.object(w90,'configuration_draft',return_value=bundle):
+            report=scans.preview(self.project,'scan','w',mode=windows.MODE,window_search=search,source_draft=draft)
+            batch=scans.freeze(self.project,'scan','w',[],'draft test',report['definition_hash'],windows.MODE,None,search,draft)
+        self.assertEqual(batch['schema'],'fpilot.wannier90-window-scan.v2')
+        self.assertNotEqual(batch['cases'][0]['bundle_id'],batch['cases'][1]['bundle_id'])
+        for case in batch['cases']:
+            frozen=w90.configuration(case['bundle_id']);self.assertEqual(frozen['scan_case_id'],case['id'])
+            self.assertEqual(frozen['execution_scope'],'scan')
+            self.assertNotIn('id',frozen)
+
     def test_single_edge_and_no_matrix_hash_cache(self):
         report=self.preview();self.assertEqual(report['case_count'],5)
         for c in report['cases']:

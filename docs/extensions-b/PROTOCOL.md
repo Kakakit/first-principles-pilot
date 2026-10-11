@@ -24,7 +24,7 @@
 | `sources.min/max` | 1–8 个来源，按用户选择顺序排列 |
 | `inputs` | 每个来源需要的角色；包含 `role/title/names/max_bytes`，可选 `required`（默认 true） |
 | `evidence` | 所需证据，如 `COMPLETED`、`vasp_timing`、`ediff_reached`；布尔证据必须严格为 true |
-| `execution` | 支持 `local`、`ssh`、`scheduler`，以及 CLI 超时；可选 `preferred_location`（默认本机，须为支持位置） |
+| `execution` | 新运行支持 `local`、`ssh`，以及 CLI 超时；旧 `scheduler` 声明只供历史解析，不赋予执行能力；可选 `preferred_location`（默认本机，须为支持位置） |
 | `dependencies` | doctor 要检查的 Python 模块 |
 | `options_schema`、`ui_schema` | object JSON Schema 与 RJSF 展示设置；只接受本 schema 内 `$ref` |
 | `presentation`（可选） | `{entrypoint:"scripts/presentation.py"}`，包内独立展示整理 CLI；旧扩展缺省使用基础表格/曲线 |
@@ -61,13 +61,13 @@ sources 是宿主冻结的来源摘要，包含具体 attempt、节点、主机�
 
 首批提供体积/元素统计、普通空间对称性、配位多面体畸变、LCALCPOL 单结果及双结果分析。后三者薄封装包内既有算法。对称性保留三个 symprec 容差，不分析磁空间群。极化比较按来源 2−来源 1 计算，保留原始差和极化量子约化；它不能单凭两个端点证明同分支或绝缘路径，科学验证保持 INSUFFICIENT。
 
-## 本机、SSH 与调度运行
+## 本机与服务器直接命令行
 
-界面按“本地运行 / 服务器运行”组织，一个扩展可支持两边；仍由 execution.locations 和 preferred_location 声明能力和默认位置，不新增互斥类型。本地使用“本地默认 Python”，未配置时沿用工作台解释器。每台服务器使用原 runtimes 登记作为服务器默认环境。扩展可按本地或具体服务器单独指定 Python；ssh 与 scheduler 共用该服务器覆盖。覆盖优先于默认，恢复默认会清除覆盖。环境配置保存在本机数据的 extensions-v2/runtime-bindings.json，不进入扩展包或 GitHub。
+界面按“本地运行 / 服务器运行”组织，一个扩展可支持两边；仍由 execution.locations 和 preferred_location 声明能力和默认位置，不新增互斥类型。本地使用“本地默认 Python”，未配置时沿用工作台解释器。每台服务器使用原 runtimes 登记作为服务器默认环境。扩展可按本地或具体服务器单独指定 Python；服务器直接命令行使用该服务器覆盖。覆盖优先于默认，恢复默认会清除覆盖。环境配置保存在本机数据的 extensions-v2/runtime-bindings.json，不进入扩展包或 GitHub。
 
 环境选择只影响扩展子进程，不改变工作台启动环境。直接调用 Python 绝对路径，[无需 activate](https://docs.python.org/3/library/venv.html#how-venvs-work)。不自动安装、升级或创建环境。不存在的覆盖路径明确失败，不能静默回退。来源 attempt 的单个文件仅经受控工具回传，必须是已知大小、非空、普通文件且不超过 10 MiB；大文件应选择远端运行。草稿结构保存独立副本。本机 run 超时停止整个独立子进程组，失败保留日志。
 
-远端运行时登记已有 SSH 别名、Python 绝对路径和工作区，不创建环境。SSH 可以直接执行扩展并等待，节点/核数可留空；只有声明 scheduler 并选择调度的扩展使用 PBS/Slurm。TB2J 默认 SSH + 来源服务器已有 Python，无调度节点检测或调度核数预算。预览绑定来源、选项、包版本和运行时，10 分钟内点击“按此来源与脚本运行”。调度派发前核对实时容量和额度；资源不足等待，离线或配置错误报错。
+远端运行时登记已有 SSH 别名、Python 绝对路径和工作区，不创建环境。SSH 直接执行扩展，新入口不提供调度、节点、核数、时限资源表单。大型计算由计算节点与脚本管理。TB2J 默认 SSH + 来源服务器已有 Python，无调度节点检测或调度核数预算。预览绑定来源、选项、包版本和运行时，10 分钟内点击“按此来源与脚本运行”。新调度预览与派发请求拒绝，未启动的旧调度预览失效；历史已启动分析保留只读核查。
 
 远端独立目录位于 `<remote_workspace_root>/analyses/<analysis_id>`。原计算文件只读，使用普通独立复制并核对源文件大小/修改时间和目标大小，不建立可写硬链接、不扫描大文件 SHA。此策略不声称内容完全一致。来源元数据变化使准备失败。
 
@@ -81,12 +81,12 @@ doctor → check → run 全程使用同一解释器。创建分析时冻结实�
 - `PUT /api/extension-host/runtimes/local` 接收 `{python:"/absolute/python"}`；`python:null` 恢复工作台解释器。
 - 原 `PUT /api/extension-host/runtimes` 的服务器登记字段保持不变。
 - `PUT /api/extension-host/packages/{id}/runtime` 接收 `{scope:"local",python:"/absolute/python"}`，或 `{scope:"remote",alias:"source-server",python:"/absolute/python"}`；python:null 清除此范围的覆盖。
-- `POST /api/extension-host/packages/{id}/doctor` 可接收 `{location:"local"}` 或 `{location:"ssh",alias:"source-server"}`（也支持 scheduler）。返回 runtime 和 doctor；无请求体的旧调用仍检查所选本地默认/覆盖环境。
+- `POST /api/extension-host/packages/{id}/doctor` 可接收 `{location:"local"}` 或 `{location:"ssh",alias:"source-server"}`（新运行仅 local/ssh）。返回 runtime 和 doctor；无请求体的旧调用仍检查所选本地默认/覆盖环境。
 - check、preview、analyses 可携带 `runtime_python`；与当前解析路径不符时拒绝旧选择。远端预览继续绑定整个运行配置；本地预览也可返回 preview_id，提交时若携带则核对冻结绑定。旧本地直接运行请求保持兼容。
 
-脚本顺序为 doctor→check→run，记录 doctor.json/check.json、日志和原子 exit.json；doctor/check 最多 30/60 秒，run 使用清单超时，超时停止子进程组并写退出码 124。调度器另受用户 walltime 限制。SSH 直接运行先在原分析目录独占保留 launch.once，再由选定 Python 启动脱离连接的持久监督进程；仅短时等待启动回执，后续按 PID、启动时钟与系统启动标记核对精确进程，排除 PID 复用。超时停止该监督树并写退出回执。连接中断不会重跑。旧分析缺少 exit.json 时，仅在成功 CLI 回执的 result_file 精确对应原目录且结果协议有效时恢复结果，记录 wrapper_exit_recorded=false，不补造退出码；其他情况保留 UNKNOWN。调度器提前终止且没有足够结束证据也保持 UNKNOWN，只核对原目录/精确 job ID，不重投。缺依赖、输入不适用、非零退出分别记 FAILED、NOT_APPLICABLE、FAILED。
+脚本顺序为 doctor→check→run，记录 doctor.json/check.json、日志和原子 exit.json；doctor/check 最多 30/60 秒，run 使用清单超时，超时停止子进程组并写退出码 124。SSH 直接运行先在原分析目录独占保留 launch.once，再由选定 Python 启动脱离连接的持久监督进程；仅短时等待启动回执，后续按 PID、启动时钟与系统启动标记核对精确进程，排除 PID 复用。超时停止该监督树并写退出回执。连接中断不会重跑。旧分析缺少 exit.json 时，仅在成功 CLI 回执的 result_file 精确对应原目录且结果协议有效时恢复结果，记录 wrapper_exit_recorded=false，不补造退出码；其他情况保留 UNKNOWN。调度器提前终止且没有足够结束证据也保持 UNKNOWN，只核对原目录/精确 job ID，不重投。缺依赖、输入不适用、非零退出分别记 FAILED、NOT_APPLICABLE、FAILED。
 
-每个分析返回 analysis_id，通过独立 API 读取状态/历史/产物。文件锁和派发前持久状态防止 API/worker 重复执行；scheduler 在途与 UNKNOWN 占计算的同一额度。恢复读取原 job.id、exit.json 和精确队列状态；qstat/squeue 消失或 exit 0 单独都不能证明分析产物有效。小产物经受控脚本逐文件回传，超过 10 MiB 的产物留在远端并显示路径。
+每个分析返回 analysis_id，通过独立 API 读取状态/历史/产物。文件锁和派发前持久状态防止 API/worker 重复执行；历史 scheduler 在途与 UNKNOWN 继续按原记录保留额度，不能重投。恢复读取原 job.id、exit.json 和精确队列状态；qstat/squeue 消失或 exit 0 单独都不能证明分析产物有效。小产物经受控脚本逐文件回传，超过 10 MiB 的产物留在远端并显示路径。
 
 ## 生命周期与依赖选择
 

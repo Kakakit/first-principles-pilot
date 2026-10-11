@@ -59,6 +59,21 @@ PARAMETERS = {
 }
 PARAMETER_CHOICES = {'restart': ('default', 'wannierise', 'plot', 'transport')}
 WINDOW_TAGS = ('dis_win_min', 'dis_win_max', 'dis_froz_min', 'dis_froz_max')
+PARAMETER_GROUPS = {
+    'main': (*WINDOW_TAGS, 'restart', 'num_iter', 'dis_num_iter'),
+    'convergence': ('conv_window','conv_tol','dis_conv_window','dis_conv_tol','dis_mix_ratio','guiding_centres','use_ws_distance'),
+    'algorithm': ('num_cg_steps','precond','trial_step','fixed_step','num_dump_cycles','num_print_cycles'),
+    'output': ('write_hr','write_xyz','write_tb','write_u_matrices'),
+}
+PARAMETER_HELP = {
+    'conv_tol': '仅 conv_window > 1 时启用局域化收敛判据。',
+    'conv_window': '大于 1 才启用判据；未设置时按 num_iter 运行，结束不等于已证实收敛。',
+    'guiding_centres': '需要显式 projections；不自动修改来源投影。',
+    'restart': '需要同一模型 .chk；VASP 接口新局域化应删除此项。已有模型使用结果中的重绘入口。',
+    'dis_froz_max': '未设置时不启用冻结窗。',
+    'dis_froz_min': '启用冻结窗但未设置下界时，使用外窗下界。',
+    'trial_step': '与 fixed_step 互斥。', 'fixed_step': '与 trial_step 互斥。',
+}
 
 
 def require_fresh_interface_win(win):
@@ -71,7 +86,9 @@ def parameter_catalog():
     official, _ = win_contract.official_tags()
     if not set(PARAMETERS).issubset(official):
         raise ValueError('Wannier90 参数目录与官方 tag 注册表不一致')
-    return [{'tag':name, 'label':label, 'type':kind, 'unit':unit, **({'choices': list(PARAMETER_CHOICES[name])} if name in PARAMETER_CHOICES else {})}
+    return [{'tag':name, 'label':label, 'type':kind, 'unit':unit,
+             'group':next(group for group,tags in PARAMETER_GROUPS.items() if name in tags),
+             'help':PARAMETER_HELP.get(name,''), **({'choices': list(PARAMETER_CHOICES[name])} if name in PARAMETER_CHOICES else {})}
             for name,(label,kind,unit) in PARAMETERS.items()]
 
 
@@ -80,44 +97,82 @@ def parameter_values(win):
     return {name:win_contract._first_value(document,name) or '' for name in PARAMETERS}
 
 
-def edit_win(win, changes, fermi_eV=None):
+def _parameter_value(name, raw):
+    value=raw.strip()
+    kind = PARAMETERS[name][1]
+    if kind == 'boolean':
+        if value.lower() not in ('true','false','.true.','.false.','t','f'):
+            raise ValueError(name + ' 只能是 true 或 false')
+        value = '.true.' if value.lower() in ('true','.true.','t') else '.false.'
+    elif kind == 'enum':
+        value = value.lower()
+        if value not in PARAMETER_CHOICES[name]:
+            raise ValueError(name + ' 只能是 ' + ', '.join(PARAMETER_CHOICES[name]))
+    elif kind.startswith('integer'):
+        if not re.fullmatch(r'[+-]?\d+', value):
+            raise ValueError(name + ' 必须是整数')
+        n = int(value)
+        if kind == 'integer_positive' and n < 1 or kind == 'integer_nonnegative' and n < 0 or kind == 'integer_window' and n < -1:
+            raise ValueError(name + ' 超出允许范围')
+    else:
+        try: n = float(value.replace('D','E').replace('d','e'))
+        except ValueError: raise ValueError(name + ' 必须是有限数值') from None
+        if not math.isfinite(n) or kind == 'positive' and n <= 0 or kind == 'ratio' and not 0 < n <= 1:
+            raise ValueError(name + ' 超出允许范围')
+    return value
+
+
+def edit_win(win, changes, fermi_eV=None, remove=None, source_win=None):
     if not isinstance(changes, dict) or set(changes) - set(PARAMETERS):
         raise ValueError('包含未登记的 Wannier90 参数')
+    remove = [] if remove is None else remove
+    if not isinstance(remove,list) or any(not isinstance(tag,str) or tag not in PARAMETERS for tag in remove) or len(set(remove))!=len(remove) or set(remove)&set(changes):
+        raise ValueError('删除参数无效、重复或与修改冲突')
+    original = win
+    document = win_contract.parse_win(win)
+    lines = list(document.lines)
+    removed = []
+    for tag in remove:
+        for entry in document.scalars.get(tag,[]):
+            raw=lines[entry.line];comment=re.search(r'[!#].*',raw)
+            lines[entry.line]=(comment.group(0)+ ('\r\n' if raw.endswith('\r\n') else '\n')) if comment else ''
+        if document.occurrences(tag): removed.append({'action':'remove','name':tag,'kind':'scalar'})
+    win=''.join(lines)
     document = win_contract.parse_win(win)
     request = {'schema':win_contract.WIN_REQUEST_SCHEMA, 'add':{}, 'replace':{}}
     for name, raw in changes.items():
         if not isinstance(raw, str) or not raw.strip() or '\n' in raw or '\r' in raw:
             raise ValueError(name + ' 需要单行参数值')
         value = raw.strip()
-        kind = PARAMETERS[name][1]
-        if kind == 'boolean':
-            if value.lower() not in ('true','false','.true.','.false.'):
-                raise ValueError(name + ' 只能是 true 或 false')
-            value = '.true.' if 'true' in value.lower() else '.false.'
-        elif kind == 'enum':
-            value = value.lower()
-            if value not in PARAMETER_CHOICES[name]:
-                raise ValueError(name + ' 只能是 ' + ', '.join(PARAMETER_CHOICES[name]))
-        elif kind.startswith('integer'):
-            if not re.fullmatch(r'[+-]?\d+', value):
-                raise ValueError(name + ' 必须是整数')
-            n = int(value)
-            if kind == 'integer_positive' and n < 1 or kind == 'integer_nonnegative' and n < 0 or kind == 'integer_window' and n < -1:
-                raise ValueError(name + ' 超出允许范围')
-        else:
-            try: n = float(value)
-            except ValueError: raise ValueError(name + ' 必须是有限数值') from None
-            if not math.isfinite(n) or kind == 'positive' and n <= 0 or kind == 'ratio' and not 0 < n <= 1:
-                raise ValueError(name + ' 超出允许范围')
+        value = _parameter_value(name, raw)
         if name in WINDOW_TAGS and fermi_eV is not None:
             if not isinstance(fermi_eV, (int, float)) or not math.isfinite(fermi_eV):
                 raise ValueError('费米能必须是有限数值')
-            value = format(float(value) + fermi_eV, '.12g')
+            value = format(float(value.replace('D','E').replace('d','e')) + fermi_eV, '.12g')
         target = 'replace' if document.occurrences(name) else 'add'
         request[target][name] = value
     edited, audit = win_contract.merge_win(win, request)
-    _checked_win(win, edited)
-    return {'win':edited, 'changes':audit, 'parameters':parameter_values(edited)}
+    _checked_win(source_win if source_win is not None else original, edited)
+    return {'win':edited, 'changes':removed+audit, 'parameters':parameter_values(edited)}
+
+
+def relative_window_values(win, fermi_eV, supplied=None):
+    values=parameter_values(win)
+    relative={tag:float(values[tag].replace('D','E').replace('d','e'))-fermi_eV for tag in WINDOW_TAGS if values[tag]}
+    if not all(math.isfinite(value) for value in relative.values()):raise ValueError('相对能窗参数无效')
+    for tag,value in (supplied or {}).items():
+        if tag not in relative or type(value) not in (int,float) or not math.isfinite(value) or not math.isclose(relative[tag],value,abs_tol=1e-7):
+            raise ValueError(tag+' 相对值与最终 .win 绝对值不一致')
+    return relative
+
+
+def window_metadata(bundle):
+    """Explicit boundaries from executed text, independent of old form caches."""
+    values=parameter_values(bundle.get('win',''))
+    absolute={tag:float(values[tag].replace('D','E').replace('d','e')) for tag in WINDOW_TAGS if values[tag]}
+    fermi=(bundle.get('energy_reference') or {}).get('fermi_eV')
+    return {'absolute_windows':absolute,
+            'relative_windows':relative_window_values(bundle['win'],fermi) if fermi is not None and bundle.get('win') else {}}
 
 
 def source_names(seed, win_name=None):
@@ -300,6 +355,8 @@ def _checked_win(source, edited):
     errors = win_contract.validate_win(edited)
     if errors:
         raise ValueError('.win 审查未通过：' + json.dumps(errors, ensure_ascii=False)[:1500])
+    for tag,value in parameter_values(edited).items():
+        if value:_parameter_value(tag,value)
     before, after = win_contract.parse_win(source), win_contract.parse_win(edited)
     official_scalars, official_blocks = win_contract.official_tags()
     for name, entries in after.scalars.items():
@@ -377,13 +434,8 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
     if not isinstance(energy_reference, dict) or energy_reference.get('outcar_sha256') != actual_reference['outcar_sha256'] or not math.isclose(
             float(energy_reference.get('fermi_eV', float('nan'))), actual_reference['fermi_eV'], abs_tol=1e-9):
         raise ValueError('VASP-Wannier OUTCAR 能量参考已变化，请重新读取并设置能窗')
-    relative_windows = relative_windows or {}
+    relative_windows = relative_window_values(win, actual_reference['fermi_eV'], relative_windows)
     actual_values = parameter_values(win)
-    for tag, relative in relative_windows.items():
-        if tag not in WINDOW_TAGS or not isinstance(relative, (int, float)) or not math.isfinite(relative):
-            raise ValueError('相对能窗参数无效')
-        if not actual_values[tag] or not math.isclose(float(actual_values[tag]), relative + actual_reference['fermi_eV'], abs_tol=1e-7):
-            raise ValueError(tag + ' 相对值与最终 .win 绝对值不一致')
     script, script_source = _render_script(config, resource['profile'], template_id)
     script = ex.with_exit_trap(script)
     root = remote_paths.normalize_workspace_root(config.get('remote_workspace_root'))
@@ -692,7 +744,7 @@ def configuration(key):
     return json.loads(raw)
 
 
-def freeze_configuration(project,node_id,parent_id,alias,input_reason,win,seed=SEED,energy_reference=None,relative_windows=None,band_path=None):
+def configuration_draft(project,node_id,parent_id,alias,input_reason,win,seed=SEED,energy_reference=None,relative_windows=None,band_path=None):
     require_fresh_interface_win(win)
     from . import recycle
     recycle.assert_available('projects',project['id'],{'parent_attempt_id':parent_id})
@@ -713,13 +765,8 @@ def freeze_configuration(project,node_id,parent_id,alias,input_reason,win,seed=S
     if not isinstance(energy_reference, dict) or energy_reference.get('outcar_sha256') != actual_reference['outcar_sha256'] or not math.isclose(
             float(energy_reference.get('fermi_eV', float('nan'))), actual_reference['fermi_eV'], abs_tol=1e-9):
         raise ValueError('VASP-Wannier OUTCAR 能量参考已变化，请重新读取并设置能窗')
-    relative_windows = relative_windows or {}
+    relative_windows = relative_window_values(win, actual_reference['fermi_eV'], relative_windows)
     actual_values = parameter_values(win)
-    for tag, relative in relative_windows.items():
-        if tag not in WINDOW_TAGS or not isinstance(relative, (int, float)) or not math.isfinite(relative):
-            raise ValueError('相对能窗参数无效')
-        if not actual_values[tag] or not math.isclose(float(actual_values[tag]), relative + actual_reference['fermi_eV'], abs_tol=1e-7):
-            raise ValueError(tag + ' 相对值与最终 .win 绝对值不一致')
     bundle={'schema':'fpilot.wannier90-frozen-bundle.v1','project_id':project['id'],'node_id':node_id,'project':project,'alias':alias,
             'parent_attempt_id':parent_id,'source_path':source['source_path'],'source_files':source['files'],
             'source_win_name':source['win_source_name'],'source_win_sha256':source['files'][source['win_source_name']]['sha256'],
@@ -727,6 +774,12 @@ def freeze_configuration(project,node_id,parent_id,alias,input_reason,win,seed=S
             'spinors':source['spinors'],'seed':seed,'input_reason':input_reason.strip(),'energy_reference':actual_reference,
             'relative_windows':relative_windows,'absolute_windows':{tag:actual_values[tag] for tag in WINDOW_TAGS if actual_values[tag]},
             'band_path':band_path,'created_at':ex.now()}
+    return bundle
+
+
+def freeze_configuration(project,node_id,parent_id,alias,input_reason,win,seed=SEED,energy_reference=None,relative_windows=None,band_path=None):
+    from . import recycle
+    bundle=configuration_draft(project,node_id,parent_id,alias,input_reason,win,seed,energy_reference,relative_windows,band_path)
     raw=json.dumps(bundle,ensure_ascii=False,sort_keys=True).encode()
     key=_sha(raw)
     from .inputs import put_file
@@ -741,7 +794,7 @@ def configurations(project_id,node_id):
     for path in (ROOT/'wannier-bundles').glob('*.json'):
         item=json.loads(path.read_text())
         if item.get('project_id')==project_id and item.get('node_id')==node_id and 'project' in item and not item.get('execution_scope') and not recycle.inactive('wannier-inputs',path.stem,item):
-            result.append({'id':path.stem,'seed':item['seed'],'alias':item['alias'],'input_reason':item['input_reason'],'created_at':item['created_at'],'parent_attempt_id':item.get('parent_attempt_id'),'relative_windows':item.get('relative_windows',{}),'absolute_windows':item.get('absolute_windows',{}),'energy_reference':item.get('energy_reference',{}),'spinors':item.get('spinors')})
+            result.append({'id':path.stem,'seed':item['seed'],'alias':item['alias'],'input_reason':item['input_reason'],'created_at':item['created_at'],'parent_attempt_id':item.get('parent_attempt_id'),'win_sha256':item.get('win_sha256'),'relative_windows':item.get('relative_windows',{}),'absolute_windows':item.get('absolute_windows',{}),'energy_reference':item.get('energy_reference',{}),'spinors':item.get('spinors')})
     return sorted(result,key=lambda x:(x['created_at'],x['id']),reverse=True)
 
 from .fast_prepare import batched as _batched_prepare

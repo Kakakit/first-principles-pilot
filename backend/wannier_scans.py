@@ -21,7 +21,7 @@ ORDER = [('outer','dis_win_max'),('outer','dis_win_min'),('frozen','dis_froz_max
 
 
 def is_window(batch):
-    return batch.get('schema') == SCHEMA
+    return batch.get('schema') in (SCHEMA,'fpilot.wannier90-window-scan.v2')
 
 
 def _remote(alias, action, request):
@@ -31,7 +31,7 @@ def _remote(alias, action, request):
     if not python:
         raise ValueError('该服务器缺少已有 Python 路径；请在设置 → 结果与扩展中登记远端运行环境')
     command = shlex.quote(python)+' -c '+shlex.quote(TOOL.read_text())+' '+shlex.quote(action)+' '+shlex.quote(scans.packed(request))
-    result = ex.ssh(alias, command, timeout=180, stdout_limit=32000)
+    result = ex.ssh(alias, command, timeout=180, stdout_limit=8*1024*1024)
     if result['exit_code'] or result.get('stdout_truncated'):
         raise ValueError('远端窗口检查/摘要失败：'+(result.get('stdout') or result.get('stderr',''))[-500:])
     try: value = json.loads(result['stdout'])
@@ -57,7 +57,7 @@ def _source(bundle, scope):
 
 def _selected(batch, case_id):
     recycle.assert_available('scans',batch['id'],batch)
-    if batch['state'] != 'COMPLETE': raise ValueError('本轮尚未结束；请等待后再创建下一轮')
+    if batch['state'] != 'COMPLETE' and not (batch.get('schema')=='fpilot.wannier90-window-scan.v2' and batch['state'] in ('PAUSED','BLOCKED')): raise ValueError('本轮尚未结束；请等待后再创建下一轮')
     case = next((c for c in batch['cases'] if c['id']==case_id),None)
     if not case or not case.get('attempt_id'): raise ValueError('请选择本轮已完成的候选')
     record = ex.get(case['attempt_id'])
@@ -67,7 +67,11 @@ def _selected(batch, case_id):
     return case, record
 
 
-def preview(project, scan_node_id, base_node_id, frozen_id, search):
+def preview(project, scan_node_id, base_node_id, frozen_id, search, source_draft=None):
+    if source_draft is not None:
+        if frozen_id:raise ValueError("草稿与旧冻结来源不能同时指定")
+        from .wannier_scan_drafts import preview as draft_preview
+        return draft_preview(project,scan_node_id,base_node_id,source_draft,search)
     validate_workspace({'activeId':project['id'],'projects':[project]})
     recycle.assert_available('projects',project['id'])
     nodes={n['id']:n for n in project['nodes']}
@@ -173,12 +177,19 @@ def preview(project, scan_node_id, base_node_id, frozen_id, search):
             'campaign_id':campaign,'round':previous['round']+1 if previous else 1,'project_snapshot':project}
 
 
-def freeze(project, scan_node_id, base_node_id, frozen_id, search, reason, expected_definition_hash=None):
+def freeze(project, scan_node_id, base_node_id, frozen_id, search, reason, expected_definition_hash=None, source_draft=None):
     if not isinstance(reason,str) or not reason.strip(): raise ValueError('请填写本轮测试目的')
-    report=preview(project,scan_node_id,base_node_id,frozen_id,search)
+    report=preview(project,scan_node_id,base_node_id,frozen_id,search,source_draft)
     if expected_definition_hash!=report['definition_hash']:raise ValueError('来源或候选定义已变化，请重新预览')
     if not report['ready']:raise ValueError(report['message'])
-    original={'id':frozen_id,**w90.configuration(frozen_id)}
+    original=report.pop('_draft_bundle',None)
+    if original is not None:
+        from .inputs import put_file
+        raw=scans.packed(original).encode();frozen_id=w90._sha(raw)
+        put_file(ROOT/'wannier-bundles'/(frozen_id+'.json'),raw)
+        report['source_frozen_id']=frozen_id
+        original={'id':frozen_id,**original}
+    else:original={'id':frozen_id,**w90.configuration(frozen_id)}
     batch_id=uuid.uuid4().hex;cases=[]
     snapshot=copy.deepcopy(original['project'])
     scan=next(n for n in project['nodes'] if n['id']==scan_node_id)
@@ -186,8 +197,8 @@ def freeze(project, scan_node_id, base_node_id, frozen_id, search, reason, expec
     snapshot['edges']=[e for e in snapshot['edges'] if e['target']!=scan_node_id]+[{'id':'window-source-'+scan_node_id,'source':base_node_id,'target':scan_node_id}]
     for c in report['cases']:
         case_id=scans.digest({'batch':batch_id,'windows':c['relative_windows']})[:24]
-        frozen={**original,'project':snapshot,'win':c['win'],'win_sha256':w90._sha(c['win'].encode()),'relative_windows':c['relative_windows'],
-                'absolute_windows':c['absolute_windows'],'execution_scope':scan_node_id,'scan_batch_id':batch_id,'scan_case_id':case_id,
+        frozen={**original,'project':snapshot,'win':c['win'],'win_sha256':w90._sha(c['win'].encode()),'relative_windows':w90.relative_window_values(c['win'],original['energy_reference']['fermi_eV']),
+                'absolute_windows':{tag:value for tag,value in w90.parameter_values(c['win']).items() if tag in w90.WINDOW_TAGS and value},'execution_scope':scan_node_id,'scan_batch_id':batch_id,'scan_case_id':case_id,
                 'window_source_frozen_id':frozen_id,'input_reason':reason.strip(),'created_at':ex.now()}
         frozen.pop('id',None)
         raw=json.dumps(frozen,ensure_ascii=False,sort_keys=True).encode();key=w90._sha(raw)
@@ -197,7 +208,7 @@ def freeze(project, scan_node_id, base_node_id, frozen_id, search, reason, expec
         cases.append({**c,'id':case_id,'bundle_id':key,'state':'COMPLETED' if reuse else 'PENDING',
                       'attempt_id':reuse['attempt_id'] if reuse else None,'attempt_history':[],'retry_count':0})
     batch={k:v for k,v in report.items() if k not in ('cases','project_snapshot','ready','message')}
-    batch.update(schema=SCHEMA,id=batch_id,campaign_id=report['campaign_id'] or batch_id,cases=cases,state='FROZEN' if report['new_case_count'] else 'COMPLETE',created_at=ex.now(),reason=reason.strip())
+    batch.update(schema=report.get('schema',SCHEMA),id=batch_id,campaign_id=report['campaign_id'] or batch_id,cases=cases,state='FROZEN' if report['new_case_count'] else 'COMPLETE',created_at=ex.now(),reason=reason.strip())
     batch['case_table_hash']=scans.digest([{k:c[k] for k in ('id','bundle_id','relative_windows','reuse')} for c in cases])
     return scans.save(batch)
 
@@ -284,7 +295,8 @@ def compare(batch, project_id, case_ids, band_attempt_id, dft_band_offset):
     if not is_window(batch) or batch['project_id']!=project_id:raise ValueError('批次不属于当前项目')
     recycle.assert_available('scans',batch['id'],batch)
     if type(dft_band_offset) is not int or dft_band_offset<0:raise ValueError('请指定本轮共同的 DFT 起始能带（从 1 计数）')
-    if not 1<=len(case_ids)<=5 or len(set(case_ids))!=len(case_ids):raise ValueError('请选择 1–5 个不同 case')
+    if not 1<=len(case_ids)<=64 or len(set(case_ids))!=len(case_ids):raise ValueError('请选择 1–64 个不同 case')
+    if not batch['search'].get('target'):raise ValueError('请在本批配置中填写可选的比较能量范围后再创建测试；已有结果可直接叠图')
     contract={'project_id':project_id,'band_attempt_id':band_attempt_id,'dft_band_offset':dft_band_offset,'target':batch['search']['target']}
     contract_file=ROOT/'window-comparisons'/(batch['campaign_id']+'.json')
     if contract_file.exists() and json.loads(contract_file.read_text()) != contract:

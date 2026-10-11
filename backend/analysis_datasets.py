@@ -19,7 +19,8 @@ MAX_BYTES = 10 * 1024 * 1024
 SOURCES = {'v2': ('analyses-v2', 'fpilot.analysis.v2', 'analyses'),
            'v1': ('analyses', 'fpilot.analysis-record.v1', 'local-analyses'),
            'local': ('analyses', 'fpilot.local-analysis.v1', 'local-analyses'),
-           'plot': ('plots', 'fpilot.local-plot.v1', 'plots')}
+           'plot': ('plots', 'fpilot.local-plot.v1', 'plots'),
+           'comparison': ('wannier-comparisons','fpilot.wannier-band-comparison.v1','comparisons')}
 
 
 def now():
@@ -49,7 +50,7 @@ def directory(key):
 def source_path(kind, key):
     if kind not in SOURCES or not isinstance(key, str) or not re.fullmatch(r'[a-f0-9]{32}', key):
         raise ValueError('分析来源标识无效')
-    return inside(ROOT, SOURCES[kind][0] + '/' + key + '/analysis.json')
+    return inside(ROOT, SOURCES[kind][0] + '/' + key + ('/record.json' if kind=='comparison' else '/analysis.json'))
 
 
 def read_json(path, max_bytes=MAX_BYTES):
@@ -116,21 +117,22 @@ def summary(kind, record, projects, attempts):
         sources = record.get('sources') or []
         names = [source.get('name') or '结构来源' for source in sources] if isinstance(sources, list) else []
     manifest = record.get('manifest') or record.get('extension') or {}
-    name = manifest.get('name') or ('极化比较' if record.get('kind') == 'polarization' else record.get('kind') or record.get('mode') or '历史分析')
+    name = ('DFT–Wannier 能带叠图' if kind=='comparison' else manifest.get('name')) or ('极化比较' if record.get('kind') == 'polarization' else record.get('kind') or record.get('mode') or '历史分析')
     result = record.get('result') or {}
     return {'source_kind': kind, 'source_id': record['id'], 'project_id': owner,
             'project_name': project.get('name') or '未关联项目', 'source_names': names,
             'source_attempt_ids': ids, 'analysis_name': name, 'analysis_version': manifest.get('version') or '未记录',
-            'created_at': record.get('created_at', ''), 'state': record.get('state'),
+            'created_at': record.get('created_at', ''), 'state': 'COMPLETED' if kind=='comparison' else record.get('state'),
             'summary': result.get('summary') or record.get('summary') or '',
             'warnings': result.get('warnings') or [], 'scientific_validation': record.get('scientific_validation') or 'NOT_PERFORMED',
-            'title': ' · '.join([project.get('name') or '未关联项目', '／'.join(names), name, record.get('created_at', '')[:19].replace('T', ' ')])[:500]}
+            'title': record.get('title') or ' · '.join([project.get('name') or '未关联项目', '／'.join(names), name, record.get('created_at', '')[:19].replace('T', ' ')])[:500]}
 
 
 def source_record(kind, key):
     record = read_json(source_path(kind, key))
-    if record.get('id') != key or record.get('schema') != SOURCES[kind][1] or record.get('state') != 'COMPLETED':
+    if record.get('id') != key or record.get('schema') != SOURCES[kind][1] or (kind!='comparison' and record.get('state') != 'COMPLETED'):
         raise ValueError('只能登记明确完成的对应分析结果')
+    if kind=='comparison' and (set(record.get('files',[]))!={'comparison.png','comparison.svg','curves.csv'} or not record.get('wannier_attempt_id') or not record.get('band_attempt_id')):raise ValueError('叠图缺少完整输出或任务来源记录')
     if recycle.inactive(SOURCES[kind][2], key, record):
         raise ValueError('原分析或项目已回收，请先恢复原记录')
     return record
@@ -140,7 +142,7 @@ def available(project_id=None):
     projects, attempts = context()
     rows = []
     for kind, (folder, schema, recycle_kind) in SOURCES.items():
-        for path in (ROOT / folder).glob('*/analysis.json'):
+        for path in (ROOT / folder).glob('*/record.json' if kind=='comparison' else '*/analysis.json'):
             try:
                 record = source_record(kind, path.parent.name)
                 item = summary(kind, record, projects, attempts)
@@ -172,7 +174,7 @@ def history_detail(kind, key):
                 if reason:
                     output.update(available=False, unavailable_reason=reason)
     item['analysis'] = record
-    outputs = record.get('outputs') or []
+    outputs = (record.get('files') if kind=='comparison' else record.get('outputs')) or []
     item['files'] = ([{'path': output['path'], 'media_type': output['media_type'], 'available': output.get('available', False),
                       'reason': output.get('unavailable_reason', '')} for output in outputs]
                      if kind == 'v2' else [{'path': name, 'media_type': mimetypes.guess_type(name)[0] or 'text/plain',
@@ -184,7 +186,7 @@ def history_output(kind, key, name):
     record = source_record(kind, key)
     if name == 'analysis.json':
         return source_path(kind, key), 'application/json'
-    if name not in record.get('outputs', []):
+    if name not in (record.get('files',[]) if kind=='comparison' else record.get('outputs', [])):
         raise ValueError('文件未在分析输出清单中声明')
     path = inside(source_path(kind, key).parent, name)
     if not path.is_file() or path.stat().st_size > MAX_BYTES:
@@ -241,6 +243,19 @@ def register(kind, source_id, title=None, note=''):
         item = summary(kind, record, projects, attempts)
         item.update(metadata(title if title is not None else item['title'], note))
         snapshot = copy.deepcopy(record)
+        if kind=='comparison':
+            attempt=attempts.get(record['wannier_attempt_id']) or {}
+            bundle_id=attempt.get('bundle_id');bundle={}
+            if isinstance(bundle_id,str) and re.fullmatch(r'[a-f0-9]{64}',bundle_id):
+                path=ROOT/'wannier-bundles'/(bundle_id+'.json')
+                if path.is_file() and path.stat().st_size<=MAX_BYTES:
+                    raw=path.read_bytes()
+                    if hashlib.sha256(raw).hexdigest()==bundle_id:bundle=json.loads(raw)
+            item['comparison_context']={k:record.get(k,bundle.get(k)) for k in ('absolute_windows','relative_windows','energy_reference','input_reason','win_sha256')}
+            if bundle.get('win') and bundle.get('energy_reference',{}).get('fermi_eV') is not None:
+                from .wannier_execution import window_metadata
+                item['comparison_context'].update(window_metadata(bundle))
+            item['comparison_context']['window_record_available']=bool(item['comparison_context']['win_sha256'])
         temporary = Path(tempfile.mkdtemp(prefix=key + '.', dir=base))
         files = []
         try:
@@ -284,12 +299,13 @@ def register(kind, source_id, title=None, note=''):
                     else:
                         item['warnings'] = [*item['warnings'], '交互展示文件不完整；已保留原始分析结果']
             else:
-                for name in record.get('outputs') or []:
+                for name in (record.get('files') if kind=='comparison' else record.get('outputs')) or []:
                     if name == 'analysis.json':
                         continue
                     copy_file(inside(original.parent, name), temporary, name, mimetypes.guess_type(name)[0] or 'text/plain', files)
                 if not any(file['available'] and file['path'] != 'analysis.json' for file in files):
                     raise ValueError('原分析没有可登记的本机结果文件')
+            if kind=='comparison' and any(not f['available'] for f in files):raise ValueError('叠图本机附件缺失或超限，无法完整登记；原记录保留')
             if original.read_bytes() != raw_before:
                 raise ValueError('登记期间原分析记录变化，请刷新后重新登记')
             item.update(id=key, schema='fpilot.analysis-dataset.v1', registered_at=now(),

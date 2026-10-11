@@ -8,6 +8,7 @@ test('manifest chooses its preferred location without an extension ID branch',()
  assert.equal(preferredLocation({execution:{locations:['ssh','local'],preferred_location:'ssh',timeout_seconds:300}}),'ssh');
  assert.equal(preferredLocation({execution:{locations:['local','ssh'],timeout_seconds:300}}),'local');
  assert.equal(preferredLocation({execution:{locations:['ssh'],timeout_seconds:300}}),'ssh');
+ assert.equal(preferredLocation({execution:{locations:['scheduler','ssh'],preferred_location:'scheduler',timeout_seconds:300}}),'ssh');
 });
 test('default runtime follows source server and never silently picks another host',()=>{
  assert.equal(sourceRuntime('source-host',{'other':{},'source-host':{}}),'source-host');

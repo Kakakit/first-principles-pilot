@@ -18,7 +18,7 @@ def call(function, *args, **kwargs):
 
 
 class Registration(BaseModel):
-    source_kind: Literal['v2', 'v1', 'local', 'plot']
+    source_kind: Literal['v2', 'v1', 'local', 'plot', 'comparison']
     source_id: str = Field(pattern=r'^[a-f0-9]{32}$')
     title: Optional[str] = Field(default=None, max_length=500)
     note: str = Field(default='', max_length=10000)

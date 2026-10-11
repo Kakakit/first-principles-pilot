@@ -28,7 +28,7 @@ def number(value):
     return result
 
 
-def validate_base(text):
+def validate_base(text, allow_defaults=False):
     # These modes select additional/non-energy states and need a different checker.
     for key in ('dis_froz_proj', 'dis_proj_min', 'dis_proj_max', 'dis_spheres_num', 'dis_spheres_first_wann'):
         value = scalar(text, key)
@@ -41,7 +41,7 @@ def validate_base(text):
     nw, nb = int(scalar(text, 'num_wann', '0')), int(scalar(text, 'num_bands', '0'))
     if not 0 < nw < nb:
         raise ValueError('能窗迭代要求 0 < num_wann < num_bands 的解缠输入')
-    windows = {key: number(scalar(text, key)) for key in KEYS}
+    windows = {key: number(scalar(text,key)) for key in KEYS if scalar(text,key) is not None} if allow_defaults else {key:number(scalar(text,key)) for key in KEYS}
     grid = [int(x) for x in scalar(text, 'mp_grid', '').split()]
     if len(grid) != 3 or any(x <= 0 for x in grid):
         raise ValueError('mp_grid 无效')
@@ -85,9 +85,17 @@ def check(request):
         if key == 'amn' and dimensions[2] != nw:
             raise ValueError('.amn 投影数与 num_wann 不一致')
     candidates = request['candidates']
-    if not isinstance(candidates, list) or not 1 <= len(candidates) <= 5:
-        raise ValueError('每轮需要 1–5 个候选')
-    windows = [{key: number(c[key]) for key in KEYS} for c in candidates]
+    limit=64 if request.get('allow_defaults') else 5
+    if not isinstance(candidates,list) or not 1 <= len(candidates) <= limit:
+        raise ValueError('候选数量超出允许范围')
+    if request.get('allow_defaults'):
+        windows=[]
+        for c in candidates:
+            w={key:number(value) for key,value in c.items() if key in KEYS and value is not None}
+            w.setdefault('dis_win_min',float('-inf'));w.setdefault('dis_win_max',float('inf'))
+            w['dis_froz_min']=w.get('dis_froz_min',w['dis_win_min']) if 'dis_froz_max' in w else None
+            w.setdefault('dis_froz_max',None);windows.append(w)
+    else:windows = [{key:number(c[key]) for key in KEYS} for c in candidates]
     counts = [[ [0]*nk, [0]*nk ] for _ in windows]
     seen = bytearray(nb*nk)
     energies = array('d', [0.0]) * (nb*nk)
@@ -106,7 +114,7 @@ def check(request):
             energies[index] = energy
             for w, (outer, frozen) in zip(windows, counts):
                 outer[k-1] += w['dis_win_min'] <= energy <= w['dis_win_max']
-                frozen[k-1] += w['dis_froz_min'] <= energy <= w['dis_froz_max']
+                frozen[k-1] += w['dis_froz_max'] is not None and w['dis_froz_min'] <= energy <= w['dis_froz_max']
     if total != nb*nk: raise ValueError('.eig 网格不完整，不能用平均态数替代')
     for k in range(nk):
         if any(energies[k*nb+b] > energies[k*nb+b+1] for b in range(nb-1)):
@@ -116,16 +124,21 @@ def check(request):
     rows = []
     for w, (outer, frozen) in zip(windows, counts):
         errors = []
-        if not w['dis_win_min'] <= w['dis_froz_min'] < w['dis_froz_max'] <= w['dis_win_max']:
-            errors.append('冻窗须包含于外窗且具有正宽度')
+        if not math.isfinite(w['dis_win_min']):w['dis_win_min']=min(energies)
+        if not math.isfinite(w['dis_win_max']):w['dis_win_max']=max(energies)
+        if w['dis_froz_min'] is not None and not math.isfinite(w['dis_froz_min']):w['dis_froz_min']=min(energies)
+        if w['dis_win_min'] >= w['dis_win_max']:errors.append('外窗下界必须小于上界')
+        if w['dis_froz_max'] is not None and not w['dis_win_min'] <= w['dis_froz_min'] <= w['dis_froz_max'] <= w['dis_win_max']:
+            errors.append('冻窗须包含于外窗且下界不大于上界')
         bad_outer = [i+1 for i, n in enumerate(outer) if n < nw]
         bad_frozen = [i+1 for i, n in enumerate(frozen) if n > nw]
         if bad_outer: errors.append('外窗态数不足，k 点 '+','.join(map(str,bad_outer[:8])))
         if bad_frozen: errors.append('冻窗态数超过 num_wann，k 点 '+','.join(map(str,bad_frozen[:8])))
         margin_o, margin_f = min(outer)-nw, nw-max(frozen)
-        rows.append({'errors':errors, 'outer_min':min(outer), 'outer_max':max(outer),
+        rows.append({'errors':errors, 'absolute_windows':w, 'frozen_enabled':w['dis_froz_max'] is not None, 'outer_min':min(outer), 'outer_max':max(outer),
                      'frozen_min':min(frozen), 'frozen_max':max(frozen),
                      'outer_margin':margin_o, 'disentanglement_margin':margin_f,
+                     'outer_counts':outer, 'frozen_counts':frozen,
                      'warnings':['存在等号边界；官方允许，请关注解缠余量'] if not errors and (margin_o == 0 or margin_f == 0) else []})
     return {'rows':rows, 'matrix_identity':before, 'num_kpts':nk}
 

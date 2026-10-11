@@ -151,6 +151,7 @@ def selected_input(role,source):
 
 
 def blockers(manifest,sources,location='local'):
+    if location not in ('local','ssh'):return ['扩展只支持本地或服务器直接命令行；大型计算请使用计算节点']
     reasons=[];bounds=manifest['sources']
     if not bounds['min']<=len(sources)<=bounds['max']:reasons.append(f"需要 {bounds['min']}–{bounds['max']} 个来源")
     if location not in manifest['execution']['locations']:reasons.append('清单不支持此运行位置')
@@ -228,9 +229,6 @@ def start(payload):
         binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
         if not approval or approval['binding']!=binding or (datetime.now(timezone.utc)-datetime.fromisoformat(approval['created_at'])).total_seconds()>600:raise ValueError('请重新预览当前来源、选项和运行环境')
         runtime=copy.deepcopy(runtime)
-        if location=='scheduler':
-            runtime['cores']=approval['resources']['selection']['requested_cores']
-            runtime['reason']=runtime['reason'] or '沿用用户已审阅脚本的核数，不扩大资源'
         if location!='local' and any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
     environment=p.doctor(receipt,refresh=True,python=runtime['python']) if location=='local' else None
     if environment is not None and not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
@@ -393,21 +391,10 @@ def _refresh(record):
 
 def _remote(record):
     assert_available('analyses',record['id'],record)
-    from . import execution_control as control
-    dest=directory(record['id']);cores=None
     if record['location']=='scheduler':
-        preview=remote.resource_preview(record['runtime']);record['resource_preview']=preview
-        if not preview['ready']:record.update(state='WAIT_RESOURCE',error=preview['reason']);save(record);return
-        cores=preview['selection']['requested_cores']
-        record['requested_cores']=cores
-        # Use the calculation dispatch transaction as the shared quota lock.
-        with closing(ex.db()) as connection:
-            connection.execute('BEGIN IMMEDIATE')
-            try:control.enforce_limits(connection,{'id':record['id'],'config':record['runtime']['config'],'profile':{'ppn':cores}})
-            except ValueError as exc:
-                record.update(state='WAIT_RESOURCE',error=str(exc));save(record);connection.commit();return
-            record.update(state='DISPATCHING',dispatch_started_at=now());save(record);connection.commit()
-    else:record.update(state='DISPATCHING',dispatch_started_at=now());save(record)
+        raise ValueError('旧扩展调度预览已失效；请选择本地或服务器直接命令行重新建立分析')
+    dest=directory(record['id']);cores=None
+    record.update(state='DISPATCHING',dispatch_started_at=now());save(record)
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
     text=remote.script(record['runtime'],record['runtime']['config'].get('remote_workspace_root','$HOME/230269265lht').rstrip('/')+'/analyses/'+record['id'],record['manifest']['entrypoint'],record['location'],cores,record['manifest']['execution']['timeout_seconds'])
     (dest/'launch.sh').write_text(text);record['script']=text
@@ -416,10 +403,7 @@ def _remote(record):
     # A crash from here must never resubmit, even if job.id hasn't arrived yet.
     record['submission_started']=True;save(record)
     assert_available('analyses',record['id'],record)
-    if record['location']=='scheduler':
-        record['job_id']=remote.submit(record);record.update(state='SUBMITTED');save(record)
-    else:
-        response=remote.direct(record);record['dispatch_receipt']=response;save(record);_refresh(record)
+    response=remote.direct(record);record['dispatch_receipt']=response;save(record);_refresh(record)
 
 
 def _execute(key):
@@ -488,7 +472,7 @@ def preview(payload):
         p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':{'ready':True}})
         return {'preview_id':key,'ready':True,'runtime':runtime,'reason':'使用选定本地解释器，在独立目录运行'}
     if any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
-    resources=remote.resource_preview(runtime) if location=='scheduler' else {'ready':True}
+    resources={'ready':True}
     if not resources['ready']:return resources
     key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
     p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':resources})

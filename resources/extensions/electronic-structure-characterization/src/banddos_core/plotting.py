@@ -97,7 +97,7 @@ def remap_channel_to_ticks(source: BandChannel, target: BandChannel) -> list[np.
     return mapped
 
 
-def plot_compare(dft: list[BandChannel], wannier: list[BandChannel], output: Path, emin: float, emax: float, formats: list[str], title: str | None = None) -> list[Path]:
+def plot_compare(dft: list[BandChannel], wannier: list[BandChannel], output: Path, emin: float, emax: float, formats: list[str], title: str | None = None, title_font=None) -> list[Path]:
     if len(dft) != len(wannier):
         raise ValueError("DFT and Wannier channel counts differ")
     apply_style()
@@ -122,7 +122,7 @@ def plot_compare(dft: list[BandChannel], wannier: list[BandChannel], output: Pat
         if i:
             ax.set_ylabel("")
     if title:
-        fig.suptitle(title)
+        fig.suptitle(title, fontproperties=title_font)
     fig.tight_layout()
     return save_figure(fig, output, formats)
 

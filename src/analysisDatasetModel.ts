@@ -1,8 +1,8 @@
 import type {Analysis} from './extensionModel';
-export type AnalysisKind='v2'|'v1'|'local'|'plot';
+export type AnalysisKind='v2'|'v1'|'local'|'plot'|'comparison';
 export type AnalysisRecord={id?:string;dataset_id?:string|null;dataset_recycled?:boolean;source_kind:AnalysisKind;source_id:string;project_id?:string|null;project_name:string;source_names:string[];analysis_name:string;analysis_version:string;created_at:string;registered_at?:string;title:string;note?:string;summary:string;scientific_validation:string;warnings:string[];source_deleted?:boolean};
 export type AnalysisFile={path:string;media_type:string;available:boolean;reason?:string;sha256?:string;size_bytes?:number};
-export type AnalysisDetail=AnalysisRecord&{analysis:Analysis|Record<string,any>;files:AnalysisFile[]};
+export type AnalysisDetail=AnalysisRecord&{analysis:Analysis|Record<string,any>;files:AnalysisFile[];comparison_context?:Record<string,unknown>};
 export const analysisKey=(row:AnalysisRecord)=>`${row.source_kind}:${row.source_id}`;
 export const openDataset=(id:string)=>window.dispatchEvent(new CustomEvent('fpilot:dataset',{detail:{id}}));
 export function filterAnalyses(rows:AnalysisRecord[],projectId:string,type:string,query:string){

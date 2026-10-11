@@ -69,6 +69,29 @@ class WannierExecutionTests(unittest.TestCase):
         self.assertAlmostEqual(float(changed['parameters']['dis_froz_min']),4.179381397)
         self.assertAlmostEqual(float(changed['parameters']['dis_froz_max']),7.179381397)
 
+    def test_remove_parameters_preserves_comments_and_owned_fields(self):
+        source=fixture_win()+'\nwrite_hr = true # keep explanation\nrestart=plot\n'
+        changed=w90.edit_win(source,{},remove=['write_hr','restart','num_iter'])
+        self.assertEqual(changed['parameters']['write_hr'],'')
+        self.assertEqual(changed['parameters']['num_iter'],'')
+        self.assertIn('# keep explanation',changed['win'])
+        w90.require_fresh_interface_win(changed['win'])
+        for tags in (['num_wann'],['spinors'],['kpoints'],['write_hr','write_hr']):
+            with self.assertRaises(ValueError):w90.edit_win(source,{},remove=tags)
+        with self.assertRaises(ValueError):w90.edit_win(source,{'write_hr':'true'},remove=['write_hr'])
+        self.assertEqual(w90.edit_win(changed['win'],{})['parameters']['write_hr'],'')
+
+    def test_final_raw_input_is_authoritative_and_checks_scalar_types(self):
+        source=fixture_win()
+        final=w90.edit_win(source,{'dis_win_min':'-3','dis_win_max':'4'},fermi_eV=6)['win']
+        final=final.replace('dis_win_max = 10','dis_win_max = 12')
+        self.assertEqual(w90.relative_window_values(final,6),{'dis_win_min':-3,'dis_win_max':6})
+        with self.assertRaisesRegex(ValueError,'最终 .win'):w90.relative_window_values(final,6,{'dis_win_max':4})
+        with self.assertRaisesRegex(ValueError,'整数'):w90.edit_win(source.replace('num_iter    = 20','num_iter = nonsense'),{},source_win=source)
+        with self.assertRaisesRegex(ValueError,'spinors'):w90.edit_win(source.replace('spinors = .true.','spinors = .false.'),{},source_win=source)
+        deleted=w90.edit_win(final,{},remove=['dis_win_max'])['win']
+        self.assertEqual(w90.relative_window_values(deleted,6),{'dis_win_min':-3})
+
     def test_all_supplied_scripts_render_without_body_whitelist(self):
         choices = w90.script_choices()
         self.assertEqual({item['alias'] for item in choices},

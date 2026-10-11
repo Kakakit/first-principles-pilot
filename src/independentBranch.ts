@@ -14,7 +14,7 @@ export function independentBranch(project:Project,nodeId:string):Project {
   const draft={...(n.data.inputDraft as Record<string,unknown>||{})};
   for(const key of Object.keys(draft))if(/attempt|source|hash|bundle|authorization|remote|probe/i.test(key))delete draft[key];
   const data={...structuredClone(n.data),inputDraft:draft,sourceDraft:{mode:'new',purpose:'charge',files:'charge'},stageSequence:index+2};
-  for(const key of Object.keys(data))if(/authorization|binding|attempt|result|prepared|chainState|execution_scope|remote/i.test(key))delete (data as Record<string,unknown>)[key];
+  for(const key of Object.keys(data))if(/authorization|binding|attempt|result|prepared|chainState|execution_scope|remote|wannierDrafts|activeWannierDraft|windowAdoption/i.test(key))delete (data as Record<string,unknown>)[key];
   return {...n,id:mapping.get(n.id)!,selected:false,data};
  });
  const kept=new Set(nodes.map(n=>n.id));

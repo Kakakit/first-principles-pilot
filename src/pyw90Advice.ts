@@ -13,7 +13,7 @@ export function candidateWindows(row:Windows):Windows{
   return Object.fromEntries(windowTags.filter(tag=>typeof row[tag]==='number'&&Number.isFinite(row[tag])).map(tag=>[tag,row[tag]]));
 }
 
-// Blank form fields retain the current .win value, as the existing apply action does.
+// An explicit blank removes the tag; absent fields still come from the final .win.
 export function draftWindows(parameters:Record<string,string>,win:string,fermi:number):Windows{
   const result:Windows={};
   for(const line of win.split('\n')){
@@ -22,7 +22,8 @@ export function draftWindows(parameters:Record<string,string>,win:string,fermi:n
   }
   for(const tag of windowTags){
     const raw=parameters[tag]?.trim();
-    if(raw){const value=Number(raw);if(!Number.isFinite(value))throw new Error(`${tag} 必须是有限的相对能量`);result[tag]=value;}
+    if(raw){const value=Number(raw.replace(/[dD]/,'e'));if(!Number.isFinite(value))throw new Error(`${tag} 必须是有限的相对能量`);result[tag]=value;}
+    else if(Object.hasOwn(parameters,tag))delete result[tag];
   }
   return result;
 }

@@ -319,6 +319,7 @@ class ScanRequest(BaseModel):
     mode: Literal['vasp','wannier90-window'] = 'vasp'
     frozen_id: Optional[str] = None
     window_search: Optional[dict] = None
+    source_draft: Optional[dict] = None
     reason: str = ''
     expected_definition_hash: Optional[str] = None
 
@@ -342,13 +343,13 @@ class ScanAuthorization(BaseModel):
 
 @app.post('/api/scans/preview')
 def scan_preview(payload: ScanRequest):
-    try: return scans.preview(payload.project,payload.scan_node_id,payload.base_node_id,payload.dimensions,payload.mode,payload.frozen_id,payload.window_search)
+    try: return scans.preview(payload.project,payload.scan_node_id,payload.base_node_id,payload.dimensions,payload.mode,payload.frozen_id,payload.window_search,payload.source_draft)
     except (ValueError,KeyError,TypeError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
 
 
 @app.post('/api/scans/freeze')
 def scan_freeze(payload: ScanRequest):
-    try: return scans.freeze(payload.project,payload.scan_node_id,payload.base_node_id,payload.dimensions,payload.reason,payload.expected_definition_hash,payload.mode,payload.frozen_id,payload.window_search)
+    try: return scans.freeze(payload.project,payload.scan_node_id,payload.base_node_id,payload.dimensions,payload.reason,payload.expected_definition_hash,payload.mode,payload.frozen_id,payload.window_search,payload.source_draft)
     except (ValueError,KeyError,TypeError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
 
 
@@ -593,6 +594,7 @@ def wannier_pyw90_window_check(payload: PyW90WindowCheck):
 
 
 class WannierCompareRequest(BaseModel):
+    title: Optional[str] = None
     project_id: str
     wannier_attempt_id: str
     band_attempt_id: str
@@ -754,7 +756,9 @@ def wannier_band_path_apply(payload: WannierBandPathApply):
 
 class WannierWinEdit(BaseModel):
     win: str
-    changes: dict[str, str]
+    changes: dict[str, str] = {}
+    remove: list[str] = []
+    source_win: Optional[str] = None
     fermi_eV: Optional[float] = None
 
 
@@ -771,7 +775,7 @@ def wannier_parameters():
 
 @app.post('/api/wannier90/win-edit')
 def wannier_win_edit(payload: WannierWinEdit):
-    try:return wannier_execution.edit_win(payload.win, payload.changes, payload.fermi_eV)
+    try:return wannier_execution.edit_win(payload.win, payload.changes, payload.fermi_eV, payload.remove, payload.source_win)
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 

@@ -97,11 +97,11 @@ class ExtensionHostTests(unittest.TestCase):
         self.install('lcalcpol-polarization-analysis');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True})
         sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('lcalcpol-polarization-analysis')['manifest'];self.assertIn('已完成运行：缺少 ediff_reached 证据',runs.blockers(m,sources))
         sources[0]['evidence']['ediff_reached']=True;sources[0]['files'][1]['size_bytes']=artifacts.MAX_PULL_BYTES+1
-        self.assertTrue(any('10 MiB' in s for s in runs.blockers(m,sources,'local')));self.assertFalse(runs.blockers(m,sources,'scheduler'))
+        self.assertTrue(any('10 MiB' in s for s in runs.blockers(m,sources,'local')));self.assertFalse(runs.blockers(m,sources,'ssh'));self.assertTrue(runs.blockers(m,sources,'scheduler'))
     def runtime(self,scheduler='pbs'):
         value={'alias':'jutai-1','python':sys.executable,'node':'node01','cores':2,'reason':'fixture','config':{'alias':'jutai-1','scheduler':scheduler,'queue':'batch','walltime':'00:10:00','remote_workspace_root':str(self.root/'230269265lht')}}
         p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':value});return value
-    def remote_payload(self,mode='scheduler'):
+    def remote_payload(self,mode='ssh'):
         self.runtime();self.install();payload=self.payload(location=mode,alias='jutai-1');self.stack.enter_context(patch.object(remote,'resource_preview',return_value={'ready':True,'selection':{'requested_cores':2},'probe':'fixture'}));payload['preview_id']=runs.preview(payload)['preview_id'];return payload
     def test_remote_preview_binding_rejects_later_changes(self):
         payload=self.remote_payload();payload['options']={'include_elements':False}
@@ -113,19 +113,22 @@ class ExtensionHostTests(unittest.TestCase):
             receipt=runs.preview(self.payload(location='ssh',alias='jutai-1'))
         self.assertTrue(receipt['ready']);self.assertIn('analyses/analysis-preview',receipt['script'])
         self.assertIn('doctor.json',receipt['script']);self.assertNotIn('#PBS',receipt['script']);probe.assert_not_called()
-    def test_scheduler_dispatch_exact_id_once_and_unknown_recovery(self):
-        payload=self.remote_payload();receipt=runs.start(payload);key=receipt['analysis_id']
-        with patch.object(remote,'stage',return_value='/workspace/analyses/'+key),patch.object(remote,'submit',side_effect=ValueError('no receipt')) as submit:
-            runs._execute(key);runs._execute(key);self.assertEqual(submit.call_count,1)
-        self.assertEqual(runs.get(key)['state'],'UNKNOWN')
+    def test_old_scheduler_unknown_only_recovers_original_receipt(self):
+        payload=self.remote_payload();key=runs.start(payload)['analysis_id']
+        record=runs.get(key);record.update(location='scheduler',state='UNKNOWN',submission_started=True,remote_dir='/workspace/analyses/'+key);runs.save(record)
         with patch.object(remote,'inspect',return_value={'job_id':'731.server','exit':None}),patch.object(remote,'queued',return_value=True),patch.object(remote,'submit') as submit:
             self.assertEqual(runs.refresh(key)['job_id'],'731.server');self.assertEqual(runs.get(key)['state'],'SUBMITTED');submit.assert_not_called()
         with closing(ex.db()) as db:
             with self.assertRaisesRegex(ValueError,'在途'):control.enforce_limits(db,{'id':'other','config':{'alias':'jutai-1'},'profile':{'ppn':2}})
-    def test_resource_wait_never_stages_or_submits(self):
-        payload=self.remote_payload();receipt=runs.start(payload)
-        with patch.object(remote,'resource_preview',return_value={'ready':False,'reason':'busy'}),patch.object(remote,'stage') as stage,patch.object(remote,'submit') as submit:runs._execute(receipt['analysis_id']);stage.assert_not_called();submit.assert_not_called()
-        self.assertEqual(runs.get(receipt['analysis_id'])['state'],'WAIT_RESOURCE');self.assertEqual(runs.active_usage(),[])
+
+    def test_scheduler_preview_and_old_unstarted_dispatch_are_blocked(self):
+        payload=self.remote_payload()
+        with patch.object(remote,'stage') as stage,patch.object(remote,'submit') as submit,patch.object(remote,'resource_preview') as probe:
+            for action in (runs.preview,runs.start):
+                with self.assertRaisesRegex(ValueError,'直接命令行'):action({**payload,'location':'scheduler'})
+            key=runs.start(payload)['analysis_id'];record=runs.get(key);record.update(location='scheduler');runs.save(record);runs._execute(key)
+            self.assertEqual(runs.get(key)['state'],'FAILED');stage.assert_not_called();submit.assert_not_called();probe.assert_not_called()
+
     def test_known_remote_exit_with_invalid_output_is_failed_not_unknown(self):
         payload=self.remote_payload('ssh');receipt=runs.start(payload);key=receipt['analysis_id']
         with patch.object(remote,'stage',return_value='/workspace/analyses/'+key),patch.object(remote,'direct',return_value={'returncode':0}),patch.object(remote,'inspect',return_value={'exit':{'exit_code':0},'check':{'status':'APPLICABLE'}}),patch.object(runs,'_collect',side_effect=ValueError('invalid result fixture')):
@@ -206,7 +209,7 @@ class ExtensionHostTests(unittest.TestCase):
         text=ssh.call_args.args[1];self.assertIn('stat -c',text);self.assertIn('cp --',text);self.assertNotIn('sha256',text);self.assertNotIn('ln ',text)
 
     def test_active_unknown_analysis_counts_core_budget(self):
-        payload=self.remote_payload();receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);record.update(state='UNKNOWN',requested_cores=2);runs.save(record)
+        payload=self.remote_payload();receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);record.update(location='scheduler',state='UNKNOWN',requested_cores=2);runs.save(record)
         control.save_settings({'max_inflight_total':5,'max_inflight_per_host':5,'max_cores_per_host':3})
         with closing(ex.db()) as db:
             with self.assertRaisesRegex(ValueError,'核数预算'):control.enforce_limits(db,{'id':'other','config':{'alias':'jutai-1'},'profile':{'ppn':2}})

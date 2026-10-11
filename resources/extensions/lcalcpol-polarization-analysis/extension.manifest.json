@@ -42,8 +42,7 @@
   "execution": {
     "locations": [
       "local",
-      "ssh",
-      "scheduler"
+      "ssh"
     ],
     "timeout_seconds": 300
   },

@@ -7,7 +7,7 @@ export default function LatticeComparison({rows,labels}:{rows:LatticeRow[];label
  const [referenceId,setReferenceId]=useState(rows[0]?.attempt_id||'');
  useEffect(()=>{setReferenceId(old=>rows.some(row=>row.attempt_id===old)?old:rows[0]?.attempt_id||'');},[rows]);
  const reference=rows.find(row=>row.attempt_id===referenceId)||rows[0];
- const label=(row:LatticeRow)=>(labels[row.node_id]||'计算')+' · '+(row.job_id||row.attempt_id.slice(0,12));
+ const label=(row:LatticeRow)=>(labels[row.node_id]||'计算')+' · '+(row.job_id||'未提交');
  const percent=(value:number|null)=>value===null?'—':(value>0?'+':'')+formatValue(value);
  const download=()=>{
   const url=URL.createObjectURL(new Blob([latticeCsv(rows,reference?.attempt_id||'',label)],{type:'text/csv;charset=utf-8'}));

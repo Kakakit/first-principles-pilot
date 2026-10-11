@@ -94,10 +94,10 @@ def source_project(project,scan_node_id,base_node_id):
     return project
 
 
-def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', frozen_id=None, window_search=None):
+def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', frozen_id=None, window_search=None, source_draft=None):
     if mode == 'wannier90-window':
         from . import wannier_scans
-        return wannier_scans.preview(project,scan_node_id,base_node_id,frozen_id,window_search)
+        return {k:v for k,v in wannier_scans.preview(project,scan_node_id,base_node_id,frozen_id,window_search,source_draft).items() if not k.startswith('_')}
     if mode != 'vasp':raise ValueError('迭代模式无效')
     project=source_project(project,scan_node_id,base_node_id)
     validate_workspace({'activeId':project['id'], 'projects':[project]})
@@ -173,10 +173,10 @@ def history(project_id):
     return [item for row in rows if not recycle.inactive('scans',(item := json.loads(row[0]))['id'],item)]
 
 
-def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_definition_hash=None, mode='vasp', frozen_id=None, window_search=None):
+def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_definition_hash=None, mode='vasp', frozen_id=None, window_search=None, source_draft=None):
     if mode == 'wannier90-window':
         from . import wannier_scans
-        return wannier_scans.freeze(project,scan_node_id,base_node_id,frozen_id,window_search,reason,expected_definition_hash)
+        return wannier_scans.freeze(project,scan_node_id,base_node_id,frozen_id,window_search,reason,expected_definition_hash,source_draft)
     if mode != 'vasp':raise ValueError('迭代模式无效')
     project=source_project(project,scan_node_id,base_node_id)
     if not isinstance(reason,str) or not reason.strip() or len(reason)>2000: raise ValueError('请填写批次输入理由')

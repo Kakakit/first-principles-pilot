@@ -1,52 +1,38 @@
-# Wannier90 能窗分阶段迭代
+# Wannier90 单参数窗口测试
 
-## 从哪里开始
+在画布连接 **Wannier90 → 参数迭代**。先在 Wannier 节点选择实际 VASP 接口、服务器和通道，载入 `.win` 与能量参考。fatband／PDOS、PyW90 辅助在参数之前；填写参数后在底部应用到 `.win`。参数迭代直接读取该通道的当前项目草稿，无需先手动冻结基础输入。
 
-在计算流程画布连接 **Wannier90 → 参数迭代**。基础 Wannier90 节点先选择明确的 VASP 接口 attempt、通道与完整矩阵，配置投影、能窗和能带路径，审查并独立冻结。不要用 `restart=plot` 作为基线。
+## 参数草稿与删除
 
-选择参数迭代节点，在“计算配置”中指定这份冻结输入和固定比较目标（均按 `E−E_F`、eV）。初始小冻窗继承该输入，应先在基础节点核对；界面不为材料猜步长和允许范围。
+四个窗口填写 `E−E_F`（eV），最终 `.win` 保存绝对能量；审核、冻结和准备重新解析最终原文。清空已有字段表示删除该 tag，布尔与 restart 可选择“删除／使用程序默认”。应用前显示新增、修改、删除；原文编辑后先解析再同步表格。未应用或解析失败时不能冻结。非窗口参数的删除不要求额外读取费米能。
 
-1. 填写本轮边界的允许范围、步长和测试目的，点击“预览并检查本轮窗口”。这时才读取源服务器 `.eig`，一次检查最多五组候选。
-2. 核对候选、态数余量、过滤原因和新增任务数，冻结本轮。
-3. 到“运行与监控”选择本轮，检测空闲节点，使用已有候选池设置并行上限；修改作业名、队列和时限，审阅最终脚本并确认一次。
-4. 刷新状态，按需读取收敛、spread（Å²）和耗时。选择程序已完成的候选作为基线，再粗扫、减半步长或推进下一边界。新轮次仍须预览、冻结和授权。
+默认展开窗口、restart、num_iter、dis_num_iter；高级收敛与插值、算法与日志折叠，输出文件单独分组。已有高级值保留。VASP 生成的晶胞、原子、维度、k 点和自旋信息受保护，其余内容和注释保留。`restart` 仍需要相同模型的检查点，新接口局域化应删除该项；已有模型保留结果页 `restart=plot` 重绘入口。
 
-固定顺序是外窗上沿 → 外窗下沿 → 冻窗上沿 → 冻窗下沿 → 外窗上沿局部复查 → 外窗下沿局部复查。每轮只修改一个边界的当前值、±一步、±两步，其他三个边界与所有其他参数固定。最后两次复查不能重复粗扫；没有合法新组合时给出原因，已完成的准确结果仍可复用并由用户选择。
+草稿按来源和通道保存在项目记录中，可随项目接续快照迁移。切换通道或重新载入时核对来源身份；已删除值不会从旧字段缓存恢复。运行审阅明确提示草稿与所选历史冻结输入不同，旧冻结和授权不改写。
 
-“采用窗口，生成新草稿”把选定窗口写到基础节点的采用草稿卡片。在基础节点点击“载入扫描窗口并重新审查”，核对后生成新的冻结版本。旧冻结输入、旧轮次和授权不会改写。“开始新的窗口方案”只清空该节点的迭代配置，历史仍可访问。
+## 一批测试如何运行
 
-## 科学检查与结果解释
+1. 在参数迭代中选择四个边界之一，填写起点／终点／步长（允许负步长），或显式数值列表，最多 64 个值。其他参数和矩阵来源固定。
+2. 点击“预览候选”。来源服务器读取完整 `.eig`，返回每个 k 点的外窗／冻结窗态数、相对／绝对边界、错误和零余量提示。没有基础冻结输入选择，也不强制扫描顺序或上一轮基线。
+3. 调整或移除错误候选后“准备这批测试”。后台保存不可变的批次基线和每个 case 的输入；之后进入资源、脚本审阅与明确授权。
+4. 查看程序结束、解缠／局域化判据、spread（Å²）、耗时及人工叠图。误差比较按需运行。选择已完成结果采用到基础节点新草稿，不自动评选最佳窗口，不自动减半步长。
 
-- 检查完整均匀 `mp_grid/kpoints`，源 `.eig` 的每个 band/k 对须恰好一行，有限且按能带序递增；`.amn/.mmn` 头部须与有效 `num_bands/num_wann/num_kpts` 匹配。`exclude_bands` 应已由 DFT 接口体现在矩阵中，不在这里重复删带；维度不匹配时阻断。
-- 在每个 k 点按包含上下边界的区间检查 `N_frozen ≤ num_wann ≤ N_outer`。表中外窗余量为 `min(N_outer)−num_wann`，解缠余量为 `num_wann−max(N_frozen)`。等号允许，但明确提示余量为零。
-- 冻窗须位于外窗内且有正宽度；每个外窗候选必须覆盖固定比较目标。仅支持普通能量解缠；projectability 冻结、特殊解缠 k 区域及投影数不同于 `num_wann` 的来源会提示暂不支持，不误报通过。
-- 程序结束与数值判据分开。明确 convergence 标记才显示“已证实”；`All done`、`Final State` 或达到最大迭代次数不作为收敛证据。未执行和未启用局域化判据分别显示。缺标记不会显示已证实，应结合完整 `.wout` 核查；不依 spread 自动终止阶段或判断物理拟合质量。
-- spread 按 `.wout` 的长度单位换算为 Å²，包括 `length_unit=bohr`。来源 `.win` 内容须与本次冻结输入相符，才归属该输出证据。
+缺省遵循 Wannier90：未设外窗边界时使用完整 `.eig` 能量极值；没有 `dis_froz_max` 时不启用冻结窗，已有上界但未设下界时使用外窗下界。扫描冻窗下界前须先设置上界。每个 k 点须满足 `N_frozen ≤ num_wann ≤ N_outer`，等号允许但显示零余量；显式窗口关系错误逐候选报告。
 
-## 按需比较 DFT 能带
+检查完整均匀 mp_grid/kpoints、`.eig` 的 band/k 覆盖、有限值与能带顺序，矩阵头部维度与 num_bands/num_wann/num_kpts 一致。特殊 projectability 冻结和特殊 k 区域等现有不支持情况继续阻断。程序 All done 不等于数值收敛；spread 不单独证明物理拟合质量。
 
-无兼容 DFT 参考也可以运行窗口测试并人工评估。需要数值误差时，展开“按需比较 DFT 能带误差”，选择相同 SCF 来源、路径、通道与采样的 DFT 能带，明确共同的 DFT 起始能带。
+## 叠图与保存
 
-本阶段支持明确的连续能带、按能量次序的一一对应：`num_wann` 条 Wannier 带对应从指定序号开始的同数目 DFT 带。接口内部序号从 0 计数，界面从 1 计数。子空间纠缠、交叉或混合不能建立这种对应时，使用叠图人工分析，不能把错误配对的指标解释成质量排序。
+结果页可填写叠图标题，再生成 PNG、SVG、CSV。新叠图和已有历史叠图均可“登记到数据集”，另填名称和备注。数据集独立保留图片、曲线、实际任务来源、窗口和费米参考；旧记录补读已核验冻结输入，缺证据时明确标记不可用。重复登记打开已有数据集，不重新分析。
 
-同一方案首次成功比较后固定 DFT attempt、目标范围和共同对应关系，各候选的取样掩码由 DFT 参考决定；拟合带移出目标范围不会被排除。返回 MAE、RMSE、最大绝对误差（meV）与叠图，不自动排序。路径、来源、通道或共同取样不一致则只报告阻断原因。没有分析 CLI 不影响核心窗口任务。
+DFT 比较须有同 SCF、同服务器、同路径和通道来源。连续能带的一一对应误差只是指定比较区间内的数值指标；纠缠交叉应结合叠图判断，不由误差自动排序。比较区间是可选项，不限制新候选的窗口资格。
 
-## 执行、恢复与回收
+## 合同、恢复与兼容
 
-方案固定使用矩阵来源服务器，不能跨机搬运计算目录。每个新 case 拥有独立 `.win`、目录和新 `.chk`；完整矩阵复用现有同服务器来源文件合同，不复用旧 checkpoint。
+新请求使用 `mode=wannier90-window`、`source_draft`（parent_id、alias、seed、win、energy_reference、band_path、input_reason、pending）和 `window_search`（boundary＋values，或 start/end/step；可选 target）。`/api/scans/preview` 返回定义身份，`/freeze` 另需 reason、expected_definition_hash。新批次为 `fpilot.wannier90-window-scan.v2`。历史 v1 冻结包、分阶段接口和授权保留兼容，旧 next-round 仅服务历史调用。
 
-候选池与 VASP 扫描/计算链共用容量、总量、主机和核数预算；批次还有限定的并行数。满载时等待。确定 attempt 身份持久保存；UNKNOWN 阻止继续派发并核查原回执，不能重投。失败可按现有规则明确重试一次。
+每个 case 使用独立目录、`.win` 和 `.chk`，同服务器矩阵按既有文件合同核验与物化。来源变化要求重新预览；UNKNOWN 保留准确 attempt 并阻止重投。暂停、受阻链／批次不自动继续。准备输入不等于提交，提交仍经已有资源和脚本授权入口。
 
-回收项目、批次或准确来源会暂停后续派发；恢复后需手动继续。已永久删除的来源不会自动换成最新结果。单独删除 case 任务后，其窗口组合也不会静默重新提交。统一回收站只处理本地对象，服务器任务与文件不删除。
+扩展的新运行入口仅有本地和服务器直接命令行；新扩展不能申请队列资源。历史已启动调度分析只能核查原作业与结果，未启动调度预览失效。大型计算由后续自定义节点处理。
 
-## 接口与独立工具
-
-旧 `/api/scans/preview` 与 `/freeze` 请求默认 `mode=vasp`，行为保留。窗口模式用 `mode=wannier90-window`、`frozen_id`、`window_search`（phase、boundary、target、lower、upper、step、previous_batch_id、selected_case_id、refine）。冻结请求另需 reason 与 expected_definition_hash。
-
-新增接口：`POST /api/scans/{id}/next-round` 只生成预览；`GET .../window-results` 按需读取；`POST .../window-compare` 使用 case_ids、band_attempt_id、dft_band_offset；`POST .../cases/{case}/adopt-window` 返回采用草稿。资源预览、授权、暂停、恢复和重试共用扫描入口。
-
-`resources/sets/wannier_windows.py` 为 stdlib JSON CLI，支持 `check`/`summary`，在来源服务器读文件、只回传小摘要；批量检查按准确来源和大小/修改时间缓存。大矩阵不下载、不默认整文件哈希。小 `.win`/OUTCAR 与冻结合同内容身份保留。
-
-能带指标通过 `resources/extensions/pyw90/scripts/pyw90_window_scan.py measure --request request.json` 的独立 JSON 文件协议获得，不调用主体内部模块或启动作业。请求包含 curves_csv、target_relative_eV、dft_band_offset，标准输出为 JSON；保留原扩展独立搜索能力。
-
-依据：[官方窗口实现](https://wannier-developers.github.io/wannier90/proc/dis_windows.html)、[官方参数表](https://wannier90.readthedocs.io/en/latest/user_guide/wannier90/parameters/)、[官方 3.1 输出单位与收敛实现](https://github.com/wannier-developers/wannier90/blob/v3.1.0/src/wannierise.F90)、[能窗优化研究](https://greschd.ch/assets/pdf/gresch_automated_2018.pdf)。
+依据：[官方窗口实现](https://wannier-developers.github.io/wannier90/proc/dis_windows.html)、[官方参数表](https://wannier90.readthedocs.io/en/latest/user_guide/wannier90/parameters/)、[SOC 拟合讨论](https://vasp.at/forum/viewtopic.php?p=18855)、[开发者关于投影与收敛](https://lists.quantum-espresso.org/pipermail/wannier/2006-November/000033.html)。本轮验收见 [记录](../submission/WANNIER_USABILITY_ACCEPTANCE.md)。

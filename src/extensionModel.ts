@@ -15,7 +15,7 @@ export type EnvironmentDoctor={ready:boolean;python?:string;python_version?:stri
 export type PythonRuntime={python:string;inherited?:boolean;alias?:string;scope?:string};
 export type EnvironmentData={local:PythonRuntime;runtimes:Record<string,PythonRuntime>;overrides:Record<string,{local?:string;remote?:Record<string,string>}>};
 export function executionCategories(manifest:Pick<ExtensionManifest,'execution'>):string[]{
- return [...new Set((manifest.execution?.locations||[]).map(mode=>mode==='local'?'local':'remote'))];
+ return [...new Set((manifest.execution?.locations||[]).filter(mode=>['local','ssh'].includes(mode)).map(mode=>mode==='local'?'local':'remote'))];
 }
 export function runtimeChoice(id:string,location:string,alias:string,data:EnvironmentData):PythonRuntime|undefined {
  const base=location==='local'?data.local:data.runtimes[alias];if(!base)return undefined;
@@ -23,9 +23,10 @@ export function runtimeChoice(id:string,location:string,alias:string,data:Enviro
  return {...base,python:override||base.python,inherited:!override};
 }
 
-export function preferredLocation(manifest:Pick<ExtensionManifest,'execution'>):string {
- const {locations=[],preferred_location}=manifest.execution||{};
- return preferred_location&&locations.includes(preferred_location)?preferred_location:locations.includes('local')?'local':locations[0];
+export function preferredLocation(manifest:Pick<ExtensionManifest,'execution'>):string|undefined {
+ const {locations:declared=[],preferred_location}=manifest.execution||{};
+ const locations=declared.filter(mode=>mode==='local'||mode==='ssh');
+ return preferred_location&&locations.some(mode=>mode===preferred_location)?preferred_location:locations.includes('local')?'local':locations[0];
 }
 export function environmentVersion(doctor:EnvironmentDoctor):string {
  return [doctor.python_version&&`Python ${doctor.python_version}`,doctor.version&&`版本 ${doctor.version}`,...Object.entries(doctor.versions||{}).map(([name,version])=>`${name} ${version}`)].filter(Boolean).join(' · ');

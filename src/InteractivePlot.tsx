@@ -143,7 +143,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
     const node=project.nodes.find(row=>item.path?.includes(`/stages/${String(row.data.stageSequence).padStart(2,'0')}-${row.data.stageSlug}/`));
     const attemptTime=item.path?.match(/attempts\/(\d{8})-(\d{6})/);
     const when=attemptTime?`${attemptTime[1].slice(4,6)}/${attemptTime[1].slice(6,8)} ${attemptTime[2].slice(0,2)}:${attemptTime[2].slice(2,4)}`:'';
-    return `${node?.data.label||item.stage} · ${item.job_id||item.id.slice(0,12)} · ${item.host}${when?' · '+when:''}`;
+    return `${node?.data.label||item.stage} · ${item.job_id||'未提交'} · ${item.host}${when?' · '+when:''}`;
   };
   useEffect(()=>{void api(`/api/interactive-plots/candidates?project_id=${encodeURIComponent(projectId)}`).then(value=>setCandidates(value.attempts)).catch(caught=>setError((caught as Error).message));},[projectId]);
   useEffect(()=>{
@@ -195,7 +195,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
       const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${image.width}" height="${image.height}"><image width="100%" height="100%" href="${png}"/></svg>`;
       const result=await api('/api/interactive-plots/save',{cache_id:job.id,project_id:projectId,
         selected:selected.map(item=>{const [element,orbital]=item.split('|');return {element,orbital};}),emin,emax,point_size_scale:pointSize,png_data_url:png,svg,title});
-      setMessage(`已保存结果集 ${result.id.slice(0,12)}；可在“数据集与历史交接”重看和下载。`);
+      setMessage(`已保存结果集；可在“数据集与历史交接”重看和下载。`);
     }catch(caught){setError((caught as Error).message);}
   };
   const bandOptions=useMemo(()=>data?.band?Array.from({length:data.band.spins},(_,i)=>bandOption(data.band!,i,emin,emax,pointSize)):[],[data?.band,emin,emax,pointSize]);

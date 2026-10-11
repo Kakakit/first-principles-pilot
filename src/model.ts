@@ -15,7 +15,7 @@ export const catalog: Record<Kind, {label: string; en: string; description: stri
   dos: { label: '态密度', en: 'DENSITY OF STATES', description: '分析电子态随能量的分布', color: '#bf8142' },
   'vasp-wannier': { label: 'VASP→Wannier 接口', en: 'VASP WANNIER', description: '读取 SCF 电荷并生成 Wannier 接口矩阵', color: '#a05d8d' },
   wannier90: { label: 'Wannier90 局域化', en: 'WANNIER90', description: '读取接口矩阵并运行 Wannier90', color: '#81518e' },
-  scan: { label: '参数迭代', en: 'PARAMETER SCAN', description: '迭代 VASP 参数或分阶段测试 Wannier90 能窗', color: '#7058a1' },
+  scan: { label: '参数迭代', en: 'PARAMETER SCAN', description: '迭代 VASP 参数或逐个测试 Wannier90 窗口边界', color: '#7058a1' },
 };
 export type StepData = { kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
 export type Step = Node<StepData, 'step'>;
@@ -103,7 +103,7 @@ export function mergeWorkspace(current: Workspace, imported: Workspace): Workspa
   const projects = imported.projects.map(p=>{
     const ids = new Map(p.nodes.map(n=>[n.id,uid()]));
     const id=uid(),base=(p.remoteSlug||slugify(p.name)||'project').slice(0,55).replace(/-+$/,'');
-    return {...p,id,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>({...n,id:ids.get(n.id)!})),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
+    return {...p,id,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data={...n.data};delete data.wannierDrafts;delete data.activeWannierDraft;delete data.windowAdoption;return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
   });
   if(current.projects.length+projects.length>100) throw new Error('最多保存 100 个项目，请先导出备份并整理。');
   return {...current,activeId:projects[0].id,projects:[...current.projects,...projects]};
