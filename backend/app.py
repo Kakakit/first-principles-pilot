@@ -564,11 +564,31 @@ class PyW90Advice(BaseModel):
     emax: float = 4
     energy_reference: dict
     dos_attempt_id: Optional[str] = None
+    relative_windows: Optional[dict[str, float]] = None
 
 
 @app.post('/api/wannier90/pyw90-advice')
 def wannier_pyw90_advice(payload: PyW90Advice):
     try:return pyw90_remote.recommend(**payload.model_dump())
+    except (ValueError, OSError, KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+class PyW90WindowCheck(BaseModel):
+    project: dict
+    node_id: str
+    parent_id: str
+    alias: str
+    seed: str
+    emin: float = -4
+    emax: float = 4
+    energy_reference: dict
+    relative_windows: Optional[dict[str, float]] = None
+    expected_source_hashes: Optional[dict[str, str]] = None
+
+
+@app.post('/api/wannier90/pyw90-window-check')
+def wannier_pyw90_window_check(payload: PyW90WindowCheck):
+    try:return pyw90_remote.check(**payload.model_dump())
     except (ValueError, OSError, KeyError) as exc:raise HTTPException(422,str(exc)) from exc
 
 

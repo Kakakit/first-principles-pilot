@@ -29,6 +29,7 @@ class AdapterTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(W90, 'read_eigenval', W90.read_eigenval))
         self.stack.enter_context(patch.object(DOS, 'get_dos_from_selected', DOS.__dict__['get_dos_from_selected']))
+        self.stack.enter_context(patch.object(DOS, 'get_dos_analysis_df', DOS.__dict__['get_dos_analysis_df']))
         self.stack.enter_context(patch.object(pre, 'main_features', pre.main_features))
         self.stack.enter_context(patch.object(pre, 'Vasprun', pre.Vasprun))
 
@@ -98,7 +99,9 @@ class AdapterTests(unittest.TestCase):
 
     def test_soc_projection_count_and_actual_band_channel(self):
         self.eigenval(1)
-        parsed = SimpleNamespace(parameters={'LSORBIT': True}, tdos=SimpleNamespace(densities={Spin.up: []}))
+        # The installed XML reader maps SOC charge/magnetization sets onto
+        # two Spin keys, while the actual EIGENVAL still has one channel.
+        parsed = SimpleNamespace(parameters={'LSORBIT': True}, tdos=SimpleNamespace(densities={Spin.up: [], Spin.down: []}))
         args = SimpleNamespace(deg=1)
         def feature(actual):
             pre.Vasprun('vasprun.xml')
@@ -117,6 +120,15 @@ class AdapterTests(unittest.TestCase):
         adapter.install()
         obj = W90(seedname='test', path=str(self.path))
         np.testing.assert_allclose(obj.ir_ebands[0], [[1, 2], [1.1, 2.1]])
+
+    def test_window_analysis_uses_current_basis_without_hiding_pdos_count(self):
+        self.eigenval()
+        adapter.install(nwann_override=3)
+        with redirect_stdout(StringIO()) as output:
+            obj = W90(eig='EIGENVAL', path=str(self.path), nwann=2)
+        self.assertEqual(obj.nwann, 3)
+        self.assertIn('"suggested_num_wann": 2', output.getvalue())
+        self.assertIn('"window_num_wann": 3', output.getvalue())
 
 
 if __name__ == '__main__':

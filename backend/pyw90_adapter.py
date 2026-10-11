@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-REVISION = 'fpilot.pyw90-predos.v1'
+REVISION = 'fpilot.pyw90-manual.v2'
 
 
 def validate_layout(path):
@@ -34,7 +34,7 @@ def validate_layout(path):
             raise ValueError('EIGENVAL 包含超出声明数量的数据')
 
 
-def install(spin_down=False):
+def install(spin_down=False, nwann_override=None):
     import numpy as np
     import pandas as pd
     from pymatgen.electronic_structure.core import Spin
@@ -45,11 +45,15 @@ def install(spin_down=False):
 
     # Keep each numerical table in one block for the SSH receipt parser.
     pd.set_option('display.expand_frame_repr', False)
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.precision', 10)
 
     spin = Spin.down if spin_down else Spin.up
     original = W90.read_eigenval
     original_features = pre_w90_tool.main_features
     original_vasprun = pre_w90_tool.Vasprun
+    original_analysis = DOS.get_dos_analysis_df
     context = {'spinors': False, 'channels': None}
 
     def features(args):
@@ -57,8 +61,11 @@ def install(spin_down=False):
             parsed = original_vasprun(*positional, **keywords)
             context['spinors'] = bool(parsed.parameters.get('LSORBIT') or
                                       parsed.parameters.get('LNONCOLLINEAR'))
-            context['channels'] = len(parsed.tdos.densities)
-            if spin not in parsed.tdos.densities:
+            # Noncollinear XML has charge, mx, my, mz sets. Older pymatgen
+            # exposes charge as Spin.up and the last magnetic set as Spin.down;
+            # those keys do not represent two eigenvalue channels.
+            context['channels'] = 1 if context['spinors'] else len(parsed.tdos.densities)
+            if (context['spinors'] and spin_down) or spin not in parsed.tdos.densities:
                 raise ValueError('所选 DOS 为单通道（含 SOC/非共线），不能选择 spin-down')
             # Each spatial orbital supplies two spinor projections. Do not
             # assert Kramers degeneracy: the actual SOC bands stay individual.
@@ -105,11 +112,26 @@ def install(spin_down=False):
         self.emin = self.ir_ebands.min()
         self.eband_max = self.ir_ebands.max(axis=1)[0]
         self.eband_min = self.ir_ebands.min(axis=1)[0]
+        suggested = self.nwann
+        if nwann_override is not None:
+            self.nwann = nwann_override
         print('FPILOT_EIGENVAL=' + json.dumps({
             'adapter': REVISION, 'source_ispin': data.ispin,
             'channel': ('down' if spin_down else 'up') if data.ispin == 2 else 'single',
+            'density_channel': 'charge' if context['spinors'] else ('down' if spin_down else 'up'),
             'spinors': context['spinors'], 'nkpts': data.nkpt, 'nbands': data.nbands,
-            'suggested_num_wann': self.nwann}))
+            'suggested_num_wann': suggested, 'window_num_wann': self.nwann}))
+
+    def dos_analysis(cls, frame, lb=0.1):
+        count, simplified = original_analysis(frame, lb=lb)
+        threshold = float(frame['dos'].max()) * lb
+        rows = frame.copy()
+        rows['selected'] = rows['dos'] > threshold
+        print('FPILOT_DOS_SELECTION=' + json.dumps({
+            'lb': lb, 'threshold': threshold, 'spatial_orbitals': int(count),
+            'suggested_num_wann': int(count * (2 if context['spinors'] else 1)),
+            'orbitals': json.loads(rows.to_json(orient='records'))}))
+        return count, simplified
 
     def selected_dos(cls, complete_dos, erange, selected):
         # Upstream 1.0.7 otherwise defaults each selected orbital to Spin.up.
@@ -118,11 +140,26 @@ def install(spin_down=False):
 
     W90.read_eigenval = read_eigenval
     DOS.get_dos_from_selected = classmethod(selected_dos)
+    DOS.get_dos_analysis_df = classmethod(dos_analysis)
     pre_w90_tool.main_features = features
 
 
 def main():
+    if sys.argv[1] == 'window-check':
+        print('FPILOT_WINDOW_CHECK=' + json.dumps(window_check(json.loads(sys.argv[2])), allow_nan=False))
+        return
+    override = None
+    if '--fpilot-num-wann' in sys.argv:
+        i = sys.argv.index('--fpilot-num-wann')
+        override = int(sys.argv[i + 1])
+        del sys.argv[i:i + 2]
     if sys.argv[1:3] == ['pre', 'dos']:
-        install('--spin-down' in sys.argv[3:])
+        install('--spin-down' in sys.argv[3:], override)
+    else:
+        import pandas as pd
+        pd.set_option('display.expand_frame_repr', False)
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.max_rows', None)
+        pd.set_option('display.precision', 10)
     from pyw90.pyw90_cli import main_cli
     main_cli()
