@@ -1,4 +1,5 @@
 import {makeStep,type Project} from './model';
+import {STAGE_SEQUENCES,staticDefaults} from './stagePolicy';
 import {upstreamStructure} from './parameters';
 export function independentBranch(project:Project,nodeId:string):Project {
  const start=project.nodes.find(n=>n.id===nodeId);
@@ -10,10 +11,11 @@ export function independentBranch(project:Project,nodeId:string):Project {
  const root=makeStep('structure',{x:40,y:120},1);
  const structure=upstreamStructure(project,start);
  if(structure)root.data.structure=structuredClone(structure);
- const nodes=project.nodes.filter(n=>ids.has(n.id)&&n.data.kind!=='structure').map((n,index)=>{
+ const nodes=project.nodes.filter(n=>ids.has(n.id)&&n.data.kind!=='structure').map(n=>{
   const draft={...(n.data.inputDraft as Record<string,unknown>||{})};
   for(const key of Object.keys(draft))if(/attempt|source|hash|bundle|authorization|remote|probe/i.test(key))delete draft[key];
-  const data={...structuredClone(n.data),inputDraft:draft,sourceDraft:{mode:'new',purpose:'charge',files:'charge'},stageSequence:index+2};
+  const data={...structuredClone(n.data),inputDraft:draft,sourceDraft:{mode:'new',purpose:'charge',files:'charge'},stageSequence:STAGE_SEQUENCES[n.data.kind]};
+  if(Object.keys(staticDefaults(data.kind)).length)data.parameters={...data.parameters,values:{...staticDefaults(data.kind),...data.parameters?.values}};
   for(const key of Object.keys(data))if(/authorization|binding|attempt|result|prepared|chainState|execution_scope|remote|wannierDrafts|activeWannierDraft|windowAdoption/i.test(key))delete (data as Record<string,unknown>)[key];
   return {...n,id:mapping.get(n.id)!,selected:false,data};
  });
@@ -26,5 +28,5 @@ export function independentBranch(project:Project,nodeId:string):Project {
   node.data.sourceDraft={mode:parent?'upstream':'new',purpose:'charge',files:'charge'};
  }
  const id=crypto.randomUUID();
- return {id,name:project.name+' · 独立分支',remoteSlug:'project-'+id.slice(0,8),nodes:[root,...nodes],edges,parameters:structuredClone(project.parameters),sharedPotcar:structuredClone(project.sharedPotcar),updatedAt:new Date().toISOString()};
+ return {id,stagePolicy:'kind-fixed-v1',name:project.name+' · 独立分支',remoteSlug:'project-'+id.slice(0,8),nodes:[root,...nodes],edges,parameters:structuredClone(project.parameters),sharedPotcar:structuredClone(project.sharedPotcar),updatedAt:new Date().toISOString()};
 }

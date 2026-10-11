@@ -3,6 +3,7 @@ import type {ParameterLayer,ParameterProject} from './parameters';
 import {validateStructure} from './structure';
 import type {StructureDocument} from './structure';
 import type { Edge, Node } from '@xyflow/react';
+import {STAGE_SEQUENCES,staticDefaults,clearExecutionBindings} from './stagePolicy';
 
 export const STORAGE_KEY = 'dft-workbench.workspace';
 export const kinds = ['structure', 'relax', 'scf', 'bands', 'dos', 'vasp-wannier', 'wannier90', 'scan'] as const;
@@ -19,21 +20,21 @@ export const catalog: Record<Kind, {label: string; en: string; description: stri
 };
 export type StepData = { kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
 export type Step = Node<StepData, 'step'>;
-export type Project = { parameters?:ParameterProject; sharedPotcar?:{id:string;provenance_id?:string}; recipeRuntime?:unknown; id: string; name: string; remoteSlug?:string; nodes: Step[]; edges: Edge[]; updatedAt: string };
+export type Project = { stagePolicy?:'kind-fixed-v1'; parameters?:ParameterProject; sharedPotcar?:{id:string;provenance_id?:string}; recipeRuntime?:unknown; id: string; name: string; remoteSlug?:string; nodes: Step[]; edges: Edge[]; updatedAt: string };
 export type Workspace = { activeId: string; projects: Project[] };
 export type Issue = { level: 'error' | 'info'; message: string; nodeId?: string };
 export const uid = () => crypto.randomUUID();
 export function slugify(value:string):string {
   return value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,64);
 }
-export function makeStep(kind: Kind, position = { x: 80, y: 80 }, stageSequence=1): Step {
-  return { id: uid(), type: 'step', position, data: { kind, label: catalog[kind].label, note: '', executionMode:kind==='scan'?'scan':kind==='wannier90'?'wannier90':'vasp', stageSequence, stageSlug:kind, params: kind === 'structure' ? { material: '未指定' } : { functional: 'PBE', encut: '', kmesh: '', spin: '未设置' } } };
+export function makeStep(kind: Kind, position = { x: 80, y: 80 }, stageSequence=STAGE_SEQUENCES[kind]): Step {
+  return { id: uid(), type: 'step', position, data: { kind, label: catalog[kind].label, note: '', executionMode:kind==='scan'?'scan':kind==='wannier90'?'wannier90':'vasp', stageSequence, stageSlug:kind, ...(Object.keys(staticDefaults(kind)).length?{parameters:{values:staticDefaults(kind)}}:{}), params: kind === 'structure' ? { material: '未指定' } : { functional: 'PBE', encut: '', kmesh: '', spin: '未设置' } } };
 }
 export function newProject(name: string, demo = false): Project {
   const nodes = demo ? [makeStep('structure', {x: 40, y: 190},1), makeStep('relax', {x: 310, y: 190},2), makeStep('scf', {x: 580, y: 190},3), makeStep('bands', {x: 850, y: 85},4), makeStep('dos', {x: 850, y: 295},5)] : [makeStep('structure',undefined,1)];
   if (demo) { nodes[0].data.params.material = 'Si · 硅（演示）'; nodes.forEach(n => {n.data.note = n.data.kind === 'structure' ? '可导入真实结构' : '仅展示流程组织，尚未生成计算输入';}); }
   const edges = demo ? [[0,1],[1,2],[2,3],[2,4]].map(([a,b]) => ({id:uid(),source:nodes[a].id,target:nodes[b].id})) : [];
-  const id=uid();return { id, name, remoteSlug:slugify(name)||`project-${id.slice(0,8)}`, nodes, edges, updatedAt: new Date().toISOString() };
+  const id=uid();return { id, name, stagePolicy:'kind-fixed-v1', remoteSlug:slugify(name)||`project-${id.slice(0,8)}`, nodes, edges, updatedAt: new Date().toISOString() };
 }
 export function demoWorkspace(): Workspace { const p = newProject('Si · 电子结构', true); return { activeId:p.id, projects:[p] }; }
 export function initialWorkspace(): Workspace { const p = newProject('新项目'); return { activeId:p.id, projects:[p] }; }
@@ -50,6 +51,7 @@ export function parseWorkspace(raw: string): Workspace {
   const projectIds = new Set();
   for (const p of w.projects) {
     if (!p || !nonempty(p.id) || projectIds.has(p.id) || !nonempty(p.name) || !text(p.updatedAt, 100) || !Array.isArray(p.nodes) || !Array.isArray(p.edges) || p.nodes.length > 500 || p.edges.length > 2000) throw new Error('项目内容或大小无效。');
+    if(p.stagePolicy!==undefined&&p.stagePolicy!=='kind-fixed-v1')throw new Error('项目阶段编号规则无效。');
     if(!text(p.remoteSlug,64)||!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(p.remoteSlug))throw new Error('远程项目标识无效。');
     if(p.sharedPotcar!==undefined&&(!p.sharedPotcar||!/^[a-f0-9]{64}$/.test(p.sharedPotcar.id)||p.sharedPotcar.provenance_id!==undefined&&!/^[a-f0-9]{64}$/.test(p.sharedPotcar.provenance_id)))throw new Error('项目共享 POTCAR 无效。');
     if(p.parameters!==undefined){if(p.parameters.version!==1)throw new Error('不支持的参数版本。');validateLayer(p.parameters.shared);if(p.parameters.templates!==undefined){if(!Array.isArray(p.parameters.templates)||p.parameters.templates.length>20)throw new Error('参数模板过多。');for(const t of p.parameters.templates){if(!nonempty(t.name))throw new Error('模板名称无效。');validateLayer(t.layer);}}}
@@ -58,6 +60,7 @@ export function parseWorkspace(raw: string): Workspace {
     for (const n of p.nodes) {
       if (!n || !nonempty(n.id) || nodeIds.has(n.id) || n.type !== 'step' || !n.position || !Number.isFinite(n.position.x) || !Number.isFinite(n.position.y) || Math.abs(n.position.x)>1e6 || Math.abs(n.position.y)>1e6 || !n.data || !kinds.includes(n.data.kind) || !nonempty(n.data.label) || !text(n.data.note) || !n.data.params || typeof n.data.params !== 'object' || Array.isArray(n.data.params) || Object.keys(n.data.params).length > 30 || !Object.values(n.data.params).every(v=>text(v,200))) throw new Error('流程节点格式无效。');
       if(!Number.isInteger(n.data.stageSequence)||n.data.stageSequence<1||n.data.stageSequence>999||!text(n.data.stageSlug,48)||!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(n.data.stageSlug)||!['vasp','wannier90','scan'].includes(n.data.executionMode)||((n.data.kind==='scan')!==(n.data.executionMode==='scan'))||((n.data.kind==='wannier90')!==(n.data.executionMode==='wannier90')))throw new Error('节点执行类型或远程阶段标识无效。');
+      if(p.stagePolicy==='kind-fixed-v1'&&n.data.stageSequence!==STAGE_SEQUENCES[n.data.kind as Kind])throw new Error('新项目阶段编号须与节点类型一致。');
       if(n.data.structure!==undefined) {if(n.data.kind!=='structure')throw new Error('结构只能绑定输入结构节点。');validateStructure(n.data.structure);}
       if(n.data.parameters!==undefined)validateLayer(n.data.parameters);
       if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
@@ -103,7 +106,7 @@ export function mergeWorkspace(current: Workspace, imported: Workspace): Workspa
   const projects = imported.projects.map(p=>{
     const ids = new Map(p.nodes.map(n=>[n.id,uid()]));
     const id=uid(),base=(p.remoteSlug||slugify(p.name)||'project').slice(0,55).replace(/-+$/,'');
-    return {...p,id,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data={...n.data};delete data.wannierDrafts;delete data.activeWannierDraft;delete data.windowAdoption;return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
+    return {...p,id,stagePolicy:'kind-fixed-v1' as const,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data=clearExecutionBindings(n.data);if(Object.keys(staticDefaults(data.kind)).length)data.parameters={...data.parameters,values:{...staticDefaults(data.kind),...data.parameters?.values}};data.stageSequence=STAGE_SEQUENCES[data.kind];return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
   });
   if(current.projects.length+projects.length>100) throw new Error('最多保存 100 个项目，请先导出备份并整理。');
   return {...current,activeId:projects[0].id,projects:[...current.projects,...projects]};

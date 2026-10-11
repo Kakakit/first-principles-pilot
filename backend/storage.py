@@ -28,6 +28,8 @@ def validate_workspace(w):
         if not isinstance(p.get('id'), str) or not p['id'] or p['id'] in ids or not str(p.get('name', '')).strip():
             raise ValueError('项目身份或名称无效。')
         ids.add(p['id'])
+        if 'stagePolicy' in p and p['stagePolicy'] != 'kind-fixed-v1':
+            raise ValueError('项目阶段编号规则无效。')
         remote_slug = p.get('remoteSlug')
         if not isinstance(remote_slug, str) or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?', remote_slug):
             raise ValueError('远程项目标识无效。')
@@ -50,6 +52,10 @@ def validate_workspace(w):
                 raise ValueError('节点执行类型无效。')
             if type(sequence) is not int or not 1 <= sequence <= 999 or not isinstance(slug, str) or len(slug) > 48 or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?', slug):
                 raise ValueError('远程阶段标识无效。')
+            if p.get('stagePolicy') == 'kind-fixed-v1':
+                from .node_editability import STAGE_SEQUENCES
+                if sequence != STAGE_SEQUENCES[n['data']['kind']]:
+                    raise ValueError('新项目的阶段编号须与节点类型一致。')
             nodes.add(n['id'])
             if 'structure' in n['data']:
                 if n['data']['kind'] != 'structure':
@@ -154,6 +160,9 @@ class WorkspaceStore:
                 return {'revision': current, 'path': str(self.root)}
             if expected_revision != current:
                 raise ConflictError('磁盘版本已变化。请先导出当前编辑，再重新载入磁盘版本。')
+            if previous:
+                from .node_editability import assert_changes
+                assert_changes(self.root, json.loads((self.root / 'snapshots' / previous[0]).read_text()), workspace)
             for p in workspace['projects']:
                 for n in p['nodes']:
                     if n['data'].get('structure'):

@@ -8,7 +8,7 @@ import type {FrozenInput} from '../src/resultWorkspace.ts';
 test('task templates create independent valid drafts without physics or jobs',()=>{
  for(const name of ['scf','relax-scf','electronic']){
   const a=taskProject(name),b=taskProject(name);assert.notEqual(a.id,b.id);
-  for(const node of a.nodes){assert.equal(node.data.structure,undefined);assert.equal(node.data.parameters,undefined);assert.equal(node.data.inputDraft,undefined);}
+  for(const node of a.nodes){assert.equal(node.data.structure,undefined);assert.equal(node.data.parameters?.values.ENCUT,undefined);assert.equal(node.data.parameters?.values.ISPIN,undefined);if(['scf','bands','dos'].includes(node.data.kind)){assert.equal(node.data.parameters?.values.NSW,'0');assert.equal(node.data.parameters?.values.IBRION,'-1');}assert.equal(node.data.inputDraft,undefined);}
   for(const edge of a.edges)assert.equal(canConnect(a.nodes,a.edges.filter(e=>e!==edge),edge.source,edge.target),true);
   assert.equal(parseWorkspace(JSON.stringify({activeId:a.id,projects:[a]})).projects[0].id,a.id);
  }

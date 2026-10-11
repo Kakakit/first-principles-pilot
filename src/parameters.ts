@@ -43,6 +43,9 @@ export function effectiveParameters(project:Project,node:Step):Record<string,Eff
  }
  if(['bands','dos','vasp-wannier'].includes(node.data.kind))out.ICHARG={value:'11',source:'节点执行合同'};
  if(['bands','dos','vasp-wannier'].includes(node.data.kind)&&!Object.hasOwn(shared,'LORBIT')&&!Object.hasOwn(local,'LORBIT'))out.LORBIT={value:'11',source:'节点执行合同'};
+ if(node.data.kind==='vasp-wannier'){
+  for(const [tag,value] of Object.entries({NCORE:'1',KPAR:'1',ISYM:'-1',LWANNIER90:'true',LWANNIER90_RUN:'false',LWRITE_MMN_AMN:'true'}))out[tag]={value,source:'节点执行合同'};
+ }
  return out;
 }
 export function upstreamStructure(project:Project,node:Step):StructureDocument|undefined {
@@ -78,7 +81,10 @@ export function checkParameters(project:Project,node:Step):ParameterIssue[] {
  if(node.data.kind==='relax'){
   if(!numeric(value('NSW'))||Number(value('NSW'))<=0)issues.push({level:'error',message:'结构优化需要明确 NSW > 0。'});
   if(!['1','2','3'].includes(value('IBRION')||''))issues.push({level:'error',message:'结构优化需选择本阶段支持的离子优化算法。'});
- }else if(value('NSW')!==null&&Number(value('NSW'))!==0)issues.push({level:'error',message:'静态、能带和 DOS 节点不能执行离子更新；NSW 应为 0。'});
+ }else {
+  if(value('NSW')!==null&&Number(value('NSW'))!==0)issues.push({level:'error',message:'静态、能带和 DOS 节点不能执行离子更新；NSW 应为 0。'});
+  if(value('IBRION')!==null&&value('IBRION')!=='-1')issues.push({level:'error',message:'静态、能带、DOS 和 VASP-Wannier 节点的 IBRION 应为 -1。'});
+ }
  if(value('ISMEAR')==='-5'&&node.data.kind==='bands')issues.push({level:'error',message:'本能带路径任务不支持四面体积分（ISMEAR=−5）。'});
  if(value('ISMEAR')==='-5')issues.push({level:'warning',message:'四面体法的网格与体系适用性需结合实际 VASP 网格和体系核对。'});
  if(value('ISMEAR')!==null&&value('ISMEAR')!=='-5'&&value('SIGMA')===null)issues.push({level:'warning',message:'展宽方法已选，SIGMA 尚未明确。'});

@@ -1265,6 +1265,17 @@ def node_attempts(project_id: str, node_id: str):
     return {'attempts': artifacts.attempts(project_id, node_id), 'path_schema': 'fpilot.remote-attempt-path'}
 
 
+@app.get('/api/projects/{project_id}/node-editability')
+def node_editability(project_id: str):
+    from .node_editability import status
+    import sqlite3
+    store = WorkspaceStore()
+    project = next((p for p in (store.read()['workspace'] or {'projects': []})['projects'] if p['id'] == project_id), None)
+    if project is None: raise HTTPException(404, '项目尚未保存或不存在')
+    try: return status(store.root, project)
+    except (ValueError, OSError, sqlite3.Error) as exc: raise HTTPException(422, '节点历史核查失败：' + str(exc)) from exc
+
+
 @app.post('/api/execution/{key}/artifacts/refresh')
 def artifact_refresh(key: str):
     try:return artifacts.refresh(key)

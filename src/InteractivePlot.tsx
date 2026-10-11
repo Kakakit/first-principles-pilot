@@ -7,7 +7,7 @@ import {themedPlotOption} from './plotAppearance';
 import {kPathBounds,projectionColors} from './projectionStyle';
 import type {Project} from './model';
 
-type Candidate={id:string;stage:'bands'|'dos';host:string;job_id?:string;path?:string;scf_attempt_id?:string};
+type Candidate={id:string;node_id?:string;execution_scope?:string;stage:'bands'|'dos';host:string;job_id?:string;path?:string;scf_attempt_id?:string};
 type CacheMeta={id:string;remote_parts?:Record<string,unknown>;band_attempt_id?:string;dos_attempt_id?:string;band?:{elements:string[];orbitals:string[];spins:number;energy_reference:{fermi_eV:number}};dos?:{elements:string[];orbitals:string[];spins:number;energy_reference:{fermi_eV:number};projection_note?:string};sources:Array<{name:string;size_bytes:number;local_path:string}>;compatible?:boolean;compatibility_note?:string};
 type Job={id:string;state:string;downloaded_bytes:number;total_bytes:number;available_bytes?:number;current_file?:string;error?:string;metadata?:CacheMeta};
 type Trace={element:string;orbital:string;weights?:number[][][];values?:number[][]};
@@ -132,7 +132,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[title,setTitle]=useState('');
   const charts=useRef<Array<echarts.ECharts|null>>([null,null,null,null]);
   const candidateLabel=(item:Candidate)=>{
-    const node=project.nodes.find(row=>item.path?.includes(`/stages/${String(row.data.stageSequence).padStart(2,'0')}-${row.data.stageSlug}/`));
+    const node=project.nodes.find(row=>row.id===(item.node_id||item.execution_scope));
     const attemptTime=item.path?.match(/attempts\/(\d{8})-(\d{6})/);
     const when=attemptTime?`${attemptTime[1].slice(4,6)}/${attemptTime[1].slice(6,8)} ${attemptTime[2].slice(0,2)}:${attemptTime[2].slice(2,4)}`:'';
     return `${node?.data.label||item.stage} · ${item.job_id||'未提交'} · ${item.host}${when?' · '+when:''}`;

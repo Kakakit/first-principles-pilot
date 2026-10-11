@@ -190,17 +190,21 @@ def materialize(recipe):
         "executionMode": "vasp", "stageSequence": 1, "stageSlug": "structure",
         "params": {"material": structure["document"].get("formula", "未指定")}, "structure": structure["document"]}}]
     edges = []
-    for sequence, stage in enumerate(recipe["stages"], 2):
+    from .node_editability import STAGE_SEQUENCES
+    for stage in recipe["stages"]:
         stage_slug = re.sub(r"[^a-z0-9]+", "-", stage["id"].lower()).strip("-")[:48].rstrip("-") or stage["kind"]
-        data = {"executionMode": "vasp", "stageSequence": sequence, "stageSlug": stage_slug,
+        data = {"executionMode": "vasp", "stageSequence": STAGE_SEQUENCES[stage["kind"]], "stageSlug": stage_slug,
                 "kind": stage["kind"], "label": stage["label"], "note": stage.get("description", ""),
                 "params": {"functional": "", "encut": "", "kmesh": "", "spin": ""},
                 "parameters": stage.get("parameters", {"values": {}})}
+        defaults = {} if stage["kind"] == "relax" else {"NSW": "0", "IBRION": "-1"}
+        if stage["kind"] == "vasp-wannier": defaults["NCORE"] = "1"
+        data["parameters"]["values"] = {**defaults, **data["parameters"].get("values", {})}
         if stage.get("input"): data["inputDraft"] = stage["input"]
         if stage.get("potcar"): data["recipePotcar"] = stage["potcar"]
         nodes.append({"id": stage["id"], "type": "step", "position": position(stage["id"]), "data": data})
         edges.extend({"id": f"recipe:{parent}->{stage['id']}", "source": parent, "target": stage["id"]} for parent in stage["depends_on"])
-    content = {"name": recipe["name"], "nodes": nodes, "edges": edges,
+    content = {"stagePolicy": "kind-fixed-v1", "name": recipe["name"], "nodes": nodes, "edges": edges,
                "parameters": {"version": 1, "shared": recipe.get("shared", {"values": {}})}}
     if recipe.get("runtime") is not None: content["recipeRuntime"] = recipe["runtime"]
     identity = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()

@@ -67,6 +67,8 @@ def candidates(project_id: str) -> list[dict]:
         if manifest.get('stage') in ('bands', 'dos'):
             rows.append({'id': row['id'], 'stage': manifest['stage'], 'host': row['config']['alias'],
                          'job_id': row.get('job_id'), 'path': row.get('remote_path_absolute'),
+                         'node_id': row.get('node_id') or manifest.get('node_id'),
+                         'execution_scope': row.get('execution_scope'),
                          'scf_attempt_id': (row.get('dependency_snapshot') or {}).get('upstream_attempt_id')})
     return rows
 

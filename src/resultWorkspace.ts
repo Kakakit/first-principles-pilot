@@ -29,7 +29,7 @@ export const taskTemplates=[
 export function taskProject(id:string,name?:string):Project {
  const template=taskTemplates.find(t=>t.id===id);if(!template)throw new Error('未知任务模板');
  const project=newProject(name||template.name);
- project.nodes=template.kinds.map((kind,index)=>makeStep(kind as Kind,{x:60+index*270,y:kind==='dos'?340:140},index+1));
+ project.nodes=template.kinds.map((kind,index)=>makeStep(kind as Kind,{x:60+index*270,y:kind==='dos'?340:140}));
  project.edges=template.edges.map(([a,b])=>({id:uid(),source:project.nodes[a].id,target:project.nodes[b].id}));
  return project;
 }
