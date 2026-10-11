@@ -32,4 +32,10 @@
 .pyw90-counts p{margin:.5rem 0}
 .pyw90-projections{font-weight:650}
 .pyw90-preview>.button{margin:.5rem .5rem 0 0}
+.pyw90-frozen-boundary{margin:1rem 0;padding:1rem;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface-raised)}
+.pyw90-cutoff-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:1rem}
+.pyw90-cutoff{min-width:0;padding:.75rem;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface)}
+.pyw90-cutoff p{margin:.6rem 0;overflow-wrap:anywhere}
+.pyw90-cutoff-value{font-size:18px;font-weight:650}
+.pyw90-cutoff-value strong{font-size:22px;font-variant-numeric:tabular-nums}
 @media(max-width:600px){.pyw90-summary,.pyw90-window-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.pyw90-report,.pyw90-result,.pyw90-preview{padding:.65rem}.pyw90-metric,.pyw90-window{padding:.65rem}}

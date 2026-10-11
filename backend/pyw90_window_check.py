@@ -94,6 +94,73 @@ def lower_diagnostic(energies, lower, gaps):
             'nearest_above': min(above, key=lambda g: g['i_max']) if above else None}
 
 
+def frozen_boundary_diagnostic(energies, nwann, lower, upper):
+    """Single-edge limits from per-k order statistics, with original .eig IDs.
+
+    Endpoints are included by Wannier90. The (N+1)th eligible eigenvalue
+    therefore defines a strict limit; a fixed global band index is insufficient
+    when the other window edge crosses dispersive bands.
+    """
+    if lower is None or upper is None or lower > upper:
+        return None
+    low, high = energies.min(axis=0), energies.max(axis=0)
+
+    def band_info(index):
+        values = energies[:, index]
+        return {'band': int(index) + 1, 'min_eV': float(low[index]),
+                'max_eV': float(high[index]), 'min_kpoint': int(values.argmin()) + 1,
+                'max_kpoint': int(values.argmax()) + 1}
+
+    nearby = {}
+    for label, edge in (('lower', lower), ('upper', upper)):
+        groups = {'crossing': np.flatnonzero((low <= edge) & (edge <= high)).tolist()}
+        below, above = np.flatnonzero(high < edge), np.flatnonzero(low > edge)
+        groups['below'] = [int(below[np.argmax(high[below])])] if len(below) else []
+        groups['above'] = [int(above[np.argmin(low[above])])] if len(above) else []
+        for role, indices in groups.items():
+            for index in indices:
+                nearby.setdefault(index, {**band_info(index), 'roles': []})['roles'].append(label + '_' + role)
+
+    upper_extra, lower_extra, upper_keep, lower_keep = [], [], [], []
+    for k, row in enumerate(energies):
+        order = np.argsort(row, kind='stable')
+        from_lower = order[row[order] >= lower]
+        from_upper = order[row[order] <= upper][::-1]
+        for indices, extra, keep in ((from_lower, upper_extra, upper_keep),
+                                     (from_upper, lower_extra, lower_keep)):
+            if len(indices) >= nwann:
+                keep.append(float(row[indices[nwann - 1]]))
+            if len(indices) > nwann:
+                index = int(indices[nwann])
+                extra.append((float(row[index]), k, index))
+
+    def cutoff(extra, keep, tag):
+        if not extra:
+            return None
+        is_upper = tag == 'dis_froz_max'
+        limit = (min if is_upper else max)(value for value, _, _ in extra)
+        witnesses = [(k, index) for value, k, index in extra if value == limit]
+        # This is a numerical trial offset, not a fit-quality recommendation.
+        trial = limit + (-1e-6 if is_upper else 1e-6)
+        trial_lower, trial_upper = (lower, trial) if is_upper else (trial, upper)
+        trial_counts = state_counts(energies, trial_lower, trial_upper)
+        keep_edge = (max if is_upper else min)(keep) if len(keep) == len(energies) else None
+        exact = keep_edge is not None and (keep_edge < limit if is_upper else limit < keep_edge)
+        return {'tag': tag, 'operator': '<' if is_upper else '>', 'limit_eV': limit,
+                'limiting_states': [{**band_info(index), 'kpoint': k + 1,
+                                     'energy_eV': float(energies[k, index]), 'rank': nwann + 1}
+                                    for k, index in witnesses[:16]],
+                'limiting_state_count': len(witnesses), 'trial_value_eV': trial,
+                'trial_offset_eV': 1e-6, 'trial_counts': trial_counts,
+                'trial_valid': trial_lower <= trial_upper and trial_counts['max'] <= nwann,
+                'exact_n_interval_eV': ([keep_edge, limit] if is_upper else [limit, keep_edge]) if exact else None}
+
+    return {'schema': 'fpilot.frozen-boundary.v1', 'band_index_scope': 'interface_eig',
+            'nearby_bands': [nearby[index] for index in sorted(nearby)],
+            'upper': cutoff(upper_extra, upper_keep, 'dis_froz_max'),
+            'lower': cutoff(lower_extra, lower_keep, 'dis_froz_min')}
+
+
 def evaluate_windows(energies, nwann, values, target_range):
     outer_min = values.get('dis_win_min', float(energies.min()))
     outer_max = values.get('dis_win_max', float(energies.max()))
@@ -148,6 +215,8 @@ def window_check(request):
               'analysis_counts': state_counts(energies, *target), 'gaps': gaps,
               'analysis_lower': lower_diagnostic(energies, target[0], gaps),
               'outer_lower': lower_diagnostic(energies, current['absolute_windows_eV']['dis_win_min'], gaps),
+              'frozen_boundary': frozen_boundary_diagnostic(energies, basis['num_wann'],
+                  current['absolute_windows_eV']['dis_froz_min'], current['absolute_windows_eV']['dis_froz_max']),
               'current': current, 'candidates': candidates}
     # Retain absolute values; UI values consistently use E-E_F in eV.
     def relative_check(check):

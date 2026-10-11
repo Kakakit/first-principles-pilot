@@ -48,8 +48,30 @@ function LowerView({label,value,fermi}:{label:string;value:Diagnostic;fermi:numb
   </div>;
 }
 
-function Report({report,onGap}:{report:MeshReport;onGap?:(gap:Gap)=>void}){
+function FrozenBoundaryView({report,onBoundary}:{report:MeshReport;onBoundary?:(values:Windows)=>void}){
+  const diagnostic=report.frozen_boundary;if(!diagnostic||!report.current.frozen)return null;
+  const relative=(value:number)=> (value-report.fermi_eV).toFixed(8);
+  const roles:Record<string,string>={lower_crossing:'穿过下界',lower_below:'下界下方最近带',lower_above:'下界上方最近带',upper_crossing:'穿过上界',upper_below:'上界下方最近带',upper_above:'上界上方最近带'};
+  const overflow=report.current.frozen.max>report.basis.num_wann;
+  return <section className="pyw90-frozen-boundary" aria-label="冻结窗边界与超额态"><h4>冻结窗边界与超额态</h4><p>当前冻结窗有 <strong className="pyw90-key-number">{report.current.frozen.min}～{report.current.frozen.max}</strong> 个态／k 点，允许最多 {report.basis.num_wann} 个。以下能量为 E−E_F / eV，显示至八位小数；采用前按完整精度复核。</p>
+    <div className="pyw90-cutoff-grid">{(['upper','lower'] as const).map(side=>{
+      const limit=diagnostic[side];const upper=side==='upper';const fixed=upper?'dis_froz_min':'dis_froz_max';
+      if(!limit)return <div className="pyw90-cutoff" key={side}><h5>{upper?'调整上界':'调整下界'}</h5><p>固定另一边界时，已提供能带没有第 {report.basis.num_wann+1} 个计入态，未形成该侧临界值。</p></div>;
+      const state=limit.limiting_states[0];const interval=limit.exact_n_interval_eV;
+      return <div className="pyw90-cutoff" key={side}><h5>{upper?'固定下界，检查上界':'固定上界，检查下界'}</h5><p>保留 {fixed} = {number(report.current.relative_windows_eV[fixed])}</p><p className="pyw90-cutoff-value">{limit.tag} {limit.operator} <strong>{relative(limit.limit_eV)}</strong></p><p>从当前{upper?'下界向上':'上界向下'}数第 <strong>{state.rank}</strong> 个态：.eig 带 <strong>#{state.band}</strong> · k <strong>#{state.kpoint}</strong>。</p><p>该带全网格：最小 <strong>{relative(state.min_eV)}</strong>（k #{state.min_kpoint}），最大 <strong>{relative(state.max_eV)}</strong>（k #{state.max_kpoint}）。</p>
+        {limit.limiting_state_count>1&&<details><summary>共同限制的位置 · {limit.limiting_state_count} 个</summary>{limit.limiting_states.map(s=><p key={s.kpoint}>k #{s.kpoint} · .eig 带 #{s.band} · 第 {s.rank} 个计入态 · {relative(s.energy_eV)} eV</p>)}{limit.limiting_state_count>limit.limiting_states.length&&<p>显示前 {limit.limiting_states.length} 个位置。</p>}</details>}
+        <p>{interval?<>逐 k 点恰好 {report.basis.num_wann} 态的{upper?'上界':'下界'}范围：<strong>{upper?'[':'('}{relative(interval[0])}, {relative(interval[1])}{upper?')':']'}</strong>。</>:<>仅调整这一侧，无法让每个 k 点都恰好有 {report.basis.num_wann} 个态；仍可检查“最多不超过”的条件。</>}</p>
+        <p>临界值{upper?'以下':'以上'} {limit.trial_offset_eV} eV 的数值试算：<strong>{limit.trial_counts.min}～{limit.trial_counts.max}</strong> 个态／k 点。简并时可能一次排除多个态。</p><button className="button" disabled={!onBoundary||!limit.trial_valid} onClick={()=>onBoundary?.({[limit.tag]:limit.trial_value_eV-report.fermi_eV})}>{upper?'预览临界值以下的上界':'预览临界值以上的下界'}</button>
+      </div>;
+    })}</div>
+    <details open={overflow}><summary>上下界附近的能带极值 · {diagnostic.nearby_bands.length} 条</summary><div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr><th>.eig 带号</th><th>与当前边界关系</th><th>最小 E−E_F / eV</th><th>位置</th><th>最大 E−E_F / eV</th><th>位置</th></tr></thead><tbody>{diagnostic.nearby_bands.map(b=><tr key={b.band}><td className="pyw90-native-count">{b.band}</td><td>{b.roles.map(role=>roles[role]||role).join('；')}</td><td>{relative(b.min_eV)}</td><td>k #{b.min_kpoint}</td><td>{relative(b.max_eV)}</td><td>k #{b.max_kpoint}</td></tr>)}</tbody></table></div></details>
+    <details><summary>临界值如何计算</summary><p>固定下界：每个 k 点按能量排序，取下界以上第 num_wann+1 个态，再取这些能量的全网格最小值。固定上界：从上界往下数第 num_wann+1 个态，再取全网格最大值。闭区间端点也计入，所以必须严格避开临界值。</p><p>下界或上界穿带时，对应的 .eig 带号可能随 k 点变化；全文件第 55 条带与窗口中第 55 个计入态不同。全网格极值供判断，逐 k 点临界值用于态数限制。带号属于当前接口 .eig；exclude_bands 后不直接等同于原 DFT 带号。</p><p>数值试算只检查采样网格的态数；须核对目标轨道与拟合质量，采用前继续核验完整窗口和来源。</p></details>
+  </section>;
+}
+
+function Report({report,onGap,onBoundary}:{report:MeshReport;onGap?:(gap:Gap)=>void;onBoundary?:(values:Windows)=>void}){
   return <div className="pyw90-report"><Summary report={report}/><p>检查范围：{report.nkpts} 个 k 点 · {report.nbands} 条能带。以下能量为 E−E_F，单位 eV；带号与 k 点号从 1 开始。</p>
+    <FrozenBoundaryView report={report} onBoundary={onBoundary}/>
     <LowerView label="分析下界" value={report.analysis_lower} fermi={report.fermi_eV}/><LowerView label="当前外窗下界" value={report.outer_lower} fermi={report.fermi_eV}/>
     <p>分析范围逐 k 点态数：{report.analysis_counts.min} ～ {report.analysis_counts.max}。</p><CountsView value={report.current}/>
     <details><summary>检查方法、当前投影与绝对能量</summary><p>判断来自接口 .eig 的全部已提供 k 点；高对称路径图与完整布里渊区可能不同。</p><p>当前投影：{report.basis.projections.join('；')||'无显式 projections'}{report.basis.exclude_bands&&<> · exclude_bands：{report.basis.exclude_bands}</>}</p><div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr><th>当前检查窗口</th><th>E−E_F / eV</th><th>绝对能量 / eV</th></tr></thead><tbody>{windowTags.map(tag=><tr key={tag}><td>{tag}</td><td>{number(report.current.relative_windows_eV[tag])}</td><td>{number(report.current.absolute_windows_eV[tag])}</td></tr>)}</tbody></table></div></details>
@@ -82,7 +104,7 @@ export default function PyW90AdvicePanel(props:Props){
         if(mounted.current&&started===currentFingerprint.current)setManual({report,fingerprint:started});
       }else{
         const result:Advice=await requestJson('/api/wannier90/pyw90-advice',{...payload(windows),mode,dos_attempt_id:mode==='pre'&&dosId?dosId:null});
-        if(mounted.current&&started===currentFingerprint.current){setAdvice(old=>({...old,[mode]:result}));setManual({report:result.interface,fingerprint:started});}
+        if(mounted.current&&started===currentFingerprint.current){setAdvice(old=>({...old,[mode]:result}));setManual({report:{...result.interface,source_hashes:result.interface_source_hashes},fingerprint:started});}
       }
     }catch(caught){if(mounted.current)setError(errorMessage(caught));}finally{if(mounted.current)setBusy(false);}
   };
@@ -106,7 +128,7 @@ export default function PyW90AdvicePanel(props:Props){
     <div className="parameter-grid"><label className="field">分析范围下界 / E−E_F (eV)<input type="number" value={emin} onChange={e=>setEmin(e.target.value)}/></label><label className="field">分析范围上界 / E−E_F (eV)<input type="number" value={emax} onChange={e=>setEmax(e.target.value)}/></label><label className="field">pre dos 来源<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">当前 VASP-Wannier attempt</option>{dosChoices.map(item=><option value={item.id} key={item.id}>{attemptLabel(item,project)}</option>)}</select></label></div>
     <div className="pyw90-actions"><button className="button" disabled={!enabled} onClick={()=>void run('check')}>检查当前草稿窗口与下界</button><button className="button" disabled={!enabled} onClick={()=>void run('eig')}>远端 eig：外窗候选</button><button className="button" disabled={!enabled} onClick={()=>void run('pre')}>远端 pre dos：投影与冻结窗候选</button></div>
     {busy&&<p role="status">正在只读核对远端文件与采样网格…</p>}{error&&<p role="alert" className="structure-error">{error}</p>}
-    {manual&&<><h4>下界与完整窗口诊断</h4>{manual.fingerprint!==fingerprint&&<p className="handoff-warning">草稿或分析设置已变化；以下为上次检查结果，请重新检查。</p>}<Report report={manual.report} onGap={enabled?gap=>void select({dis_win_min:gap.midpoint_eV-manual.report.fermi_eV},manual.report.source_hashes):undefined}/></>}
+    {manual&&<><h4>下界与完整窗口诊断</h4>{manual.fingerprint!==fingerprint&&<p className="handoff-warning">草稿或分析设置已变化；以下为上次检查结果，请重新检查。</p>}<Report report={manual.report} onGap={enabled?gap=>void select({dis_win_min:gap.midpoint_eV-manual.report.fermi_eV},manual.report.source_hashes):undefined} onBoundary={enabled&&manual.fingerprint===fingerprint?values=>void select(values,manual.report.source_hashes):undefined}/></>}
     {(['eig','pre'] as const).map(mode=>{const item=advice[mode];if(!item)return null;const selection=item.advice.dos_selection;return <div key={mode} className="pyw90-result"><h4>{mode==='eig'?'eig suggest':'pre dos'} · {item.seed}</h4><p className="pyw90-reference">E_F {number(item.fermi_eV)} eV · 分析范围 {item.relative_range_eV.join(' 至 ')} eV · PyW90 {item.pyw90_version}</p><p>{item.note}</p>
       {selection&&<><p>PDOS 自动建议：{selection.spatial_orbitals} 个空间轨道，<strong className="pyw90-key-number">{selection.suggested_num_wann}</strong> 个函数；当前窗口检查使用 num_wann=<strong className="pyw90-key-number">{item.interface.basis.num_wann}</strong>。</p>{selection.suggested_num_wann!==item.interface.basis.num_wann&&<p className="handoff-warning">PDOS 建议模型与当前函数数不同。比例评价的是自动选择的轨道；窗口态数检查使用当前接口模型。</p>}<p className="pyw90-projections">自动建议投影：{item.advice.projections?.join('；')||'未选中轨道'}</p><details><summary>完整轨道积分与选择依据 · {selection.orbitals.length} 行</summary><p>阈值 lb={selection.lb}，单轨道积分按最大值归一化，选取归一化积分 &gt; {selection.threshold}。空间轨道数与函数数按当前自旋模型换算。</p><div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr><th>元素</th><th>站点索引（从 0 开始）</th><th>轨道</th><th>归一化积分</th><th>是否选中</th></tr></thead><tbody>{selection.orbitals.map((o,i)=><tr key={i}><td>{o.species}</td><td>{o.structure_id}</td><td>{o.orb_name}</td><td>{number(o.dos)}</td><td>{o.selected?'是':'否'}</td></tr>)}</tbody></table></div></details></>}
       {item.advice.eigenval&&<p>DOS EIGENVAL：{item.advice.eigenval.spinors?'SOC／非共线单通道':channel(item.advice.eigenval.channel)} · {item.advice.eigenval.nkpts} 个 k 点 · {item.advice.eigenval.nbands} 条带。候选最终按接口 .eig 核对。</p>}

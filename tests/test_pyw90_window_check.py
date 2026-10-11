@@ -69,5 +69,72 @@ class WindowCheckTests(unittest.TestCase):
             self.assertEqual(report['candidates']['frozen'][0]['frozen']['max'],2)
             self.assertTrue(report['candidates']['frozen'][0]['valid'])
 
+    def test_frozen_55_and_57_states_use_same_55th_upper_cutoff(self):
+        energies = np.array([np.arange(61), np.arange(61) + .1])
+        for upper in (54, 56):
+            report = check.frozen_boundary_diagnostic(energies, 54, 0, upper)
+            self.assertEqual(report['upper']['limit_eV'], 54)
+            self.assertEqual(report['upper']['limiting_states'][0]['band'], 55)
+            self.assertEqual(report['upper']['limiting_states'][0]['rank'], 55)
+            self.assertEqual(report['upper']['trial_counts']['max'], 54)
+            self.assertEqual(report['upper']['exact_n_interval_eV'], [53.1, 54])
+        self.assertEqual(report['lower']['limit_eV'], 2)
+        self.assertEqual(report['lower']['trial_counts']['max'], 54)
+
+    def test_crossing_edge_changes_eligible_band_index_at_each_k(self):
+        energies = np.array([[-1, 0, 1, 2, 3], [-2, -1, .5, 1.5, 2.5]])
+        report = check.frozen_boundary_diagnostic(energies, 2, 0, 3)
+        cutoff = report['upper']
+        # Global minimum of the witness band is 1.5, but at that k point it
+        # is the second eligible state and should still be kept.
+        self.assertEqual(cutoff['limit_eV'], 2)
+        self.assertEqual(cutoff['limiting_states'][0]['min_eV'], 1.5)
+        self.assertEqual(cutoff['limiting_states'][0]['kpoint'], 1)
+        self.assertEqual(cutoff['trial_counts']['max'], 2)
+        self.assertEqual(cutoff['exact_n_interval_eV'], [1.5, 2])
+
+    def test_lower_cutoff_and_degenerate_states_may_remove_more_than_one(self):
+        energies = np.array([[0, 1, 1, 1, 2], [0, 1, 1, 1, 3]])
+        report = check.frozen_boundary_diagnostic(energies, 2, 0, 3)
+        for side in ('upper', 'lower'):
+            cutoff = report[side]
+            self.assertEqual(cutoff['limit_eV'], 1)
+            self.assertEqual(cutoff['limiting_state_count'], 2)
+            self.assertEqual(cutoff['trial_counts']['max'], 1)
+            self.assertIsNone(cutoff['exact_n_interval_eV'])
+        self.assertEqual(check.state_counts(energies, 0, 1)['max'], 4)
+        self.assertEqual(check.state_counts(energies, 1, 3)['max'], 4)
+
+    def test_cutoffs_cover_all_k_and_not_only_max_count_witness(self):
+        energies = np.array([[0, 1, 4, 7, 9], [0, 2, 3, 6, 10], [-1, 1, 5, 8, 11]])
+        report = check.frozen_boundary_diagnostic(energies, 2, 0, 10)
+        for side in ('upper','lower'):
+            cutoff = report[side]
+            edge = cutoff['trial_value_eV']
+            counts = [sum(0 <= e <= edge if side == 'upper' else edge <= e <= 10 for e in row) for row in energies]
+            self.assertLessEqual(max(counts), 2)
+            self.assertEqual(max(counts), cutoff['trial_counts']['max'])
+        self.assertEqual(report['upper']['limit_eV'], 3)
+        self.assertEqual(report['lower']['limit_eV'], 4)
+
+    def test_no_frozen_window_or_insufficient_states_have_no_cutoff(self):
+        energies = np.array([[0, 1], [2, 3]])
+        self.assertIsNone(check.frozen_boundary_diagnostic(energies, 2, None, None))
+        report = check.frozen_boundary_diagnostic(energies, 2, 0, 3)
+        self.assertIsNone(report['upper'])
+        self.assertIsNone(report['lower'])
+
+    def test_window_report_retains_absolute_cutoffs_and_basis_for_spinor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            eig, win = Path(tmp)/'test.eig', Path(tmp)/'test.win'
+            eig.write_text('1 1 5\n2 1 6\n3 1 7\n1 2 5.5\n2 2 6.5\n3 2 7.5\n')
+            win.write_text('num_wann=2\nspinors=true\n')
+            report = check.window_check({'eig_name':str(eig),'win_name':str(win),'seed':'wannier90',
+                'fermi_eV':5,'absolute_range':[5,7.5], 'absolute_windows':{'dis_froz_min':5,'dis_froz_max':7.5}})
+            self.assertEqual(report['current']['frozen']['max'], 3)
+            self.assertEqual(report['frozen_boundary']['upper']['limit_eV'], 7)
+            self.assertEqual(report['frozen_boundary']['upper']['trial_counts']['max'], 2)
+            self.assertEqual(report['basis']['channel'], 'spinor')
+
 
 if __name__=='__main__':unittest.main()
