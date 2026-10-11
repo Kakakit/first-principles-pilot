@@ -4,6 +4,8 @@ import {readJson,errorMessage} from '../src/apiClient.ts';
 
 test('empty or non-JSON API responses show a recoverable service message',async()=>{
   await assert.rejects(readJson(new Response('',{status:200})),/空响应.*重试/);
-  await assert.rejects(readJson(new Response('<html>error</html>',{status:200})),/无法读取.*重试/);
+  await assert.rejects(readJson(new Response('<html>error</html>',{status:200})),/响应格式异常.*HTTP 200.*重试/);
+  await assert.rejects(readJson(new Response('Internal Server Error',{status:500})),/服务内部错误.*HTTP 500.*填写内容保留/);
+  await assert.rejects(readJson(new Response('{"detail":"PyW90 未输出能带路径"}',{status:422})),/PyW90 未输出能带路径/);
   assert.match(errorMessage(new TypeError('Failed to fetch')),/无法连接本机 API/);
 });

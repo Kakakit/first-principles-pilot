@@ -30,7 +30,7 @@ class WannierLineageTests(unittest.TestCase):
             stack.enter_context(patch.object(bands.execution,'attempt_path',side_effect=lambda r:{'shell':'/'+r['id']}))
             stack.enter_context(patch.object(bands.pyw90_remote,'_file_hashes',side_effect=hashes))
             stack.enter_context(patch.object(bands.artifacts,'_small_bytes',side_effect=lambda r,*a,**k:((parent_poscar,len(parent_poscar)) if r['id']=='interface' else (POSCAR,len(POSCAR)))))
-            stack.enter_context(patch.object(bands.pyw90_remote,'_run',return_value='begin kpoint_path\nG 0 0 0 X 0.5 0 0\nend kpoint_path'))
+            stack.enter_context(patch.object(bands.pyw90_remote,'_run',return_value={'arguments':['pyw90','pre','kpath'],'stdout':'begin kpoint_path\nG 0 0 0 X 0.5 0 0\nend kpoint_path','stderr':'','exit_code':0}))
             stack.enter_context(patch.object(bands.execution,'ssh',return_value={'exit_code':0,'stdout':'40'}))
             return bands.path_proposal({'id':'p'},'w','interface','host','band')
 

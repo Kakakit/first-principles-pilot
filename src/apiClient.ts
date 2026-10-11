@@ -3,7 +3,11 @@ export async function readJson(response: Response): Promise<any> {
   let data: any = null;
   if (text.trim()) {
     try { data = JSON.parse(text); }
-    catch { throw new Error('服务返回了无法读取的内容。请确认本机 API 正在运行，然后重试。'); }
+    catch {
+      throw new Error(response.status >= 500
+        ? `服务内部错误（HTTP ${response.status}），错误响应无法读取。当前填写内容保留，请重试；仍失败时请核查 API 错误日志。`
+        : `服务响应格式异常（HTTP ${response.status}）：返回内容不是 JSON。当前填写内容保留，请重试。`);
+    }
   }
   if (!response.ok) {
     const detail = data?.detail;

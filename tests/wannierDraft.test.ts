@@ -1,8 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parameterChanges,relativeValues,draftSource,bandSettings} from '../src/wannierDraft';
+import {parameterChanges,relativeValues,draftSource,bandSettings,preserveParameterEdits} from '../src/wannierDraft';
 import {simpleWindowRequest,simpleWindowReady} from '../src/simpleWindowScan';
 import {emptyWindowDraft} from '../src/windowScan';
 test('cleared values are deletions; canonical formatting does not create false changes',()=>{assert.deepEqual(parameterChanges({num_iter:'',write_hr:'.true.',conv_tol:'1D-6'},{num_iter:'300',write_hr:'true',conv_tol:'0.000001'}),[{tag:'num_iter',value:'',before:'300',action:'remove'}]);assert.deepEqual(relativeValues({dis_win_min:'1D0',restart:''},6),{dis_win_min:'-5',restart:''});});
+test('path application preserves pending additions, window edits and deletions',()=>{
+  const applied={restart:'',dis_win_max:'6',write_hr:'true',num_iter:'300'};
+  const draft={...applied,restart:'plot',dis_win_max:'7',write_hr:''};
+  const next={...applied,num_iter:'400'};
+  assert.deepEqual(preserveParameterEdits(draft,applied,next),{...next,restart:'plot',dis_win_max:'7',write_hr:''});
+  assert.equal(parameterChanges(preserveParameterEdits(draft,applied,next),next).length,3);
+});
 test('iteration receives final path and rejects unapplied draft',()=>{const draft={sourceHash:'verified',parent_id:'parent',alias:'host',seed:'wannier90.2',win:'final',parameters:{num_iter:''},applied:{num_iter:'300'},inputReason:'reason',bandEnabled:true,bandPath:{project_id:'p'},bandLines:'G 0 0 0 X .5 0 0',bandPoints:'42'};assert.equal(draftSource(draft).pending,true);assert.equal(draftSource({...draft,applied:{num_iter:''}}).pending,false);assert.equal(draftSource(draft).band_path.bands_num_points,42);const settings=bandSettings('bands_plot = true\nbands_num_points: 42\nbegin kpoint_path\nG 0 0 0 X .5 0 0\nend kpoint_path\n');assert.equal(settings.enabled,true);assert.equal(settings.points,'42');});
 test('single boundary accepts signed range or list without frozen input or forced stage',()=>{const base={...emptyWindowDraft(),boundary:'dis_win_min' as const,ranges:{dis_win_min:{lower:'-3',upper:'-5',step:'-0.5'}}};assert.equal(simpleWindowReady(base),true);assert.deepEqual(simpleWindowRequest(base),{boundary:'dis_win_min',start:-3,end:-5,step:-0.5});assert.equal(simpleWindowReady({...base,ranges:{dis_win_min:{lower:'0',upper:'100',step:'1'}}}),false);const list={...base,input_mode:'list' as const,values_text:'-3, -4，-5'};assert.equal(simpleWindowReady(list),true);assert.deepEqual(simpleWindowRequest(list),{boundary:'dis_win_min',values:[-3,-4,-5]});});

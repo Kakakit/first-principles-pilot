@@ -9,6 +9,34 @@ from . import wannier_lineage, artifacts, source_contracts
 from . import execution, pyw90_remote, remote_paths, wannier_execution
 
 
+def path_lines_from_run(run):
+    """Read the shared PyW90 receipt rather than treating it as CLI text."""
+    if not isinstance(run, dict) or not isinstance(run.get('stdout'), str):
+        raise ValueError('PyW90 路径执行回执缺少可读 stdout，请重新获取路径')
+    if run.get('exit_code') != 0:
+        raise ValueError('PyW90 路径执行失败：' + str(run.get('stderr') or '未提供错误信息')[-700:])
+    output = run['stdout']
+    if not output.strip():
+        raise ValueError('PyW90 未输出能带路径，请核对所选 DFT KPOINTS')
+    match = re.search(r'(?ims)^\s*begin\s+kpoint_path\s*\n(.*?)^\s*end\s+kpoint_path\s*$', output)
+    candidates = match.group(1).splitlines() if match else output.splitlines()
+    lines = [line.strip() for line in candidates if len(line.split()) == 8 and
+             not line.lstrip().startswith(('!', '#'))]
+    if not lines or len(lines) > 200:
+        raise ValueError('PyW90 能带路径为空或过长')
+    for line in lines:
+        fields = line.split()
+        if not all(re.fullmatch(r'[A-Za-zΓ][A-Za-z0-9_Γ+-]*', fields[i]) for i in (0, 4)):
+            raise ValueError('PyW90 路径标签或坐标行格式无效')
+        try:
+            coordinates = [float(fields[i]) for i in (1, 2, 3, 5, 6, 7)]
+        except ValueError as exc:
+            raise ValueError('PyW90 路径坐标无效') from exc
+        if not all(abs(value) <= 2 for value in coordinates):
+            raise ValueError('PyW90 路径坐标超出可检查范围')
+    return lines
+
+
 def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
     parent, _ = wannier_execution._parent(project, node_id, parent_id, alias)
     band = execution.get(band_attempt_id)
@@ -36,22 +64,8 @@ def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
             raise ValueError('两个来源的实际结构不同，不能自动复用能带路径')
     source = next((info for name, info in wannier_lineage.binding(band)['files'].items()
                    if name in ('POSCAR', 'CONTCAR') and info.get('sha256')), {})
-    output = pyw90_remote._run(alias, path, ['pre', 'kpath', '--path', '.'], ('KPOINTS',))
-    match = re.search(r'(?ims)^\s*begin\s+kpoint_path\s*\n(.*?)^\s*end\s+kpoint_path\s*$', output)
-    candidates = match.group(1).splitlines() if match else output.splitlines()
-    lines = [line.strip() for line in candidates if len(line.split()) == 8 and
-             not line.lstrip().startswith(('!', '#'))]
-    if not lines or len(lines) > 200:
-        raise ValueError('PyW90 能带路径为空或过长')
-    for line in lines:
-        fields = line.split()
-        if len(fields) != 8 or not re.fullmatch(r'[A-Za-zΓ][A-Za-z0-9_Γ+-]*', fields[0]) or not re.fullmatch(r'[A-Za-zΓ][A-Za-z0-9_Γ+-]*', fields[4]):
-            raise ValueError('PyW90 路径标签或坐标行格式无效')
-        try:
-            if not all(abs(float(fields[index])) <= 2 for index in (1, 2, 3, 5, 6, 7)):
-                raise ValueError('PyW90 路径坐标超出可检查范围')
-        except ValueError as exc:
-            raise ValueError('PyW90 路径坐标无效') from exc
+    run = pyw90_remote._run(alias, path, ['pre', 'kpath', '--path', '.'], ('KPOINTS',))
+    lines = path_lines_from_run(run)
     receipt = execution.ssh(alias, 'set -e\ncd ' + remote_paths.shell_path(path) + "\nsed -n '2p' KPOINTS\n", timeout=30, stdout_limit=100)
     if receipt['exit_code'] != 0 or not re.fullmatch(r'\d+', receipt['stdout'].strip()):
         raise ValueError('DFT line-mode KPOINTS 采样数不可识别')
@@ -64,7 +78,7 @@ def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
             'parent_poscar_sha256': parent_hashes['POSCAR'], 'parent_source_path': parent_path,
             'path_lines': lines, 'bands_num_points': points,
             'path_sha256': hashlib.sha256(('\n'.join(lines)+'\n').encode()).hexdigest(),
-            'source_path': path, 'generator': 'pyw90 pre kpath'}
+            'source_path': path, 'generator': 'pyw90 pre kpath', 'pyw90_run': run}
 
 
 def with_path(win, proposal, enabled=True):

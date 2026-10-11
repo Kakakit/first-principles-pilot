@@ -750,7 +750,8 @@ def wannier_band_path_apply(payload: WannierBandPathApply):
     try:
         proposal = {**payload.proposal, 'path_lines': payload.path_lines,
                     'bands_num_points': payload.bands_num_points}
-        return {'win': wannier_bands.with_path(payload.win, proposal, payload.enabled)}
+        win = wannier_bands.with_path(payload.win, proposal, payload.enabled)
+        return {'win': win, 'parameters': wannier_execution.parameter_values(win)}
     except (ValueError, OSError, KeyError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
