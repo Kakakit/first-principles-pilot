@@ -27,7 +27,7 @@ export default function ProjectSync({project,disk,onChanged}:{project:Project;di
   };
   const stopped=state?.local?.mode==='STOPPED';
   return <details className="project-sync"><summary>跨设备项目接续</summary><p>工位上传并交接，家里下载并接管。保留项目身份、任务历史、冻结输入、分析和备注；大型计算输出继续留在服务器。</p>
-    <p role="status">{state?.local?`${modes[state.local.mode]||state.local.mode} · 最后同步 ${state.local.synced_at?new Date(state.local.synced_at).toLocaleString():'尚未完成'}${state.pending?' · 有修改待同步':''}`:'尚未启用同步；当前项目沿用本机执行。'}{state?.device&&` · 本机 ${state.device.name}（${state.device.id.slice(0,8)}）`}</p>
+    <p role="status">{state?.local?`${modes[state.local.mode]||state.local.mode} · 最后同步 ${state.local.synced_at?new Date(state.local.synced_at).toLocaleString():'尚未完成'}${state.pending?' · 有修改待同步':''}`:'尚未启用同步；当前项目沿用本机执行。'}{state?.device&&` · 本机 ${state.device.name}`}</p>
     <label>同步服务器<select aria-label="同步服务器" value={alias} disabled={busy||Boolean(state?.local)} onChange={e=>{setAlias(e.target.value);setCatalog([]);setPreview(null);}}><option value="">请选择已登记服务器</option>{hosts.map(h=><option key={h.alias} value={h.alias}>{h.alias} · {h.root}</option>)}</select></label>
     <div className="sync-actions"><button className="button" disabled={busy||!disk.ready||!alias||stopped||state?.local?.mode==='OBSERVER'} onClick={()=>void run(()=>prepare('upload'))}>上传并交接</button>
     <button className="button" disabled={busy||!disk.ready||!alias} onClick={()=>void run(async()=>{const result=await requestJson(`/api/project-sync/catalog?alias=${encodeURIComponent(alias)}`);setCatalog(result.projects);setTarget(result.projects.some((p:any)=>p.project_id===project.id)?project.id:result.projects[0]?.project_id||'');setPreview(null);})}>读取服务器项目</button>

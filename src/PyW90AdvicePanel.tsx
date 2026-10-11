@@ -1,3 +1,4 @@
+import {attemptLabel} from './humanLabels';
 import {useEffect,useRef,useState} from 'react';
 import type {Project} from './model';
 import {requestJson,errorMessage} from './apiClient';
@@ -89,7 +90,7 @@ export default function PyW90AdvicePanel(props:Props){
     </div>;
   };
   return <section className="input-submit-card pyw90-advice"><h3>PyW90 手动调窗辅助</h3><p>分析、选取候选、检查完整窗口，再填入参数草稿。实际拟合效果请结合 DFT／Wannier 能带对比。</p>
-    <div className="parameter-grid"><label className="field">分析范围下界 / E−E_F (eV)<input type="number" value={emin} onChange={e=>setEmin(e.target.value)}/></label><label className="field">分析范围上界 / E−E_F (eV)<input type="number" value={emax} onChange={e=>setEmax(e.target.value)}/></label><label className="field">pre dos 来源<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">当前 VASP-Wannier attempt</option>{dosChoices.map(item=><option value={item.id} key={item.id}>{project.nodes.find(n=>n.id===item.node_id)?.data.label||'DOS'} · {item.job_id||item.id.slice(0,12)}</option>)}</select></label></div>
+    <div className="parameter-grid"><label className="field">分析范围下界 / E−E_F (eV)<input type="number" value={emin} onChange={e=>setEmin(e.target.value)}/></label><label className="field">分析范围上界 / E−E_F (eV)<input type="number" value={emax} onChange={e=>setEmax(e.target.value)}/></label><label className="field">pre dos 来源<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">当前 VASP-Wannier attempt</option>{dosChoices.map(item=><option value={item.id} key={item.id}>{attemptLabel(item,project)}</option>)}</select></label></div>
     <div className="pyw90-actions"><button className="button" disabled={!enabled} onClick={()=>void run('check')}>检查当前草稿窗口与下界</button><button className="button" disabled={!enabled} onClick={()=>void run('eig')}>远端 eig：外窗候选</button><button className="button" disabled={!enabled} onClick={()=>void run('pre')}>远端 pre dos：投影与冻结窗候选</button></div>
     {busy&&<p role="status">正在只读核对远端文件与采样网格…</p>}{error&&<p role="alert" className="structure-error">{error}</p>}
     {manual&&<><h4>下界与完整窗口诊断</h4>{manual.fingerprint!==fingerprint&&<p className="handoff-warning">草稿或分析设置已变化；以下为上次检查结果，请重新检查。</p>}<Report report={manual.report} onGap={enabled?gap=>void select({dis_win_min:gap.midpoint_eV-manual.report.fermi_eV},manual.report.source_hashes):undefined}/></>}
