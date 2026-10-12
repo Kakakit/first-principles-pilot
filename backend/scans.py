@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from . import execution as ex
 from . import recycle, execution_control as control, inputs, parameter_catalog, servers, candidate_pool
 from .storage import validate_workspace
+from .platform_runtime import exclusive_lock
 
 SCHEMA = 'fpilot.vasp-scan.v1'
 
@@ -225,6 +226,64 @@ def get(batch_id):
     return json.loads(row[0])
 
 
+def status(batch_id, project_id):
+    """Read local attempt progress without SSH or changing the batch revision."""
+    batch = get(batch_id)
+    if batch['project_id'] != project_id:
+        raise ValueError('批次不属于当前项目')
+    for case in batch['cases']:
+        if not case.get('attempt_id'):
+            continue
+        try:
+            record = ex.get(case['attempt_id'])
+        except ValueError:
+            continue
+        if (record.get('project_id') != project_id or
+                record.get('scan_batch_id', batch_id) != batch_id):
+            continue
+        case['state'] = record['state']
+        case['job_id'] = record.get('job_id')
+        if record['state'] == 'UNKNOWN' and record.get('note'):
+            case['note'] = record['note']
+    return batch
+
+
+def _dispatch_lock(batch_id):
+    return exclusive_lock(ex.ROOT/'scan-locks'/(digest(batch_id)+'.lock'))
+
+
+def _finish_initial_dispatch(batch_id):
+    # A pause may win while SSH is in flight. Merge only dispatch metadata.
+    for _ in range(3):
+        batch = get(batch_id)
+        if batch.get('initial_dispatch', {}).get('state') != 'IN_PROGRESS':
+            return
+        batch['initial_dispatch'].update(state='FINISHED', finished_at=ex.now())
+        try:
+            save(batch)
+            return
+        except ValueError:
+            if get(batch_id)['revision'] == batch['revision']:
+                raise
+
+
+def authorize_and_dispatch(batch_id, **payload):
+    request_hash = digest(payload)
+    with _dispatch_lock(batch_id) as owned:
+        current = get(batch_id)
+        if (current['project_id'] == payload['project_id'] and current.get('authorization') and
+                current.get('initial_dispatch', {}).get('request_hash') == request_hash):
+            return status(batch_id, payload['project_id'])
+        if not owned:
+            raise ValueError('扫描批次正在核对或派发，请读取当前状态后重试')
+        batch = authorize(batch_id, **payload)
+        batch['initial_dispatch'] = {'state': 'IN_PROGRESS', 'started_at': ex.now(),
+                                     'request_hash': request_hash}
+        save(batch)
+        _dispatch_pass(batch_id, {})
+        return status(batch_id, payload['project_id'])
+
+
 def history(project_id):
     with closing(database()) as db:
         rows = db.execute('SELECT body FROM scan_batches WHERE project_id=? ORDER BY rowid DESC',(project_id,)).fetchall()
@@ -365,9 +424,28 @@ def tick():
         ids=[r[0] for r in db.execute("SELECT id FROM scan_batches WHERE state IN ('ACTIVE','BLOCKED','PAUSED') ORDER BY rowid")]
     capacity_context={}
     for batch_id in ids:
-        dispatched=set()
+        with _dispatch_lock(batch_id) as owned:
+            if owned:
+                _dispatch_pass(batch_id, capacity_context)
+
+
+def _dispatch_pass(batch_id, capacity_context):
+    dispatched=set()
+    try:
         for _ in range(64):
             if not _tick_batch_once(batch_id,capacity_context,dispatched):break
+        batch = get(batch_id)
+        if batch.get('last_worker_error'):
+            batch.pop('last_worker_error')
+            save(batch)
+    except Exception as exc:
+        batch = get(batch_id)
+        if batch['state'] == 'ACTIVE':
+            batch['last_worker_error'] = control.redact(str(exc))[:1000]
+            try: save(batch)
+            except ValueError: pass
+    finally:
+        _finish_initial_dispatch(batch_id)
 
 
 def _tick_batch_once(batch_id,capacity_context,dispatched):

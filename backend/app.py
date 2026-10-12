@@ -361,15 +361,13 @@ def scan_history(project_id: str):
 @app.get('/api/scans/{batch_id}')
 def scan_get(batch_id: str, project_id: str):
     try:
-        batch=scans.get(batch_id)
-        if batch['project_id']!=project_id: raise ValueError('批次不属于当前项目')
-        return batch
+        return scans.status(batch_id, project_id)
     except ValueError as exc: raise HTTPException(422,str(exc)) from exc
 
 
 @app.post('/api/scans/{batch_id}/authorize')
 def scan_authorize(batch_id: str, payload: ScanAuthorization):
-    try: return scans.authorize(batch_id,**payload.model_dump())
+    try: return scans.authorize_and_dispatch(batch_id,**payload.model_dump())
     except (ValueError,KeyError,TypeError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
 
 
