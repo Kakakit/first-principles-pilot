@@ -1,4 +1,17 @@
 :root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--color-text);background:var(--color-surface-raised);font-synthesis:none;font-size:var(--font-size);--teal:var(--color-accent);--line:var(--color-muted-text);--muted:var(--color-muted-text)}
+.poscar-editor{padding:20px;border:1px solid var(--color-border);border-radius:10px;background:var(--color-surface);margin:16px 0}
+.poscar-editor p{line-height:1.7}
+.poscar-editor details{margin-bottom:16px}
+.poscar-text-label{display:block}
+.poscar-text-label textarea{display:block;width:100%;min-height:340px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:1.6;white-space:pre;overflow:auto;margin:8px 0 12px;tab-size:4}
+.poscar-editor .poscar-identity{display:flex;flex-direction:row;gap:8px;align-items:flex-start}
+.poscar-identity input{width:auto;margin-top:4px}
+.poscar-preview{padding:16px;margin-top:16px;background:var(--color-accent-soft);border:1px solid var(--color-border);border-radius:8px}
+.poscar-volume{display:flex;flex-wrap:wrap;gap:18px 36px}
+.poscar-volume span{display:block;color:var(--color-muted-text)}
+.poscar-volume strong{display:block;font-size:22px;line-height:1.5;overflow-wrap:anywhere}
+.poscar-editor .crystal-actions{flex-wrap:wrap;gap:12px}
+.poscar-editor .crystal-actions>div{display:flex;flex-wrap:wrap;gap:8px}
 *{box-sizing:border-box}
 body{margin:0}
 .first-run-notice{display:flex;align-items:center;gap:12px;padding:12px 20px;background:var(--color-accent-soft);flex-shrink:0;flex-wrap:wrap}

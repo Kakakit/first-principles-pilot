@@ -10,7 +10,7 @@ import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
-from .structure_edit import source_bytes
+from .structure_edit import source_bytes, input_geometry
 
 MAX_WORKSPACE_BYTES = 32 * 1024 * 1024
 ROOT = Path(os.environ.get('FPILOT_WORKSPACE', Path(__file__).resolve().parents[1] / 'workspace-data')).resolve()
@@ -61,6 +61,8 @@ def validate_workspace(w):
                 if n['data']['kind'] != 'structure':
                     raise ValueError('结构只能绑定输入结构节点。')
                 source_bytes(n['data']['structure'])
+                if 'poscarText' in n['data']['structure']:
+                    input_geometry(n['data']['structure'])
         if any(e['source'] not in nodes or e['target'] not in nodes for e in p['edges']):
             raise ValueError('连接引用不存在的节点。')
     if w.get('activeId') not in ids:

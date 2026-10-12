@@ -58,6 +58,7 @@ def edit_structure(parent, lattice, atoms, coordinate_mode):
     if not math.isfinite(s.volume) or not np.isfinite(s.cart_coords).all() or not np.isfinite(s.frac_coords).all():
         raise ValueError('编辑后的几何超出有效数值范围。')
     result = copy.deepcopy(parent)
+    result.pop('poscarText', None)
     result.update(lattice=s.lattice.matrix.tolist(), lengths=list(s.lattice.abc),
                   angles=list(s.lattice.angles), volume=float(s.volume), formula=s.composition.formula)
     result['atoms'] = [{'id': a['id'], 'element': site.specie.symbol,
@@ -70,4 +71,69 @@ def edit_structure(parent, lattice, atoms, coordinate_mode):
                       'at': datetime.now(timezone.utc).isoformat(),
                       'operation': 'geometry-and-constraints',
                       'parent_edit_id': parent.get('edit', {}).get('id')}
+    return result
+
+
+def edit_poscar(parent, text, rebuild_atom_ids=False):
+    """Validate a proposal; saving the returned document is a separate UI action."""
+    from .structures import parse_structure
+    from .poscar_text import parser_text
+    source_bytes(parent)
+    if not isinstance(text, str) or not text or len(text.encode('utf-8')) > 256 * 1024:
+        raise ValueError('POSCAR 文本必须非空且不超过 256 KiB。')
+    result = parse_structure('POSCAR', 'poscar', base64.b64encode(text.encode('utf-8')).decode())
+    _, info = parser_text(text)
+    same_rows = [a['element'] for a in result['atoms']] == [a['element'] for a in parent['atoms']]
+    preserved = same_rows and not rebuild_atom_ids
+    for index, atom in enumerate(result['atoms']):
+        atom['id'] = parent['atoms'][index]['id'] if preserved else f'{uuid.uuid4()}:{index + 1}'
+    result['source'] = copy.deepcopy(parent['source'])
+    result['poscarText'] = text
+    result['edit'] = {'id': str(uuid.uuid4()), 'parent_geometry_sha256': geometry_hash(parent),
+                      'geometry_sha256': geometry_hash(result), 'coordinate_mode': info['coordinate_mode'],
+                      'at': datetime.now(timezone.utc).isoformat(), 'operation': 'poscar-text',
+                      'parent_edit_id': parent.get('edit', {}).get('id')}
+    messages = []
+    if not preserved:
+        messages.append('已重新建立原子身份；请重新核对 MAGMOM、Hubbard 和 POTCAR，旧记录不会按行套用。')
+    if info['extra_sections']:
+        messages.append('附加段随当前 POSCAR 原文保留：' + '、'.join(info['extra_sections']))
+    result['warnings'] += messages
+    return {'structure': result, 'summary': {
+        'volume_before': parent['volume'], 'volume_after': result['volume'],
+        'volume_ratio': result['volume'] / parent['volume'],
+        'lengths_before': parent['lengths'], 'lengths_after': result['lengths'],
+        'atoms_before': len(parent['atoms']), 'atoms_after': len(result['atoms']),
+        'elements_before': [a['element'] for a in parent['atoms']],
+        'species_after': info['species'], 'counts_after': info['counts'],
+        'atom_ids_preserved': preserved, **info, 'messages': messages,
+    }}
+
+
+def input_geometry(document):
+    """Old cached POSCARs are regenerated; explicit text is reparsed and checked."""
+    source_bytes(document)
+    if 'poscarText' not in document:
+        return edit_structure(document, document['lattice'],
+                              [dict(a, coordinates=a['fractional']) for a in document['atoms']], 'fractional')
+    from .structures import parse_structure
+    text = document['poscarText']
+    if not isinstance(text, str):
+        raise ValueError('POSCAR 文本无效，请重新验证。')
+    parsed = parse_structure('POSCAR', 'poscar', base64.b64encode(text.encode('utf-8')).decode())
+    mismatch = 'POSCAR 文本与保存的几何不一致，请重新验证并应用。'
+    if [a['element'] for a in parsed['atoms']] != [a['element'] for a in document['atoms']]:
+        raise ValueError(mismatch)
+    for key in ('lattice', 'lengths', 'angles', 'volume'):
+        if not np.allclose(parsed[key], document[key], atol=1e-10, rtol=0):
+            raise ValueError(mismatch)
+    for actual, saved in zip(parsed['atoms'], document['atoms']):
+        if actual['selective'] != saved['selective'] or any(
+                not np.allclose(actual[key], saved[key], atol=1e-10, rtol=0)
+                for key in ('fractional', 'cartesian')):
+            raise ValueError(mismatch)
+    if len(set(a['id'] for a in document['atoms'])) != len(document['atoms']):
+        raise ValueError('原子身份重复。')
+    result = copy.deepcopy(document)
+    result['poscar'] = text
     return result

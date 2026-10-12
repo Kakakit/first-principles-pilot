@@ -1081,7 +1081,7 @@ def import_structure(payload: StructureImport):
         raise HTTPException(status_code=422, detail=f'结构导入失败：{str(exc)[:500]}') from exc
 
 
-from .structure_edit import edit_structure
+from .structure_edit import edit_structure, edit_poscar
 from .storage import WorkspaceStore, ConflictError
 
 
@@ -1103,6 +1103,20 @@ def edit_geometry(payload: StructureEdit):
 class LocalSymmetryRequest(BaseModel):
     poscar: str = Field(min_length=1, max_length=262144)
     angle_tolerance_degree: float = Field(gt=0, le=30)
+
+
+class PoscarEdit(BaseModel):
+    parent: dict
+    text: str = Field(min_length=1, max_length=262144)
+    rebuild_atom_ids: bool = False
+
+
+@app.post('/api/structures/poscar-edit')
+def edit_poscar_text(payload: PoscarEdit):
+    try:
+        return edit_poscar(payload.parent, payload.text, payload.rebuild_atom_ids)
+    except (ValueError, KeyError, TypeError, IndexError, OverflowError) as exc:
+        raise HTTPException(422, f'POSCAR 编辑未通过验证：{str(exc)[:500]}') from exc
 
 
 @app.post('/api/structures/symmetry')

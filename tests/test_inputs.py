@@ -42,6 +42,24 @@ class InputTests(unittest.TestCase):
         self.assertEqual(result['files']['KPOINTS'], 'Regular mesh\n0\nGamma\n4 4 4\n0 0 0\n')
         self.assertNotEqual(result['files']['POSCAR'], 'not a POSCAR')
 
+    def test_explicit_poscar_text_reaches_generation_and_frozen_zip_verbatim(self):
+        from backend.structure_edit import edit_poscar
+        parent = self.project['nodes'][0]['data']['structure']
+        lines = parent['poscar'].splitlines(keepends=True)
+        lines[0], lines[1] = 'EOS length scale\n', '1.01\n'
+        text = ''.join(lines)
+        doc = edit_poscar(parent, text)['structure']
+        self.project['nodes'][0]['data']['structure'] = doc
+        report = inputs.generate(self.project, 'c')
+        self.assertFalse(report['errors'])
+        self.assertEqual(report['files']['POSCAR'], text)
+        frozen = inputs.freeze(self.project, 'c', 'EOS scale')
+        with zipfile.ZipFile(inputs.ROOT / 'inputs' / (frozen['id'] + '.zip')) as bundle:
+            self.assertEqual(bundle.read('POSCAR').decode(), text)
+        doc['poscarText'] = text.replace('1.01\n', '1.02\n', 1)
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            inputs.freeze(self.project, 'c', 'stale text must not freeze')
+
     def test_mesh_generation_information_is_optional_frozen_and_never_recalculates_old_grid(self):
         from backend import kpoints
         lattice=self.project['nodes'][0]['data']['structure']['lattice']

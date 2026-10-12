@@ -12,7 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 from .storage import ROOT, validate_workspace
-from .structure_edit import edit_structure, geometry_hash
+from .structure_edit import edit_structure, geometry_hash, input_geometry
 from . import parameter_catalog
 
 spec = importlib.util.spec_from_file_location("fpilot_vasp_contract", Path(__file__).resolve().parents[1] / "resources/sets/vasp.py")
@@ -188,10 +188,10 @@ def generate(project, node_id, context=None):
         errors.append("需要唯一、已导入的上游结构")
         return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
     source = roots[0]["data"]["structure"]
-    # Regenerate POSCAR from geometry; never trust cached POSCAR text from a backup.
+    # Revalidate explicit edits; legacy cached POSCARs remain untrusted.
     root_id = roots[0]['id']
     if root_id not in context.geometry:
-        context.geometry[root_id] = edit_structure(source, source["lattice"], [dict(a, coordinates=a["fractional"]) for a in source["atoms"]], "fractional")
+        context.geometry[root_id] = input_geometry(source)
     geometry = context.geometry[root_id]
     species = []
     for atom in geometry["atoms"]:

@@ -4,14 +4,16 @@ export type StructureDocument = {
   version:1; formula:string; lattice:Vec3[]; lengths:Vec3; angles:Vec3; volume:number;
   atoms:{id:string;element:string;fractional:Vec3;cartesian:Vec3;selective:boolean[]|null}[];
   warnings:string[]; source:{filename:string;format:'cif'|'poscar';sha256:string;base64:string};
-  parser:{name:string;version:string}; poscar:string;
+  parser:{name:string;version:string}; poscar:string; poscarText?:string;
 };
 export function validateStructure(value: unknown): asserts value is StructureDocument {
   const s=value as StructureDocument;
   const vec=(v:unknown)=>Array.isArray(v)&&v.length===3&&v.every(n=>typeof n==='number'&&Number.isFinite(n));
   if(!s||s.version!==1||typeof s.formula!=='string'||!Array.isArray(s.lattice)||s.lattice.length!==3||!s.lattice.every(vec)||!vec(s.lengths)||!vec(s.angles)||!Number.isFinite(s.volume)||s.volume<=0||!Array.isArray(s.atoms)||!s.atoms.length||s.atoms.length>1500||!s.atoms.every(a=>a&&typeof a.id==='string'&&/^[A-Z][a-z]?$/.test(a.element)&&vec(a.fractional)&&vec(a.cartesian)&&(a.selective===null||(Array.isArray(a.selective)&&a.selective.length===3&&a.selective.every(v=>typeof v==='boolean'))))||new Set(s.atoms.map(a=>a.id)).size!==s.atoms.length||!s.source||typeof s.source.filename!=='string'||!['cif','poscar'].includes(s.source.format)||!/^[a-f0-9]{64}$/.test(s.source.sha256)||typeof s.source.base64!=='string'||s.source.base64.length>349528||!Array.isArray(s.warnings)||!s.warnings.every(w=>typeof w==='string')||typeof s.poscar!=='string'||!s.parser||typeof s.parser.version!=='string') throw new Error('结构记录无效，请重新导入原文件。');
   try {if(!atob(s.source.base64).length)throw new Error();}catch {throw new Error('原文件备份编码损坏。');}
+  if(s.poscarText!==undefined&&(typeof s.poscarText!=='string'||!s.poscarText.trim()||new TextEncoder().encode(s.poscarText).length>262144))throw new Error('POSCAR 编辑文本无效或超过 256 KiB。');
 }
+export const currentPoscar=(s:StructureDocument)=>s.poscarText??s.poscar;
 export function saveBytes(name:string, bytes:BlobPart) {
   const url=URL.createObjectURL(new Blob([bytes])); const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }

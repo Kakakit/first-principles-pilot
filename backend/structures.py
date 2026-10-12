@@ -7,6 +7,7 @@ import warnings
 import numpy as np
 from pymatgen.io.cif import CifParser
 from pymatgen.io.vasp import Poscar
+from .poscar_text import parser_text
 
 MAX_BYTES = 256 * 1024
 MAX_ATOMS = 1500
@@ -24,19 +25,12 @@ def parse_structure(filename, file_format, encoded):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter('always')
         if file_format == 'poscar':
-            lines = text.splitlines()
-            if len(lines) < 8:
-                raise ValueError('POSCAR 不完整。')
-            if len(lines[1].split()) != 1:
-                raise ValueError('当前解析器只支持单一缩放因子，请先转换三轴缩放格式。原文件未修改。')
-            # VASP 4 element guessing would invent species: require explicit symbols.
-            if all(token.isdigit() for token in lines[5].split()):
-                raise ValueError('缺少元素名称行；请使用带明确元素名称的 VASP 5/6 POSCAR。')
-            poscar = Poscar.from_str(text, read_velocities=True)
+            normalized, info = parser_text(text)
+            poscar = Poscar.from_str(normalized, read_velocities=True)
             structure = poscar.structure
             if not poscar.true_names:
                 raise ValueError('无法确定元素名称，请检查 POSCAR 元素行。')
-            extra = poscar.velocities is not None or poscar.predictor_corrector is not None
+            extra = bool(info['extra_sections'])
         elif file_format == 'cif':
             parser = CifParser.from_str(text, occupancy_tolerance=1.0, frac_tolerance=0)
             structures = parser.parse_structures(primitive=False, on_error='raise')
