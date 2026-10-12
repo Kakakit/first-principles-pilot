@@ -240,6 +240,8 @@ def source_file_plan(snapshot, incar):
                       snapshot.get('schema') == 'fpilot.chain-source.v1' and
                       str(snapshot.get('kind', '')).endswith('-restart'))
     for name, info in snapshot['files'].items():
+        if snapshot.get('schema') == 'fpilot.role-source.v1' and info.get('usage') == 'geometry-reference' and name in ('POSCAR', 'CONTCAR'):
+            continue  # verified baseline; the bundle contains the scaled POSCAR
         target = 'POSCAR' if name == 'CONTCAR' else name
         writable = (name == 'CHGCAR' and not charge_read_only or name == 'WAVECAR' and not wave_read_only
                     or manual_restart and name in ('CHGCAR', 'WAVECAR'))

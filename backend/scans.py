@@ -50,6 +50,10 @@ def axis(dimension, stage):
         elif kind in ('u', 'j'):
             if not re.fullmatch(r'[A-Z][a-z]?', str(dimension.get('element', ''))):
                 raise ValueError('U/J 元素无效')
+        elif kind == 'poscar':
+            from .scan_geometry import MODES
+            if dimension.get('mode', 'volume_ratio') not in MODES:
+                raise ValueError('POSCAR 扫描方式无效')
         else:
             raise ValueError('扫描维度类型无效')
         start, end, step = (decimal(dimension.get(k)) for k in ('start', 'end', 'step'))
@@ -61,6 +65,7 @@ def axis(dimension, stage):
             if value == '-0': value = '0'
             if kind == 'incar': parameter_catalog.validate_value(tag, value)
             if kind in ('u', 'j') and current < 0: raise ValueError('U/J 不得为负')
+            if kind == 'poscar' and current <= 0: raise ValueError('POSCAR 扫描值必须大于零；目标体积填写正数，输出为负 scale')
             values.append(value)
             current += step
         if not values or len(values) > 64: raise ValueError('单维最多 64 个值')
@@ -68,7 +73,21 @@ def axis(dimension, stage):
     return values
 
 
-def case_project(project, base_id, dimensions, values):
+def geometry_baseline(project, base_id, scope):
+    from . import source_contracts
+    report = inputs.generate(project, base_id)
+    if report['errors']:
+        raise ValueError('请先修正基础输入：' + '；'.join(report['errors']))
+    source_contracts.validate_pead(report['files']['INCAR'])
+    from .scan_geometry import validate_source
+    validate_source(report['source_plan'])
+    contract = source_contracts.freeze(project, base_id, report, 'lightweight', scope)
+    raw = report['files']['POSCAR']
+    return {'text': raw, 'sha256': hashlib.sha256(raw.encode()).hexdigest(),
+            'source_contract': contract, 'source': report.get('structure_source')}
+
+
+def case_project(project, base_id, dimensions, values, baseline=None):
     clone = copy.deepcopy(project)
     node = next(n for n in clone['nodes'] if n['id'] == base_id)
     layer = node['data'].setdefault('parameters', {'values': {}})
@@ -80,7 +99,31 @@ def case_project(project, base_id, dimensions, values):
             element = dimension['element']
             row = layer.setdefault('hubbard', {}).setdefault(element, copy.deepcopy(base_hubbard.get(element, {'l':'-1','u':'0','j':'0'})))
             row[kind] = value
-        else: node['data'].setdefault('inputDraft', {})['grid'] = value
+        elif kind == 'kmesh': node['data'].setdefault('inputDraft', {})['grid'] = value
+        elif kind == 'poscar':
+            from .structure_edit import edit_poscar, input_geometry
+            from .scan_geometry import transform
+            nodes = {n['id']: n for n in clone['nodes']}
+            current = base_id
+            visited = set()
+            while nodes[current]['data']['kind'] != 'structure':
+                if current in visited: raise ValueError('存在循环依赖')
+                visited.add(current)
+                parents = [e['source'] for e in clone['edges'] if e['target'] == current]
+                if len(parents) != 1: raise ValueError('POSCAR 扫描需要唯一上游结构')
+                current = parents[0]
+            document = nodes[current]['data']['structure']
+            raw = baseline['text'] if baseline else input_geometry(document)['poscar']
+            text, summary = transform(raw, dimension.get('mode', 'volume_ratio'), value)
+            nodes[current]['data']['structure'] = edit_poscar(document, text)['structure']
+            node['data']['poscarScan'] = summary
+            if baseline and baseline.get('source'):
+                summary['baseline_source'] = baseline['source']
+            # Bind every case to the same reviewed attempt, never to whichever
+            # attempt happens to become latest while the batch is freezing.
+            if baseline and baseline['source_contract']['roles'].get('structure'):
+                source = baseline['source_contract']['roles']['structure']
+                node['data']['sourceDraft'] = {**node['data'].get('sourceDraft', {}), 'attempt_id': source['attempt_id']}
     return clone
 
 
@@ -94,7 +137,7 @@ def source_project(project,scan_node_id,base_node_id):
     return project
 
 
-def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', frozen_id=None, window_search=None, source_draft=None):
+def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', frozen_id=None, window_search=None, source_draft=None, *, _include_baseline=False):
     if mode == 'wannier90-window':
         from . import wannier_scans
         return {k:v for k,v in wannier_scans.preview(project,scan_node_id,base_node_id,frozen_id,window_search,source_draft).items() if not k.startswith('_')}
@@ -107,7 +150,7 @@ def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', f
         raise ValueError('迭代节点须直接连接一个 relax 或 SCF 基础节点')
     if not isinstance(dimensions, list) or not 1 <= len(dimensions) <= 4 or any(not isinstance(d, dict) for d in dimensions):
         raise ValueError('请输入 1–4 个扫描维度')
-    keys = [(d.get('kind'), d.get('tag') or d.get('element')) for d in dimensions]
+    keys = [(d.get('kind'), None if d.get('kind') == 'poscar' else d.get('tag') or d.get('element')) for d in dimensions]
     if len(keys) != len(set(keys)): raise ValueError('扫描维度重复')
     if any(d['kind'] in ('u','j') for d in dimensions):
         effective = dict(project.get('parameters', {}).get('shared', {}).get('values', {}))
@@ -117,24 +160,40 @@ def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', f
     count = 1
     for values in axes: count *= len(values)
     if count > 64: raise ValueError('扫描超过 64 个 case')
+    baseline = geometry_baseline(project, base_node_id, scan_node_id) if any(d['kind'] == 'poscar' for d in dimensions) else None
     cases = []
     seen_inputs = set()
     base_files = inputs.generate(project, base_node_id)['files']
+    if baseline:
+        base_files = {**base_files, 'POSCAR': baseline['text']}
+        base_files.pop('POSCAR.reference', None)
     for index, values in enumerate(itertools.product(*axes)):
-        report = inputs.generate(case_project(project, base_node_id, dimensions, values), base_node_id)
+        case = case_project(project, base_node_id, dimensions, values, baseline)
+        report = inputs.generate(case, base_node_id)
+        geometry_scan = next(n for n in case['nodes'] if n['id'] == base_node_id)['data'].get('poscarScan') if baseline else None
+        if geometry_scan and report['files']:
+            report['files']['POSCAR'] = report['files'].pop('POSCAR.reference', report['files'].get('POSCAR', ''))
+            from .scan_geometry import warnings
+            report['warnings'] += warnings(report['files']['INCAR'], report['stage'])
         hashes={name:hashlib.sha256(raw.encode()).hexdigest() for name,raw in report['files'].items() if name in ('INCAR','KPOINTS','POSCAR','POSCAR.reference')}
-        fingerprint=(hashes.get('INCAR'),hashes.get('KPOINTS'))
+        fingerprint=(hashes.get('INCAR'),hashes.get('KPOINTS'),hashes.get('POSCAR') or hashes.get('POSCAR.reference'))
         errors=list(report['errors'])
-        if fingerprint in seen_inputs: errors.append('此 case 的实际 INCAR/KPOINTS 与另一 case 相同')
+        if fingerprint in seen_inputs: errors.append('此 case 的实际 INCAR/KPOINTS/POSCAR 与另一 case 相同')
         seen_inputs.add(fingerprint)
         differences = {}
-        for name in ('INCAR', 'KPOINTS'):
+        for name in ('INCAR', 'KPOINTS', 'POSCAR'):
             before = base_files.get(name, '').splitlines()
             after = report['files'].get(name, '').splitlines()
             if before != after:
                 differences[name] = '\n'.join(difflib.unified_diff(before, after, fromfile='base/'+name, tofile='case/'+name, lineterm=''))
-        cases.append({'index':index, 'parameters':[{'kind':d['kind'],'key':d.get('tag') or d.get('element') or 'grid','value':v} for d,v in zip(dimensions,values)], 'input_hashes':hashes, 'input_diff':differences, 'errors':errors, 'warnings':report['warnings'], 'dependencies':report['dependencies']})
-    return {'project_id':project['id'], 'scan_node_id':scan_node_id, 'base_node_id':base_node_id, 'stage':base['data']['kind'], 'dimensions':dimensions, 'case_count':count, 'cases':cases, 'ready':all(not c['errors'] for c in cases), 'definition_hash':digest({'project':project,'scan_node_id':scan_node_id,'base_node_id':base_node_id,'dimensions':dimensions})}
+        from .scan_geometry import KEYS
+        cases.append({'index':index, 'parameters':[{'kind':d['kind'],'key':KEYS[d.get('mode', 'volume_ratio')] if d['kind'] == 'poscar' else d.get('tag') or d.get('element') or 'grid','value':v} for d,v in zip(dimensions,values)], 'input_hashes':hashes, 'input_diff':differences, 'errors':errors, 'warnings':report['warnings'], 'dependencies':report['dependencies'], **({'geometry': geometry_scan} if geometry_scan else {})})
+    definition = {'project':project,'scan_node_id':scan_node_id,'base_node_id':base_node_id,'dimensions':dimensions}
+    if baseline:
+        definition['geometry_baseline'] = {k:v for k,v in baseline.items() if k != 'text'}
+    result = {'project_id':project['id'], 'scan_node_id':scan_node_id, 'base_node_id':base_node_id, 'stage':base['data']['kind'], 'dimensions':dimensions, 'case_count':count, 'cases':cases, 'ready':all(not c['errors'] for c in cases), 'definition_hash':digest(definition)}
+    if _include_baseline: result['_geometry_baseline'] = baseline
+    return result
 
 
 def database():
@@ -180,7 +239,8 @@ def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_def
     if mode != 'vasp':raise ValueError('迭代模式无效')
     project=source_project(project,scan_node_id,base_node_id)
     if not isinstance(reason,str) or not reason.strip() or len(reason)>2000: raise ValueError('请填写批次输入理由')
-    report = preview(project,scan_node_id,base_node_id,dimensions)
+    report = preview(project,scan_node_id,base_node_id,dimensions,_include_baseline=True)
+    baseline = report.pop('_geometry_baseline')
     if expected_definition_hash is not None and report['definition_hash']!=expected_definition_hash:
         raise ValueError('基础输入或扫描定义已变化，请重新预览')
     if not report['ready']: raise ValueError('存在输入错误的 case，不能冻结')
@@ -188,7 +248,7 @@ def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_def
     cases = []
     axes = [axis(d,report['stage']) for d in dimensions]
     for item, values in zip(report['cases'],itertools.product(*axes)):
-        case=case_project(project,base_node_id,dimensions,values)
+        case=case_project(project,base_node_id,dimensions,values,baseline)
         base=next(n for n in case['nodes'] if n['id']==base_node_id)
         if not base['data'].get('sourceDraft'):
             from .source_contracts import draft

@@ -193,6 +193,10 @@ def generate(project, node_id, context=None):
     if root_id not in context.geometry:
         context.geometry[root_id] = input_geometry(source)
     geometry = context.geometry[root_id]
+    geometry_scan = node['data'].get('poscarScan')
+    if geometry_scan and (not isinstance(geometry_scan, dict) or kind not in ('relax', 'scf') or geometry_scan.get('schema') != 'fpilot.poscar-scan.v1' or
+                          geometry_scan.get('poscar_sha256') != digest(geometry['poscar'].encode())):
+        errors.append('POSCAR 扫描记录与实际结构不一致，请重新预览批次')
     species = []
     for atom in geometry["atoms"]:
         if not species or species[-1] != atom["element"]:
@@ -441,6 +445,7 @@ def generate(project, node_id, context=None):
             "restart_required": restart_required, "source_draft": source_draft, "source_plan": source_plan,
             "band_path_source_sha256": options.get('path_structure_hash') if kind == 'bands' else None,
             "band_path_source_attempt_id": options.get('path_source_attempt_id') if kind == 'bands' else None,
+            **({'poscar_scan': geometry_scan} if geometry_scan else {}),
             **({'kmesh_generation':kmesh_generation} if kmesh_generation else {})}
 
 

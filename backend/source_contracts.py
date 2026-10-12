@@ -311,12 +311,25 @@ def bind(policy, record, report, verification_mode):
         raw = base64.b64decode(geometry['source']['base64'], validate=True)
         if hashlib.sha256(raw).hexdigest() != observed_files[structure_name]['sha256']:
             raise ValueError('来源结构原文与解析身份不符')
+        geometry_scan = report.get('poscar_scan')
+        if geometry_scan:
+            from .scan_geometry import transform, validate_source
+            validate_source(policy)
+            if geometry_scan['baseline_sha256'] != hashlib.sha256(raw).hexdigest():
+                raise ValueError('POSCAR 扫描的基准结构已变化，请重新预览')
+            text, actual = transform(raw.decode(), geometry_scan['mode'], geometry_scan['value'])
+            if actual['poscar_sha256'] != geometry_scan['poscar_sha256'] or text != configured:
+                raise ValueError('POSCAR 扫描与实际缩放输入不同，请重新预览')
+            raw = text.encode()
+            geometry = structure_geometry(raw)
         from .structure_edit import geometry_hash
         report['files'].pop('POSCAR.reference', None)
         report['files']['POSCAR'] = raw.decode()
         report['geometry_sha256'], report['source_sha256'] = geometry_hash(geometry), geometry['source']['sha256']
         report['structure_source'] = {'attempt_id': record['id'], 'job_id': record.get('job_id'), 'file': structure_name,
-                                    'sha256': geometry['source']['sha256'], 'volume_A3': geometry['volume']}
+                                    'sha256': observed_files[structure_name]['sha256'],
+                                    'volume_A3': geometry_scan['volume_before_A3'] if geometry_scan else geometry['volume'],
+                                    **({'scaled_poscar_sha256': geometry_scan['poscar_sha256']} if geometry_scan else {})}
     else:
         geometry = structure_geometry(report['files']['POSCAR'].encode())
     if 'CHGCAR' in observed_files:
@@ -346,10 +359,15 @@ def bind(policy, record, report, verification_mode):
         roles[role] = {'attempt_id': record['id'], 'alias': alias, 'node_id': record['node_id'], 'file': name,
                        'source_path': path, 'metadata': info, 'source_bundle_id': record['bundle_id'],
                        'differences': review['differences']}
+        if role == 'structure' and report.get('poscar_scan'):
+            # The scaled POSCAR is already immutable in the bundle. Recheck its
+            # original source at prepare/dispatch, but never copy it over POSCAR.
+            roles[role]['usage'] = 'geometry-reference'
     return {'schema': 'fpilot.source-contract.v2', 'mode': policy['mode'], 'purpose': policy['purpose'],
             'files': policy['files'], 'structure': 'source' if structure_name else 'configured',
             'verification_mode': verification_mode, 'roles': roles, 'source_plan': policy,
-            'initialization': policy['initialization'], 'warnings': review['warnings'], 'wavefunction_header': wave}
+            'initialization': policy['initialization'], 'warnings': review['warnings'], 'wavefunction_header': wave,
+            **({'poscar_scan': report['poscar_scan']} if report.get('poscar_scan') else {})}
 
 
 def freeze(project, node_id, report, verification_mode, execution_scope=None):
@@ -386,7 +404,8 @@ def materialize(contract, alias):
         fresh = source_files.snapshot(alias, role['source_path'], [role['file']], ex.ssh, contract['verification_mode']).get(role['file'])
         if fresh != role['metadata']:
             raise ValueError('冻结来源文件已变化，请重新审查')
-        files[role['file']] = {**fresh, 'source_path': role['source_path']}
+        files[role['file']] = {**fresh, 'source_path': role['source_path'],
+                              **({'usage': 'geometry-reference'} if role.get('usage') == 'geometry-reference' and contract.get('poscar_scan') and role['file'] in ('POSCAR', 'CONTCAR') else {})}
     if contract.get('wavefunction_header'):
         role = contract['roles']['wavefunction']
         if source_files.wave_header(alias, role['source_path'], ex.ssh) != contract['wavefunction_header']:
