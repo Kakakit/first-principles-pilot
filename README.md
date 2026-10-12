@@ -35,7 +35,11 @@
 
 ## 开发与打包
 
-开发时从机器配置或 `FPILOT_PYTHON` 读取已有解释器，执行 `npm start`，默认网页 5173、API 8000。启动器管理自己的 API/Vite/worker，不抢占已有端口；worker 只推进已明确授权的计划。Python 环境按项目登记复用，不创建新环境。
+Mac 开发目录可直接双击 **`First Principles 工作台.app`**，打开工作台控制页，无需输入命令。该入口须与本目录一起保留；可在 Finder 中创建替身放到桌面。备用入口是 `打开工作台.command`。
+
+控制页提供“打开工作台、启动、停止、重启、日志”。重复打开复用原实例；关闭网页继续保留后台服务。停止和重启前确认项目已保存；停止只暂停本机监控与后续链推进，远端作业继续运行。正在上传／提交时等待回执完成，控制中心不强杀其他程序。默认控制页 `http://127.0.0.1:5174`，网页 5173、API 8000；`fpilot.local.json` 可配置独立的 `control_port`。
+
+命令行仍可使用 `npm start`、`npm stop`、`npm run restart`、`npm run status`。启动器从本机配置或 `FPILOT_PYTHON` 读取已有解释器，worker 只推进已明确授权的计划。Python 环境按项目登记复用，不创建新环境。控制中心日志与身份保存在忽略的 `.fpilot-runtime/`，Vite 每个目录使用独立 `.fpilot-cache/`；这两项不包含在项目同步包内。这里的新入口适用于源码开发目录，已有无需 Node 的运行 ZIP 继续使用原 `start.command`／`start.cmd`。
 
 已有前端 `dist/` 时可直接打包；只有改了前端才重新 `npm run build`。以下命令中的 `python` 应替换为登记解释器：
 

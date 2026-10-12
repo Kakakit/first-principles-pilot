@@ -1,65 +1,41 @@
-import { spawn, spawnSync } from 'node:child_process';
-import { createServer } from 'node:net';
-import { fileURLToPath } from 'node:url';
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-
-const root = fileURLToPath(new URL('../', import.meta.url));
-const configPath = process.env.FPILOT_CONFIG || join(root, 'fpilot.local.json');
-const config = existsSync(configPath) ? JSON.parse(readFileSync(configPath, 'utf8').replace(/^\uFEFF/, '')) : {};
-const python = process.env.FPILOT_PYTHON || config.python || (process.platform === 'win32' ? 'python' : 'python3');
-const apiPort = Number(process.env.FPILOT_API_PORT || 8000);
-const devPort = Number(process.env.FPILOT_DEV_PORT || config.port || 5173);
-if (![apiPort, devPort].every(p => Number.isInteger(p) && p >= 1024 && p <= 65535) || apiPort === devPort) {
-  console.error('API 和网页端口需为不同的 1024–65535 整数。'); process.exit(1);
+// Keep the workbench independent of a terminal; repeated opens reuse its controller.
+import {spawn} from 'node:child_process';
+import {readFileSync,mkdirSync,openSync,closeSync} from 'node:fs';
+import {join} from 'node:path';
+import {configuration,root,available,sleep} from './workbench-control.mjs';
+const command=process.argv.find(arg=>['start','stop','restart','status','quit'].includes(arg))||'start';
+const noBrowser=process.argv.includes('--no-browser');
+const config=configuration(),runtime=join(root,'.fpilot-runtime'),recordPath=join(runtime,'controller.json');
+const controlURL=`http://127.0.0.1:${config.controlPort}`;
+async function existing(){
+  try{
+    const record=JSON.parse(readFileSync(recordPath,'utf8'));
+    if(record.root!==root||record.url!==controlURL)return null;
+    const response=await fetch(controlURL+'/status',{signal:AbortSignal.timeout(1500)});
+    const state=await response.json();
+    return response.ok&&state.instance===record.instance?{record,state}:null;
+  }catch{return null;}
 }
-Object.assign(process.env, { PYTHONUTF8: '1', FPILOT_CONFIG: configPath, FPILOT_PORT: String(devPort), FPILOT_API_PORT: String(apiPort) });
-if (config.safe_pull && !process.env.FPILOT_SAFE_PULL) process.env.FPILOT_SAFE_PULL = config.safe_pull;
-for (const [key, env] of [['workspace', 'FPILOT_WORKSPACE'], ['research_root', 'FPILOT_RESEARCH_ROOT'], ['potcar_library', 'FPILOT_POTCAR_LIBRARY']])
-  if (!process.env[env] && config[key]) process.env[env] = config[key];
-const probe = spawnSync(python, ['-c', 'import fastapi, uvicorn, jsonschema; from pymatgen.io.cif import CifParser; from pymatgen.io.vasp import Poscar'], { encoding: 'utf8' });
-if (probe.status !== 0) {
-  console.error('现有 Python 缺少依赖或无法运行。请设置 FPILOT_PYTHON，参见 README.md。\n' + (probe.stderr || probe.error || ''));
-  process.exit(1);
-}
-for (const port of [apiPort, devPort]) {
-  await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => server.close(resolve));
-  }).catch(error => { console.error(`端口 ${port} 不可用：${error.message}。请先停止已有工作台。`); process.exit(1); });
-}
-const children = [];
-let stopping = false;
-let workerTimer;
-function stop(code = 0) {
-  if (stopping) return;
-  stopping = true;
-  clearTimeout(workerTimer);
-  for (const child of children) child.kill();
-  process.exitCode = code;
-}
-// Worker refreshes attempts and dispatches only explicitly authorized chains/batches.
-function startWorker() {
-  if (stopping) return;
-  const child = spawn(python, ['-m', 'backend.worker'], { cwd: root, stdio: 'inherit', env: { ...process.env, FPILOT_LAUNCHER_PID: String(process.pid) } });
-  children.push(child);
-  child.on('error', error => console.error('worker:', error.message));
-  child.on('exit', () => {
-    children.splice(children.indexOf(child), 1);
-    if (!stopping) workerTimer = setTimeout(startWorker, 5000);
-  });
-}
-for (const [command, args] of [
-  [python, ['-m', 'uvicorn', 'backend.app:app', '--host', '127.0.0.1', '--port', String(apiPort)]],
-  [process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(devPort), '--strictPort']],
-]) {
-  const child = spawn(command, args, { cwd: root, stdio: 'inherit' });
-  children.push(child);
-  child.on('error', error => { console.error(error.message); stop(1); });
-  child.on('exit', code => { if (!stopping) stop(code || 1); });
-}
-if (config.worker_enabled !== false) startWorker();
-process.on('SIGINT', () => stop());
-process.on('SIGTERM', () => stop());
-console.log(`工作台：http://127.0.0.1:${devPort} （等候 Vite ready）；Ctrl+C 同时停止前后端。`);
+try{
+  let current=await existing();
+  if(!current&&['stop','status','quit'].includes(command)){console.log('工作台控制中心未运行。');process.exit(0);}
+  if(!current){
+    try{await available(config.controlPort);}catch{throw new Error(`控制端口 ${config.controlPort} 被其他程序占用；请在配置中设置 control_port。不会关闭其他程序。`);}
+    mkdirSync(runtime,{recursive:true,mode:0o700});
+    const log=openSync(join(runtime,'controller.log'),'a',0o600);
+    const child=spawn(process.execPath,[join(root,'scripts/workbench-control.mjs'),'--serve'],{cwd:root,env:process.env,detached:true,stdio:['ignore',log,log]});
+    child.on('error',error=>console.error(error.message));child.unref();closeSync(log);
+    const deadline=Date.now()+15000;
+    while(Date.now()<deadline&&!current){await sleep(200);current=await existing();}
+    if(!current)throw new Error('控制中心未能启动，请查看 .fpilot-runtime/controller.log。');
+  }
+  if(command!=='status'){
+    const response=await fetch(controlURL+'/'+command,{method:'POST',headers:{'Content-Type':'application/json','X-FPilot-Control':current.record.token},body:'{}',signal:AbortSignal.timeout(5000)});
+    const result=await response.json();if(!response.ok)throw new Error(result.error||'操作失败');
+  }
+  console.log(command==='status'?`工作台状态：${current.state.phase}`:`工作台控制中心：${controlURL}\n重复打开会复用已有服务。`);
+  if(!noBrowser&&!['stop','status','quit'].includes(command)){
+    const args=process.platform==='darwin'?['open',[controlURL]]:process.platform==='win32'?['rundll32',['url.dll,FileProtocolHandler',controlURL]]:['xdg-open',[controlURL]];
+    const browser=spawn(args[0],args[1],{stdio:'ignore'});browser.on('error',()=>console.log('请在浏览器打开上方地址。'));browser.unref();
+  }
+}catch(error){console.error('无法操作工作台：'+error.message);process.exitCode=1;}

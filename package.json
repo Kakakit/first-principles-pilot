@@ -8,7 +8,10 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5173 --strictPort",
     "test": "node --import tsx --test tests/*.test.ts",
-    "start": "node scripts/start.mjs"
+    "start": "node scripts/start.mjs",
+    "stop": "node scripts/start.mjs stop",
+    "restart": "node scripts/start.mjs restart",
+    "status": "node scripts/start.mjs status"
   },
   "dependencies": {
     "@rjsf/core": "6.11.0",

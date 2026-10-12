@@ -1,0 +1,10 @@
+#!/bin/zsh
+root="${0:A:h:h:h:h}"
+cd -- "$root" || exit 2
+mkdir -p .fpilot-runtime || exit 2
+"$root/打开工作台.command" "$@" > .fpilot-runtime/open.log 2>&1
+result=$?
+# A normal launch opens only the browser. If prerequisites fail, retain the
+# diagnostic output and open the fallback launcher so the user can read it.
+if (( result != 0 )); then /usr/bin/open "$root/打开工作台.command"; fi
+exit $result
