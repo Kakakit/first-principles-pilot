@@ -644,6 +644,14 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .extension-sources>div{padding:14px;background:var(--color-surface-raised);border-radius:8px;margin:8px 0;display:flex;gap:12px;flex-wrap:wrap;align-items:center}
 .extension-sources label{min-width:170px;flex:1}
 .extension-sources span{color:var(--color-muted-text);font-size:var(--font-secondary)}
+.extension-source-picker{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.extension-source-selection{width:100%;padding:16px;background:var(--color-surface-raised);border-radius:8px}
+.extension-source-candidates{max-height:380px;overflow:auto;margin:12px 0;border:1px solid var(--color-border);border-radius:8px}
+.extension-workspace .extension-source-candidate{display:flex;flex-direction:row;align-items:flex-start;gap:12px;padding:10px;margin:0;border-bottom:1px solid var(--color-border)}
+.extension-source-candidate input{width:auto;flex:none;margin-top:4px}
+.extension-source-candidate span{display:grid;gap:4px;overflow-wrap:anywhere}
+.extension-source-candidate small{color:var(--color-muted-text)}
+.extension-extra>details>label{margin:10px 0}
 .extension-extra{display:grid;gap:12px}
 .extension-options .rjsf fieldset{border:0;margin:0;padding:0}
 .extension-options .form-group{margin:14px 0}

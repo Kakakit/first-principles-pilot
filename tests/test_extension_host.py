@@ -98,6 +98,54 @@ class ExtensionHostTests(unittest.TestCase):
         sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('lcalcpol-polarization-analysis')['manifest'];self.assertIn('已完成运行：缺少 ediff_reached 证据',runs.blockers(m,sources))
         sources[0]['evidence']['ediff_reached']=True;sources[0]['files'][1]['size_bytes']=artifacts.MAX_PULL_BYTES+1
         self.assertTrue(any('10 MiB' in s for s in runs.blockers(m,sources,'local')));self.assertFalse(runs.blockers(m,sources,'ssh'));self.assertTrue(runs.blockers(m,sources,'scheduler'))
+    def test_64_sources_manifest_and_request_share_limits(self):
+        from jsonschema import Draft7Validator
+        package=self.root/'many';shutil.copytree(TEMPLATE,package)
+        manifest=json.loads((package/'extension.manifest.json').read_text())
+        manifest['contexts']=['attempt'];manifest['stages']=[];manifest['sources']={'min':2,'max':64}
+        p.atomic_json(package/'extension.manifest.json',manifest)
+        self.assertEqual(p.inspect_package(package)['manifest']['sources']['max'],64)
+        data={str(i):{'POSCAR':SI.encode()} for i in range(64)};self.mock_attempts(data)
+        raw=[{'kind':'attempt','attempt_id':str(i)} for i in reversed(range(64))]
+        sources=runs.describe_sources(raw,'project')
+        self.assertFalse(runs.blockers(manifest,sources))
+        request=runs._input_request({'id':'check','manifest':manifest,'sources':sources,'location':'ssh','options':{}},self.root/'request')
+        self.assertEqual([item['source_id'] for item in request['inputs']['structure']],[str(i) for i in reversed(range(64))])
+        self.assertEqual(len(request['inputs']['structure']),64)
+        for root in (BASE/'resources/extension-protocol',TEMPLATE/'protocol'):
+            Draft7Validator(json.loads((root/'manifest.schema.json').read_text())).validate(manifest)
+            Draft7Validator(json.loads((root/'request.schema.json').read_text())).validate(request)
+        with self.assertRaisesRegex(ValueError,'1–64'):runs.describe_sources(raw+[raw[0]],'project')
+        with self.assertRaisesRegex(ValueError,'重复'):runs.describe_sources([raw[0],raw[0]],'project')
+        manifest['sources']['max']=65;p.atomic_json(package/'extension.manifest.json',manifest)
+        with self.assertRaisesRegex(ValueError,'1–64'):p.inspect_package(package)
+    def test_many_sources_keep_package_evidence_and_project_gates(self):
+        data={str(i):{'POSCAR':SI.encode()} for i in range(9)};self.mock_attempts(data,evidence={})
+        raw=[{'kind':'attempt','attempt_id':str(i)} for i in range(9)]
+        manifest=copy.deepcopy(p.inspect_package(TEMPLATE)['manifest']);manifest['contexts']=['attempt'];manifest['stages']=[]
+        sources=runs.describe_sources(raw,'project')
+        self.assertIn('需要 1–1 个来源',runs.blockers(manifest,sources))
+        manifest['sources']['max']=64;manifest['evidence']=['ediff_reached']
+        self.assertEqual(len(runs.blockers(manifest,sources)),9)
+        with self.assertRaisesRegex(ValueError,'当前项目'):runs.describe_sources(raw,'another-project')
+    def test_catalog_includes_older_records_and_excludes_recycled_or_foreign(self):
+        # Actual local database path, not the execution page's default 100-row slice.
+        from unittest.mock import MagicMock
+        store=MagicMock();store.read.return_value={'workspace':{'projects':[{'id':'project','nodes':[{'id':'node','data':{'label':'EOS SCF'}}]}]}}
+        with patch.object(runs,'WorkspaceStore',return_value=store),closing(ex.db()) as database:
+            (self.root/'inputs').mkdir()
+            with zipfile.ZipFile(self.root/'inputs'/('a'*64+'.zip'),'w') as archive:archive.writestr('manifest.json',json.dumps({'reason':'体积比 1.03'}))
+            for i in range(103):
+                record={'id':str(i),'project_id':'foreign' if i==102 else 'project','node_id':'node','stage':'scf','state':'COMPLETED','job_id':str(i)+'.node01','config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','recycled':i==101}
+                if i==0:record['bundle_id']='a'*64
+                database.execute('INSERT INTO attempts VALUES(?,?,?)',(str(i),'COMPLETED',json.dumps(record)))
+            database.commit()
+            catalog=runs.source_catalog('project')
+            self.assertEqual(catalog['max_sources'],64);self.assertEqual(len(catalog['attempts']),101)
+            self.assertEqual(catalog['attempts'][-1]['id'],'0');self.assertEqual(catalog['attempts'][0]['name'],'EOS SCF')
+            self.assertEqual(catalog['attempts'][-1]['input_reason'],'体积比 1.03')
+            self.assertNotIn('files',catalog['attempts'][0])
+            with self.assertRaisesRegex(ValueError,'不存在'):runs.source_catalog('missing')
     def runtime(self,scheduler='pbs'):
         value={'alias':'jutai-1','python':sys.executable,'node':'node01','cores':2,'reason':'fixture','config':{'alias':'jutai-1','scheduler':scheduler,'queue':'batch','walltime':'00:10:00','remote_workspace_root':str(self.root/'230269265lht')}}
         p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':value});return value

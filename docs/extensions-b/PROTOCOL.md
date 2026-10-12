@@ -21,7 +21,7 @@
 | `id`、`name`、`version`、`description` | 独立包的身份、显示名、版本与用途 |
 | `entrypoint` | 包内 CLI 相对路径；由选定 Python 执行 |
 | `contexts`、`stages` | 来源类型 `structure`/`attempt` 与适用计算阶段；空阶段列表表示不限阶段 |
-| `sources.min/max` | 1–8 个来源，按用户选择顺序排列 |
+| `sources.min/max` | 1–64 个来源（包括当前任务）；每个扩展仍使用自己的最小/最大值，按用户选择顺序排列 |
 | `inputs` | 每个来源需要的角色；包含 `role/title/names/max_bytes`，可选 `required`（默认 true） |
 | `evidence` | 所需证据，如 `COMPLETED`、`vasp_timing`、`ediff_reached`；布尔证据必须严格为 true |
 | `execution` | 新运行支持 `local`、`ssh`，以及 CLI 超时；旧 `scheduler` 声明只供历史解析，不赋予执行能力；可选 `preferred_location`（默认本机，须为支持位置） |
@@ -31,6 +31,8 @@
 | `outputs`、`fixtures` | table/curve/image/file 输出能力，以及可用于独立检查的包内输入 |
 
 主体按清单筛选阶段和来源；缺文件、证据或环境时显示具体原因。“不适用”与“缺依赖”分别记录。默认角色要求每个来源提供候选文件；`required=false` 允许部分或全部来源缺少该角色，最终组合由扩展 check 判断。明确选择的无效文件不能回退；可选角色空字符串表示本次不提供。
+
+计算结果后处理提供“批量选择已有任务”，搜索节点名称、作业号、备注或服务器并勾选。当前任务固定为来源 1；已选任务保留顺序，新任务按列表顺序加入。取消不改变来源；批量调整按来源身份保留已选输入文件；超过扩展上限不能全选，不截断选择。同一来源不能重复，回收记录与其他项目不参与选择。原逐个添加入口保留。来源列表包含本项目全部已知任务，不受执行页默认 100 条历史限制；读取列表不连接服务器。采用后继续按文件、证据和实际运行位置核验。参考 [EOS 等多来源扩展接入](MULTI_SOURCE_INTEGRATION.md)。
 
 ## CLI 与请求
 

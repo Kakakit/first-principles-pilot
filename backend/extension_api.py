@@ -51,6 +51,9 @@ def runtime_config(alias:str):return call(servers.select_profile,alias)
 @router.put('/runtimes')
 def save_runtime(payload:dict):return call(remote.save_runtime,payload)
 
+@router.get('/sources')
+def sources(project_id:str):return call(runs.source_catalog,project_id)
+
 @router.post('/context')
 def context(payload:dict):return call(runs.context,payload)
 

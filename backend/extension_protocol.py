@@ -20,6 +20,7 @@ from pathlib import Path
 from jsonschema import Draft7Validator
 from .storage import ROOT
 
+MAX_SOURCES = 64
 BUNDLES = Path(__file__).resolve().parents[1] / 'resources/extensions'
 PROTOCOL = 'fpilot.extension.v2'
 REQUEST = 'fpilot.extension-request.v2'
@@ -92,8 +93,8 @@ def inspect_package(root):
         raise ValueError('来源上下文须为结构或计算结果')
     if not isinstance(manifest['stages'],list) or any(not isinstance(s,str) for s in manifest['stages']): raise ValueError('阶段列表无效')
     bounds = manifest['sources']
-    if not isinstance(bounds,dict) or set(bounds) != {'min','max'} or any(type(bounds[k]) is not int for k in bounds) or not 1 <= bounds['min'] <= bounds['max'] <= 8:
-        raise ValueError('输入来源数量须为 1–8')
+    if not isinstance(bounds,dict) or set(bounds) != {'min','max'} or any(type(bounds[k]) is not int for k in bounds) or not 1 <= bounds['min'] <= bounds['max'] <= MAX_SOURCES:
+        raise ValueError(f'输入来源数量须为 1–{MAX_SOURCES}')
     roles = manifest['inputs']
     if not isinstance(roles,list) or not roles or len(roles)>16: raise ValueError('输入角色须为非空有限列表')
     for role in roles:

@@ -19,7 +19,7 @@ from pathlib import Path
 from jsonschema import Draft7Validator
 from . import artifacts, execution as ex, extension_protocol as p, extension_remote as remote, extension_environments as environments
 from .recycle import is_recycled, inactive, assert_available
-from .storage import ROOT
+from .storage import ROOT, WorkspaceStore
 from .platform_runtime import exclusive_lock, process_alive, stop_child
 
 TERMINAL={'COMPLETED','FAILED','NOT_APPLICABLE','UNKNOWN'}
@@ -112,8 +112,42 @@ def _stage(record):
     return record.get('stage_slug','unknown'),{}
 
 
+def _input_note(record):
+    note=record.get('input_reason') or record.get('reason')
+    if note:return note
+    key=record.get('bundle_id')
+    if not isinstance(key,str) or not re.fullmatch(r'[a-f0-9]{64}',key):return ''
+    try:
+        if record.get('kind')=='wannier90':
+            manifest=json.loads((ROOT/'wannier-bundles'/(key+'.json')).read_text())
+        else:
+            with zipfile.ZipFile(ROOT/'inputs'/(key+'.zip')) as archive:manifest=json.loads(archive.read('manifest.json'))
+        return manifest.get('reason') or manifest.get('input_reason') or ''
+    except (OSError,ValueError,KeyError,zipfile.BadZipFile):return ''
+
+
+def source_catalog(project_id):
+    """Local metadata only: no remote reads or arbitrary directory discovery."""
+    if not isinstance(project_id,str) or not project_id.strip():raise ValueError('请选择项目')
+    workspace=WorkspaceStore(ROOT).read()['workspace'] or {}
+    project=next((v for v in workspace.get('projects',[]) if v['id']==project_id),None)
+    if project is None:raise ValueError('项目不存在')
+    nodes={n['id']:n['data'] for n in project['nodes']}
+    rows=[]
+    # None deliberately retains older records beyond the execution page's 100-row default.
+    for record in ex.history(project_id,limit=None):
+        if record.get('recycled') or record.get('path_schema')!='fpilot.remote-attempt-path':continue
+        stage,_=_stage(record);node=nodes.get(record.get('node_id'),{})
+        rows.append({'id':record['id'],'node_id':record.get('node_id'),'stage':stage,
+                     'name':node.get('label') or record.get('display_name') or stage,
+                     'input_reason':_input_note(record), 'seed':record.get('seed'),
+                     'state':record['state'],'job_id':record.get('job_id'),'created_at':record.get('created_at'),
+                     'alias':record['config']['alias'],'evidence':record.get('evidence') or {}})
+    return {'attempts':rows,'max_sources':p.MAX_SOURCES}
+
+
 def describe_sources(raw,project_id=None):
-    if not isinstance(raw,list) or not 1<=len(raw)<=8:raise ValueError('请选择 1–8 个来源')
+    if not isinstance(raw,list) or not 1<=len(raw)<=p.MAX_SOURCES:raise ValueError(f'请选择 1–{p.MAX_SOURCES} 个来源')
     rows=[]
     for value in raw:
         if not isinstance(value,dict):raise ValueError('来源描述无效')
