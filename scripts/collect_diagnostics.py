@@ -1,5 +1,5 @@
 """Local diagnostics only: no SSH, credentials, POTCAR or project contents."""
-import hashlib,importlib.metadata,json,sys
+import hashlib,importlib.metadata,json,os,sys
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -20,7 +20,7 @@ def integrity():
 
 
 def collect():
-    config=launch.configuration(ROOT/'fpilot.local.json')
+    config=launch.configuration(os.environ.get('FPILOT_CONFIG',ROOT/'fpilot.local.json'))
     versions={}
     for name in ('fastapi','uvicorn','pymatgen','numpy','scipy','matplotlib','seekpath','jsonschema','filelock'):
         try:versions[name]=importlib.metadata.version(name)

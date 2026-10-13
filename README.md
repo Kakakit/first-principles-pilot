@@ -6,9 +6,15 @@
 
 源码保存在私有仓库 [Kakakit/first-principles-pilot](https://github.com/Kakakit/first-principles-pilot)。授权账号可克隆；后续修复按提交更新。[克隆、打包与同步说明](docs/GITHUB.md)。GitHub 源码需要 Node 构建，分享给普通使用者继续采用下方运行 ZIP。
 
-## 分享给别人
+## 安装使用
 
-**分享运行 ZIP，不要压缩整个开发文件夹。**
+普通使用者下载 [GitHub Release](https://github.com/Kakakit/first-principles-pilot/releases) 的浏览器安装测试版：Windows 安装 EXE；Mac 按 Apple Silicon/Intel 选择 DMG。安装后点击应用图标，浏览器自动打开；自带 Python 与锁定依赖，无需 Node/Python/npm。首次仍须配置自己的 SSH、合法 POTCAR 与服务器脚本。详见 [安装与测试](docs/INSTALLATION.md)。
+
+项目、配置和日志保存在独立用户数据目录，更新/卸载保留数据；旧开发目录不迁移。控制页提供停止、重启与退出，提交回执未完成时不强制停止。首版通过 Release 覆盖更新，安装测试版尚无商业签名证书，Windows/Mac 实机体验须进一步验收。
+
+## 旧版运行 ZIP
+
+已有 ZIP 保留供旧版本恢复。它们仍需要已有 Python，不属于新的自包含安装器。不要压缩整个开发文件夹分享。
 
 - Mac：`FPilot-macOS-Test-20261004-r2.zip`（含理由输入卡顿修复）。解压后依次使用安装依赖、检查和启动三个 `.command`。[Mac 使用说明](packaging/macos/README.md)。
 - Windows：`FPilot-Windows-Test-20261004-r3.zip`（含理由输入卡顿修复）；旧包保留。[Windows 使用说明](packaging/windows/README.md)。

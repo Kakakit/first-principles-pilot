@@ -4,6 +4,12 @@
 
 2026-10-05 的源码更新包含默认脚本方式服务器配置、提交页脚本选择和编辑保留节点；使用与验收见 [本轮记录](submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)。已有运行 ZIP 不会自动随源码更新，其他设备更新后按下面步骤重新构建/打包。
 
+## 普通使用者下载安装器
+
+打开 [GitHub Releases](https://github.com/Kakakit/first-principles-pilot/releases)，下载 Windows x64 EXE 或适配 Mac 架构的 DMG。新安装器内置 Python 和锁定依赖，使用者无需克隆仓库、安装 Node 或运行 npm。源码 ZIP 不等于安装包；旧便携 ZIP 保留原流程。[安装与验收](INSTALLATION.md)。
+
+`.github/workflows/browser-release.yml` 用同一份源码完成 Linux 回归、Windows 和两种 Mac 架构的原生构建/启动检查；全部通过才发布预发行版。修改 `packaging/release.json` 的版本后运行，既有同名 Release 不覆盖。Python 上游包锁定下载 URL 和 SHA256；发布资源不包含项目、SSH 配置、POTCAR 或私人脚本。首版安装器未作商业签名/公证。
+
 ## 新设备开发或打包
 
 安装 Git、Node.js 20.19+，并选择已有 Python（推荐 3.11）。使用已登录的 GitHub Desktop 克隆，或在已配置 GitHub 认证的终端执行：

@@ -1,0 +1,137 @@
+name: Browser workbench installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'packaging/**'
+      - '.github/workflows/browser-release.yml'
+      - 'scripts/installed_launcher.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      FPILOT_WORKSPACE: /tmp/fpilot-release-regression
+      FPILOT_NOTIFICATIONS: '0'
+      FPILOT_CONTROL_URL: /_fpilot/control
+      PYTHONUTF8: '1'
+      MPLCONFIGDIR: /tmp/fpilot-release-mpl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: packaging/requirements-runtime.txt
+      - run: python -m pip install --only-binary=:all: -r packaging/requirements-runtime.txt
+      - run: python -m pip check
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: python -m unittest discover -s tests -p 'test_*.py'
+
+  installers:
+    needs: regression
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: windows-x64
+          - os: macos-15
+            target: macos-arm64
+          - os: macos-15-intel
+            target: macos-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      FPILOT_CONTROL_URL: /_fpilot/control
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - run: npm run build
+      - name: Check Windows installer compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Build self-contained installer
+        run: python packaging/build_installer.py --target ${{ matrix.target }} --output release-build
+      - name: Install and start Windows application
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem release-build/assets/*-Setup.exe)[0].FullName
+          $target = Join-Path $env:RUNNER_TEMP "中文 安装\First Principles Pilot"
+          $installation = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$target`"") -PassThru -Wait
+          if ($installation.ExitCode -ne 0) { throw "Installer failed: $($installation.ExitCode)" }
+          python packaging/smoke_installer.py --app "$target" --receipt release-build/assets/windows-x64-native-startup.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $note = Join-Path $env:LOCALAPPDATA 'FirstPrinciplesPilot\keep-after-uninstall.txt'
+          New-Item -ItemType Directory -Force (Split-Path $note) | Out-Null
+          Set-Content -Path $note -Value 'user data must remain'
+          $uninstallation = Start-Process -FilePath "$target\unins000.exe" -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -PassThru -Wait
+          if ($uninstallation.ExitCode -ne 0 -or -not (Test-Path $note)) { throw 'Uninstall data-preservation check failed' }
+      - name: Start macOS application bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          APP=$(python -c "import json; print(json.load(open('release-build/build.json'))['application'])")
+          python packaging/smoke_installer.py --app "$APP" --receipt release-build/assets/${{ matrix.target }}-native-startup.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.target }}
+          path: release-build/assets/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [regression, installers]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish tested installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('packaging/release.json'))['version'])")
+          TAG="v$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'This version already exists; bump packaging/release.json instead of overwriting it.'
+            exit 1
+          fi
+          mapfile -t ASSETS < <(find release-assets -type f | sort)
+          gh release create "$TAG" "${ASSETS[@]}" docs/INSTALLATION.md --target "$GITHUB_SHA" --title "First Principles Pilot $VERSION · 浏览器安装测试版" --prerelease --notes-file docs/INSTALLATION.md
