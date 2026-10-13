@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-REVISION = 'fpilot.pyw90-manual.v2'
+REVISION = 'fpilot.pyw90-manual.v3'
 
 
 def validate_layout(path):
@@ -54,6 +54,7 @@ def install(spin_down=False, nwann_override=None):
     original_features = pre_w90_tool.main_features
     original_vasprun = pre_w90_tool.Vasprun
     original_analysis = DOS.get_dos_analysis_df
+    original_frame = DOS.get_dos_df
     context = {'spinors': False, 'channels': None}
 
     def features(args):
@@ -122,7 +123,17 @@ def install(spin_down=False, nwann_override=None):
             'spinors': context['spinors'], 'nkpts': data.nkpt, 'nbands': data.nbands,
             'suggested_num_wann': suggested, 'window_num_wann': self.nwann}))
 
+    def dos_frame(cls, complete_dos, left, right, spin=Spin.up):
+        frame = original_frame(complete_dos, left, right, spin=spin)
+        # Native output has already divided by the largest orbital integral.
+        # Retain the unnormalised integrals using the same native integrator.
+        frame['integral'] = [cls.get_dos_given_site_orb(complete_dos, (left,right), key, spin=spin)
+                             for key in frame['key_string']]
+        return frame
+
     def dos_analysis(cls, frame, lb=0.1):
+        if frame.empty or not np.isfinite(frame['dos']).all():
+            raise ValueError('当前 DOS 范围没有可归一化的轨道积分；请核对投影数据和能量范围')
         count, simplified = original_analysis(frame, lb=lb)
         threshold = float(frame['dos'].max()) * lb
         rows = frame.copy()
@@ -130,6 +141,9 @@ def install(spin_down=False, nwann_override=None):
         print('FPILOT_DOS_SELECTION=' + json.dumps({
             'lb': lb, 'threshold': threshold, 'spatial_orbitals': int(count),
             'suggested_num_wann': int(count * (2 if context['spinors'] else 1)),
+            'spinors': context['spinors'],
+            'normalization_integral': float(frame['integral'].max()) if 'integral' in frame else None,
+            'channel': 'charge' if context['spinors'] else ('down' if spin_down else 'up') if context['channels'] == 2 else 'single',
             'orbitals': json.loads(rows.to_json(orient='records'))}))
         return count, simplified
 
@@ -140,6 +154,7 @@ def install(spin_down=False, nwann_override=None):
 
     W90.read_eigenval = read_eigenval
     DOS.get_dos_from_selected = classmethod(selected_dos)
+    DOS.get_dos_df = classmethod(dos_frame)
     DOS.get_dos_analysis_df = classmethod(dos_analysis)
     pre_w90_tool.main_features = features
 

@@ -306,22 +306,13 @@ def _parse_potcar(path, species):
 
 
 def _parse_incar(content):
-    tags = {}
-    errors = []
-    for line_number, raw_line in enumerate(content.splitlines(), 1):
-        line = raw_line.split("!", 1)[0].split("#", 1)[0].strip()
-        if not line:
-            continue
-        match = _TAG_RE.fullmatch(line)
-        if not match:
-            errors.append(_error("INCAR_SYNTAX", "invalid INCAR line {}".format(line_number)))
-            continue
-        tag, value = match.groups()
-        tag = tag.upper()
-        if tag in tags:
-            errors.append(_error("INCAR_DUPLICATE_TAG", "duplicate INCAR tag {}".format(tag)))
-        else:
-            tags[tag] = value.strip()
+    import importlib.util
+    path = Path(__file__).resolve().parents[1] / 'skills/calc-review/scripts/input_audit.py'
+    spec = importlib.util.spec_from_file_location('fpilot_incar_audit',path)
+    module = importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    tags, duplicates, malformed = module.parse_incar(content)
+    errors = [_error('INCAR_SYNTAX','invalid INCAR line {}'.format(n)) for n in malformed]
+    errors += [_error('INCAR_DUPLICATE_TAG','duplicate INCAR tag {}'.format(d['tag'])) for d in duplicates]
     return tags, errors
 
 

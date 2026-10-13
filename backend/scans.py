@@ -112,13 +112,35 @@ def case_project(project, base_id, dimensions, values, baseline=None):
     from .calculation_nodes import inheritance
     inherited=inheritance(project,node) or {}
     base_hubbard = {**project.get('parameters', {}).get('shared', {}).get('hubbard', {}), **inherited.get('hubbard', {})}
+    if any(d['kind'] in ('u','j') for d in dimensions):
+        from .incar_text import parse
+        report = inputs.generate(project,base_id)
+        if report['errors']: raise ValueError('基础输入无法用于 U/J 扫描：'+'；'.join(report['errors']))
+        tags = parse(report['files']['INCAR'])[0]
+        arrays = [tags.get(k,'').split() for k in ('LDAUL','LDAUU','LDAUJ')]
+        if any(len(a) != len(report['species']) for a in arrays): raise ValueError('最终 INCAR 的 LDAUL/U/J 无法按元素映射')
+        base_hubbard = {s:dict(zip(('l','u','j'),v)) for s,v in zip(report['species'],zip(*arrays))}
+        # A saved form may be shadowed by raw text. Start the cloned table from
+        # the effective input, so scanning U cannot restore an obsolete L/J.
+        layer['hubbard'] = copy.deepcopy(base_hubbard)
     for dimension, value in zip(dimensions, values):
         kind = dimension['kind']
-        if kind == 'incar': layer.setdefault('values', {})[dimension['tag']] = value
+        if kind == 'incar':
+            from .incar_text import parse, replace
+            tag = dimension['tag']
+            layer.setdefault('values', {})[tag] = value
+            if tag in parse(layer.get('manualIncarText',''))[0]:
+                layer['manualIncarText'] = replace(layer['manualIncarText'],tag,value)
         elif kind in ('u', 'j'):
             element = dimension['element']
             row = layer.setdefault('hubbard', {}).setdefault(element, copy.deepcopy(base_hubbard.get(element, {'l':'-1','u':'0','j':'0'})))
             row[kind] = value
+            from .incar_text import parse, replace
+            tag = 'LDAUU' if kind == 'u' else 'LDAUJ'
+            raw = layer.get('manualIncarText','')
+            if tag in parse(raw)[0]:
+                fields = [layer['hubbard'].get(s,base_hubbard[s])[kind] for s in report['species']]
+                layer['manualIncarText'] = replace(raw,tag,' '.join(fields))
         elif kind == 'kmesh': node['data'].setdefault('inputDraft', {})['grid'] = value
         elif kind == 'poscar':
             from .structure_edit import edit_poscar, input_geometry

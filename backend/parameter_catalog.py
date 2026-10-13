@@ -47,6 +47,4 @@ def validate_value(tag, value, confirmed_custom=False):
         return 'typed'
     if tag in KNOWN:
         return 'official-passthrough'
-    if not confirmed_custom:
-        raise ValueError('未收录的自定义 tag 需要显式确认')
     return 'unverified-custom'

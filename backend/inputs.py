@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from .storage import ROOT, validate_workspace
 from .structure_edit import edit_structure, geometry_hash, input_geometry
-from . import parameter_catalog
+from . import parameter_catalog, incar_text
 
 spec = importlib.util.spec_from_file_location("fpilot_vasp_contract", Path(__file__).resolve().parents[1] / "resources/sets/vasp.py")
 contract = importlib.util.module_from_spec(spec)
@@ -119,21 +119,27 @@ def generate(project, node_id, context=None):
     local = node["data"].get("parameters", {})
     values, origins = {}, {}
     inherited = case_inheritance(project, node)
-    layers = [("共享设置", shared.get("values", {}))]
-    if inherited: layers.append(("继承 case · " + inherited["snapshot"]["parameter_summary"], inherited["values"]))
-    if inherited and kind != "relax": layers.append(("下游静态类型默认", {"NSW":"0", "IBRION":"-1"}))
+    layers = [("共享设置", shared.get("values", {}), shared.get('manualIncarText',''))]
+    if inherited: layers.append(("继承 case · " + inherited["snapshot"]["parameter_summary"], inherited["values"], ''))
+    if inherited and kind != "relax": layers.append(("下游静态类型默认", {"NSW":"0", "IBRION":"-1"}, ''))
     if local.get("preset") == "basic":
-        layers.append(("阶段预设", {"IBRION": "2", "ISIF": "2"} if kind == "relax" else {"NSW": "0", "IBRION": "-1"}))
-    layers.append(("节点覆盖", local.get("values", {})))
-    for origin, layer in layers:
-        for tag, value in layer.items():
-            values[tag], origins[tag] = value, origin
-    if kind in ('bands', 'dos', 'vasp-wannier') and 'LORBIT' not in shared.get('values', {}) and 'LORBIT' not in local.get('values', {}):
+        layers.append(("阶段预设", {"IBRION": "2", "ISIF": "2"} if kind == "relax" else {"NSW": "0", "IBRION": "-1"}, ''))
+    # Atom/element tables are node settings too; they outrank shared raw tags.
+    if local.get('moments'): layers.append(('节点磁矩表', {'MAGMOM':None}, ''))
+    if local.get('hubbard'): layers.append(('节点 Hubbard 表', {k:None for k in ('LDAUL','LDAUU','LDAUJ')}, ''))
+    layers.append(("节点覆盖", local.get("values", {}), local.get('manualIncarText','')))
+    try: values, origins, manual_tags, manual_fragments = incar_text.resolve(layers)
+    except ValueError as exc:
+        return {'errors':[str(exc)],'warnings':[],'dependencies':[],'files':{},'ready':False}
+    if kind in ('bands', 'dos', 'vasp-wannier') and 'LORBIT' not in values:
         values['LORBIT'], origins['LORBIT'] = '11', '节点执行合同'
     confirmations = set(shared.get('confirmed_custom_tags', [])) | set(local.get('confirmed_custom_tags', []))
     validation_levels = {}
     for tag, value in values.items():
         if value is None:
+            continue
+        if tag in manual_tags or '手动文本' in origins.get(tag,''):
+            validation_levels[tag] = 'manual-text'
             continue
         try:
             validation_levels[tag] = parameter_catalog.validate_value(tag, value, tag in confirmations)
@@ -163,14 +169,16 @@ def generate(project, node_id, context=None):
         if level == 'official-passthrough':
             warnings.append(f'{tag} 按 VASP Wiki 已知 tag 原样传递；目标 VASP 版本与物理适用性未自动验证')
         elif level == 'unverified-custom':
-            warnings.append(f'{tag} 为显式确认的未验证自定义 tag；需检查目标 VASP 是否识别')
+            warnings.append(f'{tag} 为自定义参数，未自动验证目标 VASP 是否识别')
     if errors:
         return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
-    if kind == "relax":
-        if number(values["NSW"]) <= 0 or values["IBRION"] not in ("1", "2", "3"):
-            errors.append("优化需 NSW > 0 和离子优化算法")
-    elif number(values["NSW"]) != 0 or values["IBRION"] != "-1":
-        errors.append("静态、能带和 DOS 需 NSW=0、IBRION=-1")
+    try:
+        if kind == "relax":
+            if number(values["NSW"]) <= 0 or values["IBRION"] not in ("1", "2", "3"):
+                errors.append("优化需 NSW > 0 和离子优化算法")
+        elif number(values["NSW"]) != 0 or values["IBRION"] != "-1":
+            errors.append("静态、能带和 DOS 需 NSW=0、IBRION=-1")
+    except ValueError: errors.append('节点类型合同无法读取 NSW；请核对最终 INCAR')
     parents = context.parents[node_id]
     if len(parents) != 1:
         errors.append("计算节点必须具有唯一直接上游")
@@ -229,7 +237,9 @@ def generate(project, node_id, context=None):
     for name, value in source_plan['initialization'].items():
         if restart_required and name == 'ICHARG':
             continue
-        values[name], origins[name] = str(value), '计算来源合同'
+        if name in manual_tags:
+            if values[name] != str(value): errors.append(name+' 手动文本与计算来源合同不一致；请选择对应文件来源或修改文本')
+        else: values[name], origins[name] = str(value), '计算来源合同'
     if restart_required:
         warnings.append('ICHARG=1 需要在计算配置中选择电子文件来源并重新冻结')
     if kind in ('scf', 'relax') and values.get('LCHARG') == 'false':
@@ -289,21 +299,12 @@ def generate(project, node_id, context=None):
     tags.setdefault('LCHARG', '.FALSE.' if kind in ('bands', 'dos', 'vasp-wannier') else '.TRUE.')
     tags.setdefault('LWAVE', '.FALSE.')
     if kind == 'vasp-wannier':
-        projection_lines = [line.strip() for line in options.get('projections', '').splitlines() if line.strip()]
-        selected = {}
-        for line in projection_lines:
-            match = re.fullmatch(r'([A-Z][a-z]?):([spdf])', line)
-            if not match or match.group(1) not in species or line in selected:
-                errors.append('投影格式应为当前元素:轨道（s/p/d/f），且不能重复：' + line)
-            else:
-                selected[line] = match.groups()
-        if not projection_lines or set(species) - {item[0] for item in selected.values()}:
-            errors.append('请为结构中的每种元素明确选择至少一个投影轨道')
-        orbital_count = sum(sum({'s':1,'p':3,'d':5,'f':7}[orbital] for element, orbital in selected.values() if element == atom['element']) for atom in geometry['atoms'])
-        recommended_wann = orbital_count * (2 if noncollinear else 1)
-        raw_wann = options.get('num_wann', '')
+        from .projections import body, simple_count
+        projection_text = options.get('projections', '')
+        recommended_wann = simple_count(projection_text, geometry['atoms'], noncollinear)
+        raw_wann = values.get('NUM_WANN') if 'NUM_WANN' in manual_tags else options.get('num_wann', '')
         if not isinstance(raw_wann, str) or not re.fullmatch(r'[1-9]\d*', raw_wann.strip()):
-            errors.append(f'请明确填写 NUM_WANN 正整数；当前投影建议 {recommended_wann}，SOC／非共线按 spinor 乘 2')
+            errors.append('请明确填写 NUM_WANN 正整数；简单轨道计数仅供参考，复杂投影请手动填写')
             num_wann = None
         else:
             num_wann = int(raw_wann)
@@ -313,21 +314,21 @@ def generate(project, node_id, context=None):
                 too_many_bands = False  # NBANDS 的类型错误由参数审查单独报告
             if num_wann > 100000 or too_many_bands:
                 errors.append('NUM_WANN 不得超过 NBANDS，且须为合理的正整数')
-            elif num_wann != recommended_wann:
-                warnings.append(f'您选择 NUM_WANN={num_wann}，投影计数建议 {recommended_wann}；请核对 .amn 维度')
         tags.update(ISYM='-1', NCORE='1', KPAR='1', LWANNIER90='.TRUE.', LWANNIER90_RUN='.FALSE.',
                     LWRITE_MMN_AMN='.TRUE.')
         if num_wann is not None:
             tags['NUM_WANN'] = str(num_wann)
-        tags['WANNIER90_WIN'] = '"\nBegin Projections\n' + '\n'.join(selected) + '\nEnd Projections\n"'
+        if projection_text.strip():
+            content = body(projection_text)
+            tags['WANNIER90_WIN'] = '"\nBegin Projections\n' + content + ('' if content.endswith('\n') else '\n') + 'End Projections\n"'
         for tag in ('ISYM','NCORE','KPAR','LWANNIER90','LWANNIER90_RUN','LWRITE_MMN_AMN','NUM_WANN','WANNIER90_WIN'):
-            origins[tag] = 'VASP-Wannier 节点合同'
+            if tag not in manual_tags: origins[tag] = 'VASP-Wannier 节点合同'
     moments = dict(shared.get("moments", {}))
     if inherited and inherited["moments"]:
         if [a["element"] for a in geometry["atoms"]] != inherited["elements"]: errors.append("case 磁矩与当前结构元素或原子顺序不符")
         else: moments.update(dict(zip([a["id"] for a in geometry["atoms"]], inherited["moments"])))
     moments.update(local.get("moments", {}))
-    if noncollinear:
+    if noncollinear and 'MAGMOM' not in manual_tags:
         try:
             vectors = []
             for atom in geometry['atoms']:
@@ -338,13 +339,13 @@ def generate(project, node_id, context=None):
             tags['MAGMOM'] = ' '.join(vectors)
         except ValueError:
             errors.append('非共线/SOC 请按原子 ID 填写三个初始 MAGMOM 分量，例如 0 0 4')
-    elif values["ISPIN"] == "2":
+    elif values["ISPIN"] == "2" and 'MAGMOM' not in manual_tags:
         try:
             tags["MAGMOM"] = " ".join(str(number(moments.get(a["id"]))) for a in geometry["atoms"])
         except ValueError:
             errors.append("请按原子 ID 填写全部初始 MAGMOM")
     hubbard = dict(shared.get("hubbard", {}), **(inherited["hubbard"] if inherited else {}), **local.get("hubbard", {}))
-    if values["LDAU"] == "true":
+    if values["LDAU"] == "true" and not all(k in manual_tags for k in ('LDAUL','LDAUU','LDAUJ')):
         if values.get("LDAUTYPE") not in ("1", "2"):
             errors.append("请明确 LDAUTYPE")
         ls, us, js = [], [], []
@@ -360,7 +361,7 @@ def generate(project, node_id, context=None):
                 ls.append(l); us.append(str(u)); js.append(str(j))
             except ValueError:
                 errors.append(f"{element} 的 L / U / J 未明确")
-        tags.update(LDAUL=" ".join(ls), LDAUU=" ".join(us), LDAUJ=" ".join(js))
+        tags.update({k:v for k,v in dict(LDAUL=" ".join(ls), LDAUU=" ".join(us), LDAUJ=" ".join(js)).items() if k not in manual_tags})
         needed = max([2 * int(l) for l in ls] + [0])
         if number(values.get("LMAXMIX") or "0") < needed:
             errors.append(f"当前 +U 电荷交接需要显式 LMAXMIX ≥ {needed}")
@@ -428,7 +429,17 @@ def generate(project, node_id, context=None):
             warnings.append("ENCUT 低于 POTCAR 最大 ENMAX，请给出收敛依据")
     except (ValueError, OSError) as exc:
         errors.append(f"POTCAR: {exc}")
-    files["INCAR"] = "".join(f"{k} = {v}\n" for k, v in tags.items())
+    files["INCAR"] = incar_text.render(tags, manual_fragments)
+    # Source checks and displayed metadata must describe the exact saved text.
+    tags = incar_text.parse(files['INCAR'])[0]
+    for name in manual_tags:
+        if name in tags:
+            values[name] = incar_text.semantic(name,tags[name])
+            validation_levels[name] = 'manual-text'
+    if kind == 'vasp-wannier':
+        for name,expected in {'ISYM':'-1','NCORE':'1','KPAR':'1','LWANNIER90':'true','LWANNIER90_RUN':'false','LWRITE_MMN_AMN':'true'}.items():
+            if incar_text.semantic(name,tags.get(name,'')) != expected:
+                errors.append(name+' 手动文本与 VASP-Wannier 接口合同不一致；请修改文本，未自动改回')
     try:
         source_contracts.validate_pead(files['INCAR'])
     except ValueError as exc:
@@ -543,7 +554,7 @@ def history(project_id=None):
                            "status": manifest["status"], "dependencies": manifest.get("dependencies", []),
                            "source_contract":manifest.get('source_contract'), "created_at":datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(),
                            "band_path_source_attempt_id": manifest.get('band_path_source_attempt_id'),
-                           "requires_ncl": any(str(manifest.get('incar_tags', {}).get(tag, {}).get('value', '')).strip().upper() in ('.TRUE.', 'TRUE', 'T') for tag in ('LSORBIT', 'LNONCOLLINEAR')),
+                           "requires_ncl": any(incar_text.semantic(tag,str(manifest.get('incar_tags', {}).get(tag, {}).get('value', ''))) == 'true' for tag in ('LSORBIT', 'LNONCOLLINEAR')),
                            "reason": manifest["reason"], "download": f"/api/inputs/{path.stem}/download"})
             if len(result) >= 100:
                 break

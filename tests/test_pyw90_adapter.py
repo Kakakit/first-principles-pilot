@@ -30,6 +30,7 @@ class AdapterTests(unittest.TestCase):
         self.stack.enter_context(patch.object(W90, 'read_eigenval', W90.read_eigenval))
         self.stack.enter_context(patch.object(DOS, 'get_dos_from_selected', DOS.__dict__['get_dos_from_selected']))
         self.stack.enter_context(patch.object(DOS, 'get_dos_analysis_df', DOS.__dict__['get_dos_analysis_df']))
+        self.stack.enter_context(patch.object(DOS, 'get_dos_df', DOS.__dict__['get_dos_df']))
         self.stack.enter_context(patch.object(pre, 'main_features', pre.main_features))
         self.stack.enter_context(patch.object(pre, 'Vasprun', pre.Vasprun))
 

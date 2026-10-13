@@ -36,8 +36,8 @@ class RecipeTests(unittest.TestCase):
         exported = recipes.export_project(project)
         self.assertEqual(recipes.materialize(exported), project)
 
-    def test_field_errors_locate_unknown_tag_reference_and_extra_field(self):
-        value = sample(); value["extra"] = True; value["stages"][0]["parameters"]["values"]["MAGIC"] = "1"; value["stages"][1]["depends_on"] = ["missing"]
+    def test_field_errors_locate_invalid_assignment_reference_and_extra_field(self):
+        value = sample(); value["extra"] = True; value["stages"][0]["parameters"]["values"]["MAGIC"] = "1; NSW=5"; value["stages"][1]["depends_on"] = ["missing"]
         issues = recipes.validate(value); paths = {row["path"] for row in issues}
         self.assertIn("$.extra", paths); self.assertIn("$.stages[0].parameters.values.MAGIC", paths); self.assertIn("$.stages[1].depends_on", paths)
 

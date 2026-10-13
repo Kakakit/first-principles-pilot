@@ -17,9 +17,13 @@ MODEL_TAGS = ('GGA', 'METAGGA', 'LHFCALC', 'AEXX', 'HFSCREEN', 'ISPIN', 'LDAU',
 
 
 def tag(raw, name):
+    from .incar_text import parse, semantic, BOOLS
     text = raw.decode() if isinstance(raw, bytes) else raw
-    matches = re.findall(r'^\s*'+re.escape(name)+r'\s*=\s*([^!#\r\n]+)', text, re.I | re.M)
-    return ' '.join(matches[-1].upper().split()) if matches else None
+    value = parse(text)[0].get(name.upper())
+    if value is not None and name.upper() in BOOLS and value.strip().upper() not in ('TRUE','.TRUE.','T','FALSE','.FALSE.','F'):
+        resolved = semantic(name.upper(),value)
+        if resolved in ('true','false'): value = '.TRUE.' if resolved == 'true' else '.FALSE.'
+    return ' '.join(value.upper().split()) if value is not None else None
 
 
 def enabled(value):

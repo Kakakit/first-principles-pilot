@@ -356,16 +356,7 @@ def _checked_win(source, edited):
     errors = win_contract.validate_win(edited)
     if errors:
         raise ValueError('.win 审查未通过：' + json.dumps(errors, ensure_ascii=False)[:1500])
-    for tag,value in parameter_values(edited).items():
-        if value:_parameter_value(tag,value)
     before, after = win_contract.parse_win(source), win_contract.parse_win(edited)
-    official_scalars, official_blocks = win_contract.official_tags()
-    for name, entries in after.scalars.items():
-        if name not in official_scalars and [item.value for item in entries] != [item.value for item in before.scalars.get(name, [])]:
-            raise ValueError('新增或更改了未登记的 Wannier90 参数：' + name)
-    for name, entries in after.blocks.items():
-        if name not in official_blocks and [item.body for item in entries] != [item.body for item in before.blocks.get(name, [])]:
-            raise ValueError('新增或更改了未登记的 Wannier90 参数块：' + name)
     for name in win_contract.PROTECTED_SCALARS:
         if win_contract._first_value(before, name) != win_contract._first_value(after, name):
             raise ValueError('VASP 生成字段不可改：' + name)

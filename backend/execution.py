@@ -205,8 +205,8 @@ def _restart_policy(manifest, files):
 
 
 def _incar_value(raw, tag):
-    matches = re.findall(r'^\s*'+re.escape(tag)+r'\s*=\s*([^!#\r\n]+)', raw.decode('utf-8'), re.I|re.M)
-    return ' '.join(matches[-1].upper().split()) if matches else None
+    from .source_contracts import tag as value
+    return value(raw, tag)
 
 
 def _review_input_audit(audit, dependency=None, restart=None, stage=None):
@@ -283,11 +283,9 @@ def _restart_incar(raw, mode, start_override=None):
     if start_override is not None:
         start = start_override
     text = raw.decode('utf-8')
+    from .incar_text import merge
     for tag, value in [('ISTART', start), ('ICHARG', charge)]:
-        pattern = re.compile(r'^\s*'+tag+r'\s*=.*$', re.I|re.M)
-        text, count = pattern.subn(f'{tag} = {value}', text)
-        if not count:
-            text += f'{tag} = {value}\n'
+        text = merge(text, f'{tag} = {value}\n')
     return text.encode('utf-8')
 
 

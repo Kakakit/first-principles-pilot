@@ -1,5 +1,11 @@
 # 后续具体实施方案
 
+## 2026-10-14：自由文本参数与矩阵生成前的投影诊断
+
+共享/节点 INCAR 手动文本覆盖同层表单，删除恢复继承；合成、来源核验、冻结、扫描和续算使用同一个解析器。沿用小型续行/引号支持，不增加依赖。`.win` 原文允许自定义 tag/块，接口结构与维度仍核验。VASP-Wannier 复用独立 pre dos：普通诊断只读 XML，另核对同一 OUTCAR 能量参考，不需要 .win/.eig/EIGENVAL；共线分通道、SOC 用电荷。完整投影文本保留，NUM_WANN 只对完整简单轨道集合推荐，复杂表达须手填。
+
+真实共线 DOS 双通道、SOC 诊断与 SCF 缺投影提示通过；浏览器覆盖保存/删除恢复、原文解析、自由投影、采用/撤销。活动源全量后端 673 项（3 跳过）、前端 137 项及类型/构建通过。原 101 attempts、10 条链、4 个批次完整记录保持，研究输入未改、未提交新计算。见 [使用与验收](submission/MANUAL_INPUT_PREDOS_ACCEPTANCE.md)。日常仅同步源码，安装包工作流已改为手动；本轮不发布 Release。
+
 ## 2026-10-13：自包含浏览器安装测试版
 
 已发布 [v1.1.0-beta.1](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.1) 的 Windows x64 EXE 与 Apple Silicon Mac DMG，首版不提供 Intel Mac。使用同一份浏览器和后端，内置 CPython/锁定依赖；用户目录独立，控制中心提供重复打开复用、安全停止/重启、日志和更新保护。原工作区、冻结包和远端任务不自动迁移。Windows 实际安装/启动/卸载和 Mac 原生启动均通过；干净克隆全量基线比较零新增失败，已有环境失败继续保留。使用与边界见 [安装说明](INSTALLATION.md) 和 [实施验收](release-d/BROWSER_INSTALLER_ACCEPTANCE.md)。后续先由用户 Windows 实机按步骤验收 SSH 与实际流程。
@@ -298,3 +304,4 @@ vasp-wannier 在无显式覆盖时默认 LORBIT=11；修复旧链 SCF 绑定漏�
 1. 使用登记 Python 跑现有相关 unittest、`npm test` 和 `npm run build`；新增测试只覆盖实际合同与失败分支。
 2. 审核新增物理 INCAR 内容和高风险执行逻辑；远程动作严格按实时预检、输入审查、可核对预览、单次提交、精确 job ID、调度/程序/数值/科学分层验收。
 3. 不改原插件历史、旧远端目录或研究数据；新能力先在本项目内验证。完成后更新 `CHECKPOINT.md`，将未做的真实远程或浏览器验证明确留下。
+

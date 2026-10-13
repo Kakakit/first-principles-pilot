@@ -47,6 +47,23 @@ class ScanTests(unittest.TestCase):
             self.assertEqual(manifest['node_id'],'c')
         self.assertEqual(len({c['id'] for c in batch['cases']}),6)
 
+    def test_scan_overwrites_raw_tag_and_uses_actual_hubbard_baseline(self):
+        from backend.incar_text import parse
+        layer=self.project['nodes'][1]['data']['parameters']
+        layer['manualIncarText']='ENCUT=410\nLDAU=true\nLDAUTYPE=2\nLMAXMIX=2\nLDAUL=1\nLDAUU=3\nLDAUJ=0.5\n'
+        layer['hubbard']={'Si':{'l':'-1','u':'0','j':'0'}}
+        dimensions=[{'kind':'incar','tag':'ENCUT'},{'kind':'u','element':'Si'}]
+        original=json.dumps(self.project,sort_keys=True)
+        cloned=scans.case_project(self.project,'c',dimensions,['500','4'])
+        report=inputs.generate(cloned,'c')
+        self.assertEqual(report['errors'],[])
+        tags=parse(report['files']['INCAR'])[0]
+        self.assertEqual(tags['ENCUT'],'500')
+        self.assertEqual(tags['LDAUU'],'4')
+        self.assertEqual(tags['LDAUL'],'1')
+        self.assertEqual(tags['LDAUJ'],'0.5')
+        self.assertEqual(json.dumps(self.project,sort_keys=True),original)
+
     def test_reject_duplicate_limit_and_invalid_grid(self):
         base={'kind':'incar','tag':'ENCUT','start':'400','end':'407','step':'1'}
         with self.assertRaisesRegex(ValueError,'重复'):scans.preview(self.project,'scan','c',[base,base])

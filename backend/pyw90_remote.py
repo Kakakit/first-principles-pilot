@@ -130,6 +130,78 @@ def _absolute_windows(relative_windows, fermi):
     return {tag: value + fermi for tag, value in relative_windows.items()}
 
 
+def _dos_projection(alias, path, emin, emax, channel):
+    args = ['pre','dos','--path','.', '-e',str(emin),str(emax)]
+    if channel == 'down': args.append('--spin-down')
+    # The no --extra branch is DOS-only. EIGENVAL is used by the separate
+    # native frozen-window branch, never by projection selection.
+    run = _run(alias,path,args,('vasprun.xml',))
+    first = run['stdout']
+    projection = re.search(r'Wannier90 Projection:\s*\n(.*?)\n\s*pyw90 --extra input:',first,re.S)
+    selected = re.search(r'pyw90 --extra input:\s*\n([^\n]+)',first)
+    return {'projections':projection.group(1).strip().splitlines() if projection else [],
+            'dos_selection':_marker(first,'FPILOT_DOS_SELECTION')}, run, args, selected
+
+
+def pre_dos_sources(project, node_id):
+    """Local identity selection only; no source file or SSH probes."""
+    from .storage import validate_workspace
+    from .calculation_nodes import kind, owner
+    validate_workspace({'activeId':project['id'],'projects':[project]})
+    node = next((n for n in project['nodes'] if n['id'] == node_id),None)
+    if not node or kind(node,project) != 'vasp-wannier': raise ValueError('请选择 VASP-Wannier 接口计算节点')
+    parents = {e['source'] for e in project['edges'] if e['target'] == node_id}
+    rows = execution.history(project['id'],limit=10000)
+    stages = {}
+    for row in rows:
+        if row.get('state') != 'COMPLETED': continue
+        try: stages[row['id']] = execution.bundle(row['bundle_id'],allow_dependencies=True)[0]['stage']
+        except (ValueError,OSError,KeyError): continue
+    scfs = {r['id'] for r in rows if stages.get(r['id']) == 'scf' and owner(r) in parents}
+    result=[]
+    from .source_contracts import actual_inputs, tag, enabled
+    for row in rows:
+        stage = stages.get(row['id'])
+        try:
+            scf = row['id'] if stage == 'scf' else wannier_lineage.scf_id(row) if stage == 'dos' else None
+            if scf not in scfs or row.get('config',{}).get('alias') != next(r for r in rows if r['id'] == scf)['config']['alias']: continue
+            incar = actual_inputs(row)[1]['INCAR']
+            spinors = any(enabled(tag(incar,k)) for k in ('LSORBIT','LNONCOLLINEAR'))
+            channels = ['charge'] if spinors else ['up','down'] if tag(incar,'ISPIN') == '2' else ['single']
+            alias = row['config']['alias']
+            result.append({**row,'analysis_kind':stage,'scf_attempt_id':scf,'analysis_channels':channels,
+                           'pyw90_available':alias in PYTHON,
+                           'pyw90_reason':'' if alias in PYTHON else '该服务器尚未登记 PyW90 解释器和安装目录'})
+        except (ValueError,OSError,KeyError,StopIteration): continue
+    return result
+
+
+def pre_dos(project, node_id, source_attempt_id, channel='auto', emin=-4, emax=4):
+    if not all(isinstance(v,(int,float)) and math.isfinite(v) for v in (emin,emax)) or not -100 <= emin < emax <= 100:
+        raise ValueError('请填写有限且递增的相对费米能量范围')
+    choices = pre_dos_sources(project,node_id)
+    source = next((r for r in choices if r['id'] == source_attempt_id),None)
+    if not source: raise ValueError('请选择相连 SCF 或同一 SCF 来源的已完成 DOS attempt')
+    if not source['pyw90_available']: raise ValueError(source['pyw90_reason'])
+    channels = source['analysis_channels']
+    channel = channels[0] if channel == 'auto' else channel
+    if channel not in channels: raise ValueError('分析通道与来源实际自旋模型不一致；SOC 只使用电荷投影')
+    from .remote_energy import reference
+    energy = reference(source,force=True)
+    alias, path = source['config']['alias'], execution.attempt_path(source)['shell']
+    hashes = _file_hashes(alias,path,('OUTCAR','vasprun.xml'))
+    if hashes['OUTCAR'] != energy['outcar_sha256']: raise ValueError('能量参考来源已变化，请重新分析')
+    result, run, _, _ = _dos_projection(alias,path,emin+energy['fermi_eV'],emax+energy['fermi_eV'],channel)
+    actual = result['dos_selection']
+    if actual.get('channel') != channel or bool(actual.get('spinors')) != (channels == ['charge']):
+        raise ValueError('vasprun.xml 与来源实际输入的自旋模型不一致，请核查来源')
+    if _file_hashes(alias,path,tuple(hashes)) != hashes: raise ValueError('分析期间来源文件发生变化，请重新分析')
+    return {**result,'energy_reference':energy,'relative_range_eV':[emin,emax],
+            'source_attempt_id':source['id'],'scf_attempt_id':source['scf_attempt_id'],
+            'source_hashes':hashes,'alias':alias,'channel':channel,'pyw90_version':'1.0.7',
+            'runs':[run],'note':'仅为当前 DOS 数据与能量区间的投影建议；没有读取接口矩阵或 .eig，不证明拟合质量。'}
+
+
 def _interface_check(alias, path, seed, win_name, fermi, emin, emax, relative_windows, candidates=None):
     request = {'seed': seed, 'eig_name': seed + '.eig', 'win_name': win_name,
                'fermi_eV': fermi, 'absolute_range': [emin + fermi, emax + fermi],
@@ -206,16 +278,9 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
         source_hashes = _file_hashes(alias, dos_path, ('vasprun.xml', 'EIGENVAL'))
         # pre dos has no --efermi option. Use the parent OUTCAR's absolute
         # range so a separate DOS source cannot silently shift the reference.
-        args = ['pre', 'dos', '--path', '.', '-e', str(emin + fermi), str(emax + fermi)]
-        if seed.endswith('.2'):
-            args.append('--spin-down')
-        first_run = _run(alias, dos_path, args, ('vasprun.xml', 'EIGENVAL'))
+        projection_result, first_run, args, selected = _dos_projection(alias,dos_path,emin+fermi,emax+fermi,'down' if seed.endswith('.2') else 'auto')
         runs.append(first_run)
-        first = first_run['stdout']
-        selected = re.search(r'pyw90 --extra input:\s*\n([^\n]+)', first)
-        projection = re.search(r'Wannier90 Projection:\s*\n(.*?)\n\s*pyw90 --extra input:', first, re.S)
-        result = {'projections': projection.group(1).strip().splitlines() if projection else [],
-                  'frozen': [], 'outer': [], 'dos_selection': _marker(first, 'FPILOT_DOS_SELECTION')}
+        result = {**projection_result,'frozen': [], 'outer': []}
         if selected and selected.group(1).strip():
             second_run = _run(alias, dos_path, [*args, '--extra', selected.group(1).strip(),
                                              '--fpilot-num-wann', str(nwann)],

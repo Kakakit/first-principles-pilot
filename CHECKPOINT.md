@@ -1,5 +1,11 @@
 # 当前开发交接 · 2026-10-11
 
+## 2026-10-14：自由文本参数与矩阵生成前的投影诊断
+
+共享/节点 INCAR 手动文本覆盖同层表单，删除恢复继承；合成、来源核验、冻结、扫描和续算使用同一个解析器。沿用小型续行/引号支持，不增加依赖。`.win` 原文允许自定义 tag/块，接口结构与维度仍核验。VASP-Wannier 复用独立 pre dos：普通诊断只读 XML，另核对同一 OUTCAR 能量参考，不需要 .win/.eig/EIGENVAL；共线分通道、SOC 用电荷。完整投影文本保留，NUM_WANN 只对完整简单轨道集合推荐，复杂表达须手填。
+
+真实共线 DOS 双通道、SOC 诊断与 SCF 缺投影提示通过；浏览器覆盖保存/删除恢复、原文解析、自由投影、采用/撤销。活动源全量后端 673 项（3 跳过）、前端 137 项及类型/构建通过。原 101 attempts、10 条链、4 个批次完整记录保持，研究输入未改、未提交新计算。见 [使用与验收](docs/submission/MANUAL_INPUT_PREDOS_ACCEPTANCE.md)。日常仅同步源码，安装包工作流已改为手动；本轮不发布 Release。
+
 ## 2026-10-13：自包含浏览器安装测试版
 
 已发布 [v1.1.0-beta.1](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.1)：Windows x64 使用 Inno Setup EXE，Apple Silicon Mac 使用应用/DMG；按用户取舍，Intel Mac 不进入首版范围。共用浏览器界面与本机后端，自带 CPython 和锁定依赖。安装目录与用户数据分开，重复打开复用身份，控制页提供启动/停止/重启/退出/日志，更新和卸载保留数据。Windows 关闭临时文件后再原子替换，修复 worker 状态和设置写入；POSIX 干净停止后的立即重启也已核验。
@@ -311,3 +317,4 @@ Python 360 项、前端 64 项、类型检查和生产构建通过。空白独�
 方案和验收见 docs/submission/SETUP_AND_SCRIPT_PLAN.md、SETUP_AND_SCRIPT_ACCEPTANCE.md。运行 ZIP 未重发，新设备从最新源码构建/打包；Windows 原生与具体真实任务仍需相应验收和授权。
 
 同步始终基于远端 main 的准确父提交，只发布筛选过的源码/说明。不上传工作区数据、POTCAR、SSH 配置/密钥、私人服务器脚本或旧本地 Git 历史，不强推。详细规则见 docs/GITHUB.md、docs/DEVELOPMENT.md。
+

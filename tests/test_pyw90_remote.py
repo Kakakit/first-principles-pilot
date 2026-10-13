@@ -6,6 +6,31 @@ from backend import pyw90_remote
 
 
 class Pyw90RemoteTest(unittest.TestCase):
+    def test_projection_only_links_xml_and_never_requests_eigenvalues(self):
+        out='FPILOT_DOS_SELECTION={"channel":"charge","spinors":true}\nWannier90 Projection:\nFe:d\npyw90 --extra input:\nFe,0,4-8\n'
+        with patch.object(pyw90_remote,'_run',return_value={'stdout':out}) as run:
+            result, _, args, _ = pyw90_remote._dos_projection('jutai-1','/actual/source',-2,3,'charge')
+        self.assertEqual(run.call_args.args[3],('vasprun.xml',))
+        self.assertNotIn('--extra',args)
+        self.assertEqual(result['projections'],['Fe:d'])
+
+    def test_projection_route_uses_actual_reference_and_checks_only_dos_inputs(self):
+        from contextlib import ExitStack
+        source={'id':'s','scf_attempt_id':'s','config':{'alias':'jutai-1'},'analysis_channels':['charge'],'pyw90_available':True}
+        hashes={'OUTCAR':'out','vasprun.xml':'xml'}
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(pyw90_remote,'pre_dos_sources',return_value=[source]))
+            stack.enter_context(patch('backend.remote_energy.reference',return_value={'fermi_eV':5.5,'outcar_sha256':'out'}))
+            stack.enter_context(patch.object(pyw90_remote.execution,'attempt_path',return_value={'shell':'/source'}))
+            verify=stack.enter_context(patch.object(pyw90_remote,'_file_hashes',return_value=hashes))
+            analyze=stack.enter_context(patch.object(pyw90_remote,'_dos_projection',return_value=({'dos_selection':{'channel':'charge','spinors':True}}, {'stdout':'receipt'}, [], None)))
+            result=pyw90_remote.pre_dos({'id':'p'},'interface','s',emin=-4,emax=4)
+            self.assertEqual(analyze.call_args.args[2:5],(1.5,9.5,'charge'))
+            self.assertEqual(verify.call_args_list[0].args[2],('OUTCAR','vasprun.xml'))
+            self.assertEqual(result['source_hashes'],hashes)
+            with self.assertRaisesRegex(ValueError,'SOC'):
+                pyw90_remote.pre_dos({'id':'p'},'interface','s',channel='down')
+
     def test_analysis_uses_temporary_directory_and_only_links_selected_inputs(self):
         receipt = {'exit_code': 0, 'stdout': 'analysis complete', 'stderr': ''}
         with patch.object(pyw90_remote.execution, 'ssh', return_value=receipt) as ssh:

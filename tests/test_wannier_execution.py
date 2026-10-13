@@ -23,8 +23,9 @@ class WannierExecutionTests(unittest.TestCase):
             w90._checked_win(source, source.replace('spinors = .true.', 'spinors = .false.'))
         with self.assertRaisesRegex(ValueError, 'kpoints'):
             w90._checked_win(source, source.replace('0.0 0.0 0.5', '0.1 0.0 0.5', 1))
-        with self.assertRaisesRegex(ValueError, '未登记'):
-            w90._checked_win(source, source + '\nmade_up_wannier_tag = 1\n')
+        w90._checked_win(source, source + '\nmade_up_wannier_tag = 1\n')
+        w90._checked_win(source, source + '\nbegin custom_output\nretain this\nend custom_output\n')
+        w90._checked_win(source, source.replace('num_iter    = 20', 'num_iter = -3'))
 
     def test_structured_parameters_are_official_and_keep_channel_identity(self):
         names={item['tag'] for item in w90.parameter_catalog()}
@@ -87,7 +88,8 @@ class WannierExecutionTests(unittest.TestCase):
         final=final.replace('dis_win_max = 10','dis_win_max = 12')
         self.assertEqual(w90.relative_window_values(final,6),{'dis_win_min':-3,'dis_win_max':6})
         with self.assertRaisesRegex(ValueError,'最终 .win'):w90.relative_window_values(final,6,{'dis_win_max':4})
-        with self.assertRaisesRegex(ValueError,'整数'):w90.edit_win(source.replace('num_iter    = 20','num_iter = nonsense'),{},source_win=source)
+        raw=source.replace('num_iter    = 20','num_iter = nonsense')
+        self.assertEqual(w90.edit_win(raw,{},source_win=source)['parameters']['num_iter'],'nonsense')
         with self.assertRaisesRegex(ValueError,'spinors'):w90.edit_win(source.replace('spinors = .true.','spinors = .false.'),{},source_win=source)
         deleted=w90.edit_win(final,{},remove=['dis_win_max'])['win']
         self.assertEqual(w90.relative_window_values(deleted,6),{'dis_win_min':-3})

@@ -52,54 +52,97 @@ def _atomic_write_json(path, value):
             os.unlink(temp_name)
 
 
+def incar_statements(text):
+    """Locate assignments without interpreting tag names or their values.
+
+    Shared with the local editor. This file is also deployed alone for remote
+    input checks, so the parser must remain dependency-free.
+    """
+    entries, malformed, groups = [], [], []
+    start, index, quote = 0, 0, None
+    name = r'[A-Za-z][A-Za-z0-9_/]*'
+
+    def emit(end):
+        raw = text[start:end]
+        if not raw.strip(): return
+        match = re.fullmatch(r'\s*(' + name + r')\s*=\s*(.*?)\s*', raw, re.S)
+        if match:
+            tag = '/'.join(groups + [match[1].upper()])
+            value = re.sub(r'\\\r?\n', ' ', match[2]).strip()
+            entries.append({'tag': tag, 'value': value, 'start': start, 'end': end,
+                            'line': text.count('\n', 0, start) + 1})
+        elif '=' in raw:
+            malformed.append(text.count('\n', 0, start) + 1)
+        # VASP allows unprefixed explanatory lines with no syntax characters.
+
+    while index < len(text):
+        char = text[index]
+        if char == '\\' and index + 1 < len(text):
+            following = text[index + 1]
+            if following == '\n' or following == '\r' and text[index + 2:index + 3] == '\n':
+                index += 2 if following == '\n' else 3; continue
+            if quote and following == quote:
+                index += 2; continue
+        if quote:
+            if char == quote: quote = None
+            index += 1; continue
+        if char == '"':
+            quote = char; index += 1; continue
+        if char in '#!':
+            emit(index)
+            newline = text.find('\n', index)
+            if newline < 0: start = len(text); break
+            start = index = newline + 1; continue
+        if char == '{':
+            group = text[start:index].strip()
+            if re.fullmatch(name, group):
+                groups.append(group.upper()); start = index + 1
+        elif char == '}':
+            emit(index)
+            if groups: groups.pop()
+            else: malformed.append(text.count('\n', 0, index) + 1)
+            start = index + 1
+        elif char in ';\n':
+            emit(index); start = index + 1
+        index += 1
+    emit(len(text))
+    if quote or groups: malformed.append(text.count('\n', 0, start) + 1)
+    return entries, sorted(set(malformed))
+
+
+def remove_incar_tags(text, tags, keep_last=False):
+    entries, malformed = incar_statements(text)
+    if malformed: raise ValueError('INCAR 文本的引号、参数块或赋值未闭合：行 ' + ','.join(map(str, malformed)))
+    tags = {tag.upper() for tag in tags}
+    last = {entry['tag']: entry['start'] for entry in entries}
+    for entry in reversed(entries):
+        if entry['tag'] in tags and (not keep_last or entry['start'] != last[entry['tag']]):
+            text = text[:entry['start']] + text[entry['end']:]
+    return text
+
+
+def merge_incar_text(base, extra):
+    entries, malformed = incar_statements(extra)
+    if malformed: raise ValueError('INCAR 文本的引号、参数块或赋值未闭合：行 ' + ','.join(map(str, malformed)))
+    names = {entry['tag'] for entry in entries}
+    base = remove_incar_tags(base, names)
+    extra = remove_incar_tags(extra, names, keep_last=True)
+    return base.rstrip('\n') + ('\n' if base else '') + extra + ('' if extra.endswith('\n') else '\n')
+
+
 def parse_incar(text):
-    """Return last-value tags, duplicate records, and malformed line numbers."""
-    tags = {}
-    occurrences = {}
-    malformed = []
-    lines = text.splitlines()
-    position = 0
-    while position < len(lines):
-        line_number = position + 1
-        original = lines[position]
-        position += 1
-        if re.fullmatch(r'\s*WANNIER90_WIN\s*=\s*"\s*', original, re.I):
-            content = []
-            while position < len(lines) and lines[position].strip() != '"':
-                content.append(lines[position])
-                position += 1
-            if position == len(lines):
-                malformed.append(line_number)
-                continue
-            position += 1
-            value = '"\n' + '\n'.join(content) + '\n"'
-            occurrences.setdefault('WANNIER90_WIN', []).append({'line': line_number, 'value': value})
-            tags['WANNIER90_WIN'] = value
-            continue
-        line = re.split(r"[!#]", original, maxsplit=1)[0].strip()
-        if not line:
-            continue
-        if "=" not in line:
-            malformed.append(line_number)
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip().upper()
-        value = value.strip()
-        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or not value:
-            malformed.append(line_number)
-            continue
-        occurrences.setdefault(key, []).append({"line": line_number, "value": value})
-        tags[key] = value
+    """Return last-value tags, duplicates, and structurally unparsed lines."""
+    entries, malformed = incar_statements(text)
+    tags, occurrences = {}, {}
+    for entry in entries:
+        tags[entry['tag']] = entry['value']
+        occurrences.setdefault(entry['tag'], []).append(entry)
     duplicates = []
     for key, values in sorted(occurrences.items()):
-        if len(values) <= 1:
-            continue
-        normalized = {re.sub(r"\s+", " ", value["value"].upper()) for value in values}
-        duplicates.append({
-            "tag": key,
-            "lines": [value["line"] for value in values],
-            "conflicting": len(normalized) > 1,
-        })
+        if len(values) <= 1: continue
+        normalized = {re.sub(r'\s+', ' ', value['value'].upper()) for value in values}
+        duplicates.append({'tag': key, 'lines': [value['line'] for value in values],
+                           'conflicting': len(normalized) > 1})
     return tags, duplicates, malformed
 
 

@@ -4,7 +4,7 @@ import type {StructureDocument} from './structure';
 import catalog from '../resources/vasp-parameter-catalog.json';
 export type ParameterValue=string|null;
 export type HubbardRow={l:string;u:string;j:string};
-export type ParameterLayer={values:Record<string,ParameterValue>;preset?:'none'|'basic';moments?:Record<string,ParameterValue>;hubbard?:Record<string,HubbardRow>;confirmed_custom_tags?:string[]};
+export type ParameterLayer={values:Record<string,ParameterValue>;preset?:'none'|'basic';moments?:Record<string,ParameterValue>;hubbard?:Record<string,HubbardRow>;confirmed_custom_tags?:string[];manualIncarText?:string};
 export type ParameterProject={version:1;shared:ParameterLayer;templates?:{name:string;layer:ParameterLayer}[]};
 export type Definition={tag:string;label:string;unit?:string;type:'number'|'integer'|'enum'|'ediffg'|'vector3';choices?:[string,string][];positive?:boolean;min?:number;help:string;url:string;applies_to?:string[]};
 export const definitions:Definition[]=catalog.definitions as Definition[];
@@ -23,6 +23,7 @@ export function ionicCriterion(mode:string,magnitude:string):string|null {
 export function validateLayer(value:unknown):asserts value is ParameterLayer {
  const p=value as ParameterLayer;const text=(v:unknown)=>v===null||(typeof v==='string'&&v.length<=200);
  if(!p||!p.values||Array.isArray(p.values)||typeof p.values!=='object'||Object.keys(p.values).length>100||!Object.values(p.values).every(text)||p.preset!==undefined&&!['none','basic'].includes(p.preset))throw new Error('参数草稿格式无效。');
+ if(p.manualIncarText!==undefined&&(typeof p.manualIncarText!=='string'||new TextEncoder().encode(p.manualIncarText).length>262144))throw new Error('手动 INCAR 文本须不超过 256 KiB。');
  if(p.confirmed_custom_tags&&(!Array.isArray(p.confirmed_custom_tags)||p.confirmed_custom_tags.length>100||!p.confirmed_custom_tags.every(tag=>typeof tag==='string'&&/^[A-Z][A-Z0-9_]*$/.test(tag))))throw new Error('自定义参数确认列表无效。');
  if(p.moments&&(!Object.values(p.moments).every(text)||Object.keys(p.moments).length>1500))throw new Error('磁矩草稿格式无效。');
  if(p.hubbard&&(!Object.entries(p.hubbard).every(([k,v])=>/^[A-Z][a-z]?$/.test(k)&&v&&['l','u','j'].every(x=>typeof v[x as keyof HubbardRow]==='string'&&v[x as keyof HubbardRow].length<=200))))throw new Error('DFT+U 草稿格式无效。');
@@ -64,7 +65,7 @@ export function checkParameters(project:Project,node:Step):ParameterIssue[] {
  for(const [tag,e] of Object.entries(effective)){
   if(e.value===null)continue;const d=definitions.find(d=>d.tag===tag);
   if(!/^[A-Z][A-Z0-9_]*$/.test(tag)||managedTags.has(tag)&&tag!=='XC_FUNCTIONAL'){issues.push({level:'error',message:`${tag} 名称无效或由工作台管理。`});continue;}
-  if(!d){if(!singleLineValue(e.value)){issues.push({level:'error',message:`${tag} 须为安全单行文本。`});continue;}if(knownTags.has(tag))issues.push({level:'warning',message:`${tag} 是官方目录已知参数，以原样文本传递；仍需核对目标 VASP 版本和适用性。`});else if(!(project.parameters?.shared.confirmed_custom_tags||[]).includes(tag)&&!(node.data.parameters?.confirmed_custom_tags||[]).includes(tag))issues.push({level:'error',message:`${tag} 未收录，须显式确认自定义参数。`});else issues.push({level:'warning',message:`${tag} 为未验证的自定义参数。`});continue;}
+  if(!d){if(!singleLineValue(e.value)){issues.push({level:'error',message:`${tag} 须为单行文本；多行内容请放入手动 INCAR。`});continue;}issues.push({level:'warning',message:`${tag} 为原样传递的参数，未自动验证。`});continue;}
   if(!singleLineValue(e.value))issues.push({level:'error',message:`${tag} 须为安全单行文本。`});
   if(d.applies_to&&!d.applies_to.includes(calculationKind(node,project)))issues.push({level:'error',message:`${tag} 不适用于当前节点类型。`});
   if(tag==='EDIFFG'&&e.value!=='0'&&numeric(e.value)&&Number(e.value)===0)issues.push({level:'error',message:'力或能量阈值必须大于 0；若只按 NSW 停止，请显式选择仅步数（EDIFFG=0）。'});

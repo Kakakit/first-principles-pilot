@@ -566,6 +566,30 @@ class PyW90Advice(BaseModel):
     relative_windows: Optional[dict[str, float]] = None
 
 
+class PyW90PreDosSources(BaseModel):
+    project: dict
+    node_id: str
+
+
+class PyW90PreDos(PyW90PreDosSources):
+    source_attempt_id: str
+    channel: Literal['auto','single','up','down','charge'] = 'auto'
+    emin: float = -4
+    emax: float = 4
+
+
+@app.post('/api/inputs/pyw90-pre-dos-sources')
+def input_pyw90_pre_dos_sources(payload: PyW90PreDosSources):
+    try:return {'sources':pyw90_remote.pre_dos_sources(**payload.model_dump())}
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/inputs/pyw90-pre-dos')
+def input_pyw90_pre_dos(payload: PyW90PreDos):
+    try:return pyw90_remote.pre_dos(**payload.model_dump())
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
 @app.post('/api/wannier90/pyw90-advice')
 def wannier_pyw90_advice(payload: PyW90Advice):
     try:return pyw90_remote.recommend(**payload.model_dump())

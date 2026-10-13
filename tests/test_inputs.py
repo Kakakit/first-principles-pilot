@@ -42,6 +42,45 @@ class InputTests(unittest.TestCase):
         self.assertEqual(result['files']['KPOINTS'], 'Regular mesh\n0\nGamma\n4 4 4\n0 0 0\n')
         self.assertNotEqual(result['files']['POSCAR'], 'not a POSCAR')
 
+    def test_manual_incar_override_delete_and_exact_frozen_text(self):
+        from backend import incar_text
+        from unittest.mock import patch
+        shared=self.project['parameters']['shared']
+        local=self.project['nodes'][1]['data']['parameters']
+        shared['manualIncarText']='# shared\nENCUT=420; NELM=90\n'
+        local['values']['ENCUT']='500'
+        local['manualIncarText']='# local\nENCUT=520\nCUSTOM_TAG=odd value\n'
+        with patch.object(execution,'ssh',side_effect=AssertionError('local text preview must not use SSH')):
+            report=inputs.generate(self.project,'c')
+            self.assertEqual(report['errors'],[])
+            self.assertEqual(report['incar_tags']['ENCUT']['value'],'520')
+            self.assertIn('手动文本',report['incar_tags']['ENCUT']['source'])
+            self.assertEqual(incar_text.parse(report['files']['INCAR'])[1],[])
+            frozen=inputs.freeze(self.project,'c','manual text')
+        with zipfile.ZipFile(inputs.ROOT/'inputs'/(frozen['id']+'.zip')) as archive:
+            self.assertEqual(archive.read('INCAR').decode(),report['files']['INCAR'])
+        local['manualIncarText']=''
+        self.assertEqual(inputs.generate(self.project,'c')['incar_tags']['ENCUT']['value'],'500')
+        del local['values']['ENCUT']
+        self.assertEqual(inputs.generate(self.project,'c')['incar_tags']['ENCUT']['value'],'420')
+
+    def test_manual_moments_and_hubbard_do_not_need_form_tables(self):
+        local=self.project['nodes'][1]['data']['parameters']
+        local['manualIncarText']='ISPIN=2\nMAGMOM=1 \\\n -1\nLDAU=.TRUE.\nLDAUTYPE=2\nLMAXMIX=2\nLDAUL=1\nLDAUU=3\nLDAUJ=0\n'
+        report=inputs.generate(self.project,'c')
+        self.assertEqual(report['errors'],[])
+        self.assertEqual(report['incar_tags']['LDAUU']['value'],'3')
+        self.assertIn('MAGMOM=1 \\\n -1',report['files']['INCAR'])
+        local['manualIncarText']='ICHARG=11\n'
+        self.assertTrue(any('来源合同不一致' in s for s in inputs.generate(self.project,'c')['errors']))
+        from backend import source_contracts
+        local['manualIncarText']='LSORBIT=1\nISPIN=1\nMAGMOM=0 0 1 0 0 -1\n'
+        frozen=inputs.freeze(self.project,'c','manual SOC runtime')
+        self.assertTrue(next(r for r in inputs.history('p') if r['id']==frozen['id'])['requires_ncl'])
+        self.assertEqual(source_contracts.tag(inputs.generate(self.project,'c')['files']['INCAR'],'LSORBIT'),'.TRUE.')
+        with self.assertRaisesRegex(ValueError,'NCORE=1'):
+            source_contracts.validate_pead('LCALCPOL=1; NCORE=6\n')
+
     def test_explicit_poscar_text_reaches_generation_and_frozen_zip_verbatim(self):
         from backend.structure_edit import edit_poscar
         parent = self.project['nodes'][0]['data']['structure']
@@ -94,7 +133,7 @@ class InputTests(unittest.TestCase):
         self.assertTrue(inputs.generate(self.project,'c')['errors'])
         for tag in ('NEDOS','EMIN','EMAX'): del layer['values'][tag]
         layer['values']['MYTAG']='7'
-        self.assertTrue(inputs.generate(self.project,'c')['errors'])
+        self.assertEqual(inputs.generate(self.project,'c')['errors'], [])
         layer['confirmed_custom_tags']=['MYTAG']
         self.assertEqual(inputs.generate(self.project,'c')['parameters']['MYTAG']['validation'],'unverified-custom')
         for key,value in [('MYTAG','1; LCHARG=.FALSE.'),('ISTART','1'),('ICHARG','11')]:
@@ -112,7 +151,7 @@ class InputTests(unittest.TestCase):
             execution.validate_parallel('KPAR = 0\n',16)
 
     def test_reject_missing_invalid_and_masked_parameters(self):
-        for key, value in [('ENCUT', None), ('ENCUT', '-1'), ('ENCUT', 'NaN'), ('NSW', '3'), ('SOC', 'true')]:
+        for key, value in [('ENCUT', None), ('ENCUT', '-1'), ('ENCUT', 'NaN'), ('NSW', '3')]:
             p = copy.deepcopy(self.project)
             p['nodes'][1]['data']['parameters']['values'][key] = value
             self.assertTrue(inputs.generate(p, 'c')['errors'], (key, value))
@@ -255,7 +294,9 @@ class InputTests(unittest.TestCase):
             self.assertIn('Begin Projections\nSi:s\nSi:p\nEnd Projections',report['files']['INCAR'])
             self.assertIn('ICHARG = 11\n',report['files']['INCAR'])
         wannier['data']['inputDraft']['projections']='Si:q'
-        self.assertTrue(inputs.generate(self.project,'w')['errors'])
+        report=inputs.generate(self.project,'w')
+        self.assertEqual(report['errors'], [])
+        self.assertIn('Si:q',report['files']['INCAR'])
 
     def test_soc_vasp_wannier_projection_input_is_not_artificially_blocked(self):
         wannier=copy.deepcopy(self.project['nodes'][1]);wannier['id']='w';wannier['data']['kind']='vasp-wannier'
