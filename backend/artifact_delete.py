@@ -38,7 +38,7 @@ def target(project_id, key):
 
 
 def ensure_stoppable(record):
-    if record.get('state') in ACTIVE or record.get('state') not in ('COMPLETED', 'FAILED', 'UNKNOWN'):
+    if record.get('state') in ACTIVE or record.get('state') not in ('COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN'):
         raise ValueError('任务仍在途或尚未形成可核验终态；禁止删除文件')
 
 
@@ -81,7 +81,7 @@ def references(record, path):
         # If explicit file contracts exist, don't overstate legacy parent-only links.
         if path in names or (potential and not names):
             refs.append({'kind': kind, 'id': key, 'state': state,
-                         'relation': '历史引用' if state in ('COMPLETED', 'FAILED') else '待执行或冻结来源',
+                         'relation': '历史引用' if state in ('COMPLETED', 'FAILED', 'CANCELLED') else '待执行或冻结来源',
                          'certainty': '已知文件引用' if path in names else '旧记录潜在影响'})
     for table in ('attempts', 'chain_runs', 'scan_batches'):
         for item in recycle._rows(table):

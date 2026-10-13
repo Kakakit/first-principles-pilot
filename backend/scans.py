@@ -57,18 +57,34 @@ def axis(dimension, stage):
                 raise ValueError('POSCAR 扫描方式无效')
         else:
             raise ValueError('扫描维度类型无效')
-        start, end, step = (decimal(dimension.get(k)) for k in ('start', 'end', 'step'))
-        if step == 0 or (end-start)*step < 0: raise ValueError('扫描步长方向错误')
+        start, end = (decimal(dimension.get(k)) for k in ('start', 'end'))
+        sampling = dimension.get('sampling', 'step')
+        if sampling == 'count':
+            if kind != 'poscar': raise ValueError('按点数取样目前仅用于 POSCAR')
+            count = dimension.get('point_count')
+            if type(count) is not int or not 2 <= count <= 64:
+                raise ValueError('取样点数须为 2–64 的整数（包含起点和终点）')
+            if start == end: raise ValueError('按点数取样的起点和终点不能相同')
+            # Compute each point independently; a rounded recurring step must
+            # never drop the endpoint or accumulate into an extra point.
+            grid = [start + (end-start)*Decimal(i)/Decimal(count-1) for i in range(count)]
+            grid[0], grid[-1] = start, end
+        elif sampling == 'step':
+            step = decimal(dimension.get('step'))
+            if step == 0 or (end-start)*step < 0: raise ValueError('扫描步长方向错误')
+            grid, current = [], start
+            while (current <= end if step > 0 else current >= end) and len(grid) <= 64:
+                grid.append(current)
+                current += step
+        else: raise ValueError('取样方式无效')
         values = []
-        current = start
-        while (current <= end if step > 0 else current >= end) and len(values) <= 64:
+        for current in grid:
             value = format(current.normalize(), 'f')
             if value == '-0': value = '0'
             if kind == 'incar': parameter_catalog.validate_value(tag, value)
             if kind in ('u', 'j') and current < 0: raise ValueError('U/J 不得为负')
             if kind == 'poscar' and current <= 0: raise ValueError('POSCAR 扫描值必须大于零；目标体积填写正数，输出为负 scale')
             values.append(value)
-            current += step
         if not values or len(values) > 64: raise ValueError('单维最多 64 个值')
     if len(values) != len(set(values)): raise ValueError('扫描维度值重复')
     return values
@@ -469,7 +485,7 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
     if not locally_executable(batch['project_id']):return False
     waiting=next((c for c in batch['cases'] if c['state'] in ('PENDING','PREPARED')),None)
     if not waiting:
-        if all(c['state'] in ('COMPLETED','FAILED') for c in batch['cases']): batch['state']='COMPLETE'
+        if all(c['state'] in ('COMPLETED','FAILED','CANCELLED') for c in batch['cases']): batch['state']='COMPLETE'
         save(batch);return False
     if waiting['id'] in dispatched:return False
     auth=batch['authorization'];limits=control.settings()

@@ -82,7 +82,7 @@ def redact(text):
 def snapshot(key):
     r=ex.get(key)
     fields=('id','state','job_id','created_at','updated_at','dispatch_started_at','bundle_id','script_sha256',
-            'project_id','flow_id','node_id','remote_path','remote_path_absolute','remote_workspace_root','retry_of','evidence')
+            'project_id','flow_id','node_id','remote_path','remote_path_absolute','remote_workspace_root','retry_of','evidence','cancellation')
     result={k:r[k] for k in fields if k in r}
     result.update(schema='fpilot.failure-snapshot.v1',exported_at=ex.now(),software_version='1.0.0',
         runtime={k:r['config'].get(k) for k in ('alias','mpi_executable','vasp_executable','environment_script')},

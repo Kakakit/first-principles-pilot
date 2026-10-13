@@ -18,7 +18,7 @@ def _target(project_id, attempt_id):
     record = ex.get(attempt_id)
     if record.get('project_id') != project_id:
         raise ValueError('attempt 不属于当前项目')
-    if record.get('state') not in ('PREPARED', 'COMPLETED', 'FAILED', 'UNKNOWN', 'EXITING'):
+    if record.get('state') not in ('PREPARED', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'EXITING'):
         raise ValueError('调度器或工作台仍显示此任务在途；不能删除')
     if record.get('path_schema') != 'fpilot.remote-attempt-path':
         raise ValueError('远端目录布局不受支持')
@@ -32,7 +32,7 @@ def _target(project_id, attempt_id):
 def _pending_children(attempt_id):
     with closing(ex.db()) as connection:
         rows = [json.loads(row[0]) for row in connection.execute('SELECT body FROM attempts')]
-    return [row['id'] for row in rows if row['id'] != attempt_id and row.get('state') not in ('COMPLETED', 'FAILED')
+    return [row['id'] for row in rows if row['id'] != attempt_id and row.get('state') not in ('COMPLETED', 'FAILED', 'CANCELLED')
             and (row.get('parent_attempt_id') == attempt_id or
                  (row.get('dependency_snapshot') or {}).get('upstream_attempt_id') == attempt_id or
                  (row.get('restart_snapshot') or {}).get('source_attempt_id') == attempt_id)]

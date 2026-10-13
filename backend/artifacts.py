@@ -116,7 +116,7 @@ def cached_listing(record):
     try:
         result = json.loads((ROOT / 'artifact-cache' / (record['id'] + '.json')).read_text())
         if (result.get('attempt_id') == record['id'] and not result.get('truncated')
-                and record['state'] in ('COMPLETED', 'FAILED')
+                and record['state'] in ('COMPLETED', 'FAILED', 'CANCELLED')
                 and result.get('observed_state') == record['state']
                 and result.get('source_identity') == _identity(record)
                 and result.get('refreshed_at')):
@@ -183,7 +183,7 @@ def preview(key, relative, mode='tail', limit=MAX_PREVIEW_BYTES, force=False):
     relative = _relative(relative)
     limit = max(1, min(int(limit), MAX_PREVIEW_BYTES))
     cache = None
-    if record['state'] in ('COMPLETED', 'FAILED'):
+    if record['state'] in ('COMPLETED', 'FAILED', 'CANCELLED'):
         snapshot = refresh(key) if force else listing(key)
         identity = f"{key}|{relative}|{mode}|{limit}|{snapshot['refreshed_at']}"
         cache = ROOT / 'artifact-cache' / 'previews' / (hashlib.sha256(identity.encode()).hexdigest() + '.json')

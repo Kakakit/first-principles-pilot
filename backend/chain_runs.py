@@ -755,9 +755,9 @@ def _advance(run_id):
                 else:
                     step['state'] = 'DONE'
                     step['final_attempt_id'] = attempt_id
-            elif attempt['state'] in ('FAILED', 'UNKNOWN'):
+            elif attempt['state'] in ('FAILED', 'UNKNOWN', 'CANCELLED'):
                 step['state'] = 'BLOCKED'
-                step['blocker'] = _attempt_blocker(attempt)
+                step['blocker'] = '任务已由用户取消；请重新准备并明确授权，未自动重试' if attempt['state'] == 'CANCELLED' else _attempt_blocker(attempt)
                 if attempt['state']=='UNKNOWN':step['blocker_kind']='SUBMISSION_UNKNOWN'
                 step.pop('waiting_reason',None)
             elif attempt['state'] == 'PREPARED':

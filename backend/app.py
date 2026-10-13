@@ -1466,6 +1466,40 @@ def refresh_execution(key: str):
         raise HTTPException(422,str(exc)) from exc
 
 
+class TaskCancelRequest(BaseModel):
+    project_id: str
+    token: Optional[str] = None
+    confirm: bool = False
+
+
+@app.post('/api/execution/{key}/cancel-preview')
+def preview_task_cancel(key: str, payload: TaskCancelRequest):
+    from . import execution_cancel
+    try: return execution_cancel.preview(payload.project_id, key)
+    except (ValueError, OSError) as exc: raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/execution/{key}/cancel')
+def cancel_task(key: str, payload: TaskCancelRequest):
+    from . import execution_cancel
+    try: return execution_cancel.cancel(payload.project_id, key, payload.token, payload.confirm)
+    except (ValueError, OSError) as exc: raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/execution/{key}/cancel-status')
+def task_cancel_status(key: str, payload: TaskCancelRequest):
+    from . import execution_cancel
+    try: return execution_cancel.recover(payload.project_id, key)
+    except (ValueError, OSError) as exc: raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/scans/{batch_id}/cases/{case_id}/cancel')
+def cancel_scan_case(batch_id: str, case_id: str, payload: TaskCancelRequest):
+    from . import execution_cancel
+    try: return execution_cancel.cancel_case(payload.project_id, batch_id, case_id, payload.confirm)
+    except (ValueError, OSError) as exc: raise HTTPException(422, str(exc)) from exc
+
+
 class ServerConfig(BaseModel):
     config: dict
     force: bool = False

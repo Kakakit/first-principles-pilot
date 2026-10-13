@@ -12,6 +12,20 @@ from test_poscar_edit import DIRECT, parse
 
 
 class PoscarScanTests(unittest.TestCase):
+    def test_point_count_includes_exact_endpoints_and_keeps_step_mode(self):
+        dim = {'kind':'poscar','mode':'volume','start':'100','end':'110','sampling':'count','point_count':4}
+        values = scans.axis(dim, 'relax')
+        self.assertEqual(len(values), 4); self.assertEqual(values[0], '100'); self.assertEqual(values[-1], '110')
+        self.assertEqual(len(set(values)), 4)
+        self.assertEqual(scans.axis({**dim,'start':'110','end':'100'},'relax'), list(reversed(values)))
+        for count in (1,65,True,2.5,'11'):
+            with self.assertRaisesRegex(ValueError,'取样点数'): scans.axis({**dim,'point_count':count},'relax')
+        with self.assertRaises(ValueError): scans.axis({**dim,'end':'100'},'relax')
+        report=scans.preview(self.project,'scan','c',[dim])
+        self.assertTrue(report['ready']);self.assertEqual(report['case_count'],4)
+        self.assertAlmostEqual(report['cases'][-1]['geometry']['volume_A3'],110)
+        self.assertEqual(scans.axis({**dim,'sampling':'step','step':'2'},'relax'),['100','102','104','106','108','110'])
+
     def setUp(self):
         self.fixture = test_scans.ScanTests()
         self.fixture.setUp()

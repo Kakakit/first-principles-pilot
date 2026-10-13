@@ -673,6 +673,11 @@ cat .job-id
 
 def refresh(key):
     record = ex.get(key)
+    if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'):
+        from .execution_cancel import recover
+        recover(record['project_id'], key)
+        return ex.get(key)
+    if record['state'] == 'CANCELLED': return record
     if record['state'] in ('PREPARED', 'COMPLETED', 'FAILED'):
         return record
     ex.assert_recovery_target(record)

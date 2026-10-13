@@ -96,8 +96,12 @@ def save(record, expected_updated_at=False):
         existing=json.loads(row[0]) if row else {}
         if expected_updated_at is not False and existing.get('updated_at') != expected_updated_at:
             c.rollback();return existing
-        if existing.get('state') in ('COMPLETED','FAILED'):
+        if existing.get('state') in ('COMPLETED','FAILED','CANCELLED'):
             allowed=('watcher_pid','watcher_error','notification')
+            old_cancel, new_cancel = existing.get('cancellation', {}), record.get('cancellation', {})
+            if (old_cancel.get('operation_id') and old_cancel.get('operation_id') == new_cancel.get('operation_id')
+                    and old_cancel.get('state') != 'CONFIRMED'):
+                allowed += ('cancellation',)
             if record.get('state') == existing.get('state'):
                 # Terminal state is immutable, but a scheduler accounting row
                 # may settle just after the wrapper evidence.  Permit only
@@ -1089,6 +1093,11 @@ def assert_recovery_target(record):
 def refresh(key):
     if recycle.inactive('attempts',key,get(key)):return get(key)
     record=get(key)
+    if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'):
+        from .execution_cancel import recover
+        recover(record['project_id'], key)
+        return get(key)
+    if record['state'] == 'CANCELLED': return record
     if record.get('kind') in ('wannier90', 'wannier90-plot'):
         from . import wannier_execution
         return wannier_execution.refresh(key)
