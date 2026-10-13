@@ -51,7 +51,12 @@ def runtime(target, destination, cache):
         raise ValueError('Standalone Python SHA256 mismatch')
     safe_extract(archive, destination)
     python = destination / 'python' / ('python.exe' if target.startswith('windows') else 'bin/python3')
-    run([python, '-m', 'pip', 'install', '--only-binary=:all:', '--no-compile',
+    formats=['--only-binary=:all:']
+    if target=='macos-x64':
+        # This exact pymatgen version has no CPython 3.11 Intel Mac wheel.
+        # Build it on the native CI machine instead of changing its version.
+        formats.append('--no-binary=pymatgen')
+    run([python, '-m', 'pip', 'install', *formats, '--no-compile',
          '-r', ROOT / 'packaging/requirements-runtime.txt'])
     run([python, '-m', 'pip', 'check'])
     # Runtime metadata stays in the package. No developer interpreter is copied.
