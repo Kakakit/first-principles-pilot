@@ -1080,7 +1080,7 @@ def import_structure(payload: StructureImport):
 
 
 from .structure_edit import edit_structure, edit_poscar
-from .storage import WorkspaceStore, ConflictError
+from .storage import WorkspaceStore, ConflictError, validate_workspace
 
 
 class StructureEdit(BaseModel):
@@ -1286,6 +1286,20 @@ def node_editability(project_id: str):
     if project is None: raise HTTPException(404, '项目尚未保存或不存在')
     try: return status(store.root, project)
     except (ValueError, OSError, sqlite3.Error) as exc: raise HTTPException(422, '节点历史核查失败：' + str(exc)) from exc
+
+
+class NodeEditabilityDraft(BaseModel):
+    project: dict
+
+
+@app.post('/api/projects/{project_id}/node-editability')
+def node_editability_draft(project_id: str, payload: NodeEditabilityDraft):
+    from .node_editability import status
+    try:
+        if payload.project.get('id') != project_id: raise ValueError('项目身份不符')
+        validate_workspace({'activeId': project_id, 'projects': [payload.project]})
+        return status(WorkspaceStore().root, payload.project)
+    except (ValueError, OSError) as exc: raise HTTPException(422, str(exc)) from exc
 
 
 @app.post('/api/execution/{key}/artifacts/refresh')

@@ -129,7 +129,8 @@ def get(key):
 def history(project_id=None, limit=100):
     with closing(db()) as c:
         rows = [json.loads(row[0]) for row in c.execute('SELECT body FROM attempts ORDER BY rowid DESC')]
-    return [row for row in rows if (project_id is None or row.get('project_id') == project_id) and
+    from .calculation_nodes import case_info
+    return [{**row, **case_info(row)} for row in rows if (project_id is None or row.get('project_id') == project_id) and
             not recycle.inactive('attempts',row['id'],row)][:limit]
 
 
@@ -450,11 +451,6 @@ def dependency_snapshot(bundle_id, manifest, files, upstream_attempt_id, alias, 
     if not upstream_attempt_id or not isinstance(reason,str) or len(reason) > 2000:
         raise ValueError('依赖任务必须绑定相连节点的上游 attempt')
     parent=get(upstream_attempt_id)
-    if parent.get('scan_batch_id'):
-        from . import scans
-        selected=scans.get(parent['scan_batch_id']).get('promotion') or {}
-        if selected.get('attempt_id') != upstream_attempt_id:
-            raise ValueError('扫描来源尚未手动提升，不能作为下游依赖')
     if parent.get('path_schema') != 'fpilot.remote-attempt-path':
         raise ValueError('上游 attempt 目录结构不受支持')
     if parent.get('state') != 'COMPLETED':
@@ -469,7 +465,8 @@ def dependency_snapshot(bundle_id, manifest, files, upstream_attempt_id, alias, 
     if parent.get('config',{}).get('alias') != alias:
         raise ValueError('依赖文件仅可在同一登记主机内复用')
     dependency_node=next(iter({item['node_id'] for item in manifest['dependencies']}))
-    if parent.get('node_id') != dependency_node:
+    from .calculation_nodes import owner as attempt_owner
+    if attempt_owner(parent) != dependency_node:
         raise ValueError('上游 attempt 与冻结包指定的依赖节点不一致')
     project=frozen_project(bundle_id)
     identity=remote_paths.frozen_identity(manifest,project)

@@ -1,3 +1,4 @@
+import {independentScan,calculationKind} from './scanNodes';
 import CancelTask from './CancelTask';
 import ProgramAdaptation from './ProgramAdaptation';
 import {useSubmissionDraft} from './useSubmissionDraft';
@@ -34,7 +35,7 @@ const empty=():Dimension=>({kind:'incar',tag:'ENCUT',start:'400',end:'600',step:
 const stateLabel=(state?:string)=>state?statusLabel(state):'预览';
 
 function VaspScanPanel({project,scanNode,onDraft,view,onReview,onConfigure,onSource}:{onSource?:(value:SourceDraft)=>void;view?:'config'|'run';onReview?:()=>void;onConfigure?:()=>void;project:Project;scanNode:Step;onDraft:(dimensions:Dimension[],reason:string)=>void}){
- const parentId=project.edges.find(e=>e.target===scanNode.id)?.source||'';
+ const parentId=independentScan(scanNode)?scanNode.id:project.edges.find(e=>e.target===scanNode.id)?.source||'';
  const parent=project.nodes.find(n=>n.id===parentId);
  const saved=scanNode.data.scanDraft as {dimensions?:Dimension[];reason?:string}|undefined;
  const [confirmOpen,setConfirmOpen]=useState(false);
@@ -46,7 +47,7 @@ function VaspScanPanel({project,scanNode,onDraft,view,onReview,onConfigure,onSou
  const [pool,setPool]=useSubmissionDraft<string[]>(draftKey+':pool',[]),[maxParallel,setMaxParallel]=useSubmissionDraft(draftKey+':maxParallel',1),[scripts,setScripts]=useState<Record<string,ServerPreview>>({});
  const [limits,setLimits]=useState<{max_inflight_total:number;max_inflight_per_host:number;max_cores_per_host:number|null}|null>(null);
  const [busy,setBusy]=useState(false),[busyStep,setBusyStep]=useState(''),[error,setError]=useState(''),[status,setStatus]=useState('');
- const numeric=useMemo(()=>definitions.filter(d=>['number','integer','ediffg'].includes(d.type)&&!managedTags.has(d.tag)&&(!d.applies_to||d.applies_to.includes(parent?.data.kind||''))),[parent?.data.kind]);
+ const numeric=useMemo(()=>definitions.filter(d=>['number','integer','ediffg'].includes(d.type)&&!managedTags.has(d.tag)&&(!d.applies_to||d.applies_to.includes(calculationKind(parent,project)||''))),[parent?.data.kind,parent?.data.scanSpec]);
  const load=async()=>{const [server,history,control]=await Promise.all([api('/api/server'),api(`/api/scans?project_id=${encodeURIComponent(project.id)}`),api('/api/execution-control')]);setLimits(control.settings);setConfig(old=>old||server.config);setProfiles(server.registered_profiles||[]);setBatches(history.batches.filter((b:Batch)=>b.scan_node_id===scanNode.id));setBatch(old=>old?history.batches.find((b:Batch)=>b.id===old.id)||null:null);};
  useEffect(()=>{void load().catch(e=>setError(e.message));},[project.id,scanNode.id]);
  const safe=(next:Dimension[])=>next.every(d=>!d.meshes||d.meshes.every(mesh=>mesh.every(Number.isFinite)));
@@ -57,7 +58,7 @@ function VaspScanPanel({project,scanNode,onDraft,view,onReview,onConfigure,onSou
  const sourceProject={...project,nodes:project.nodes.map(n=>n.id===parentId?{...n,data:{...n.data,sourceDraft:scanNode.data.sourceDraft||n.data.sourceDraft}}:n)};
  const request={project:sourceProject,scan_node_id:scanNode.id,base_node_id:parentId,dimensions,reason};
  const inspect=()=>call(async()=>{setPreview(await api('/api/scans/preview',request));setBatch(null);},'正在生成并检查全部 case 输入');
- const freeze=()=>call(async()=>{const result=await api('/api/scans/freeze',{...request,expected_definition_hash:preview?.definition_hash});setBatch(result);setBatches(old=>[result,...old]);setStatus('已冻结全部 case；请审核服务器、脚本与来源后授权。');},'正在冻结 case 表与输入哈希');
+ const freeze=()=>call(async()=>{const result=await api('/api/scans/freeze',{...request,expected_definition_hash:preview?.definition_hash});setBatch(result);setBatches(old=>[result,...old]);window.dispatchEvent(new CustomEvent('fpilot:history-changed',{detail:{kind:'scans',id:result.id,action:'freeze'}}));setStatus('已冻结全部 case；请审核服务器、脚本与来源后授权。');},'正在冻结 case 表与输入哈希');
  const probeServer=(save=false)=>call(async()=>{if(!config)return;const effective=save?(await api('/api/server',{config},'PUT')).config||config:config;setConfig(effective);const report=await api('/api/server/probe',{config:effective});setProbe(report);setResource(null);setPool(old=>old.filter(name=>poolNodes(report,effective.alias).some(n=>n.NODE===name)));setScripts({});},'正在连接主机并诊断运行时与节点资源');
  const nodes=poolNodes(probe,config?.alias);
  const candidates=fullNodeCandidates(nodes,pool.filter(name=>nodes.some(n=>n.NODE===name)));
@@ -90,5 +91,6 @@ function VaspScanPanel({project,scanNode,onDraft,view,onReview,onConfigure,onSou
 
 export default function ScanPanel(props:Parameters<typeof VaspScanPanel>[0]&{onWindowChange?:(draft:WindowDraft)=>void;onWindowAdopt?:(value:WindowAdoption)=>void}){
  const parent=props.project.nodes.find(n=>n.id===props.project.edges.find(e=>e.target===props.scanNode.id)?.source);
- return parent?.data.kind==='wannier90'?<WannierScanPanel {...props} parent={parent} onChange={props.onWindowChange} onAdopt={props.onWindowAdopt}/>:<VaspScanPanel {...props}/>;
+ const base=independentScan(props.scanNode)?props.scanNode:parent;
+ return calculationKind(base,props.project)==='wannier90'?<WannierScanPanel {...props} parent={base!} onChange={props.onWindowChange} onAdopt={props.onWindowAdopt}/>:<VaspScanPanel {...props}/>;
 }

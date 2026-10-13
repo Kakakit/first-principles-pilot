@@ -22,7 +22,7 @@ def scopes(project, node_id):
         draft = b['data'].get('sourceDraft') or {}
         if draft.get('mode') == 'self' or draft.get('mode') == 'manual':
             continue
-        if b['data']['kind'] == 'scan':
+        if b['data']['kind'] == 'scan' and not b['data'].get('scanSpec'):
             # The base→scan edge supplies parameters, not remote output.
             for parent in project.get('edges',[]):
                 p = nodes.get(parent['source'])

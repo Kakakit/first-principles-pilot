@@ -1,3 +1,4 @@
+from .calculation_nodes import owner as execution_owner, case_info
 """Read-only, attempt-bound remote artifact inspection and small-file transfer."""
 import base64
 import hashlib
@@ -21,8 +22,9 @@ SCHOOL_HOSTS = {*(f'jutai-{index}' for index in range(1, 6)), 'gengzi-187'}
 
 
 def attempts(project_id, node_id):
-    rows = [item for item in execution.history(project_id)
-            if item.get('project_id') == project_id and item.get('node_id') == node_id]
+    rows = [item for item in execution.history(project_id, limit=None)
+            if item.get('project_id') == project_id and execution_owner(item) == node_id]
+    rows = [{**r, **case_info(r)} for r in rows]
     return sorted(rows, key=lambda item: item.get('created_at', ''), reverse=True)
 
 

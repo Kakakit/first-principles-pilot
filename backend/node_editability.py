@@ -40,7 +40,10 @@ def usage(root, project_id, expected_kinds=None):
                     for node_id in item: add(node_id, reason, kinds.get(node_id))
                 elif key.endswith('attempt_id') and isinstance(item, str):
                     source = attempts.get(item, {})
-                    if source.get('project_id') == project_id: add(source.get('node_id'), reason, kinds.get(source.get('node_id')))
+                    if source.get('project_id') == project_id:
+                        from .calculation_nodes import owner
+                        add(owner(source), reason, kinds.get(owner(source)))
+                        add(source.get('node_id'), reason, kinds.get(source.get('node_id')))
                 else: references(item, reason, kinds)
         elif isinstance(value, list):
             for item in value: references(item, reason, kinds)
@@ -70,7 +73,8 @@ def usage(root, project_id, expected_kinds=None):
 def status(root, project):
     blockers = usage(root, project['id'])
     return {'project_id': project['id'], 'nodes': {
-        node['id']: {'can_switch': node['data']['kind'] in VASP_KINDS and not blockers.get(node['id']),
+        node['id']: {'can_switch_scan': node['data']['kind']=='scan' and not blockers.get(node['id']),
+                     'can_switch': node['data']['kind'] in VASP_KINDS and not blockers.get(node['id']),
                      'reasons': blockers.get(node['id'], []) if node['data']['kind'] in VASP_KINDS
                      else ['仅 VASP 计算草稿支持类型切换']}
         for node in project['nodes']}}
@@ -88,6 +92,14 @@ def assert_changes(root, previous, incoming):
         changed = [n for n in project['nodes'] if n['id'] in old_nodes and
                    old_nodes[n['id']]['data']['kind'] != n['data']['kind']]
         added = [n for n in project['nodes'] if n['id'] not in old_nodes]
+        scan_changes = [n for n in project['nodes'] if n['id'] in old_nodes and n['data']['kind']=='scan' and n['data'].get('scanSpec') != old_nodes[n['id']]['data'].get('scanSpec')]
+        if scan_changes:
+            from .calculation_nodes import kind
+            scan_usage=usage(root, project['id'])
+            for node in scan_changes:
+                before=old_nodes[node['id']]
+                if before['data'].get('scanSpec') and not node['data'].get('scanSpec'): raise ValueError('独立迭代设置不能退回旧模式')
+                if kind(before,old)!=kind(node,project) and scan_usage.get(node['id']): raise ValueError('迭代已有冻结或执行引用，请复制节点后更改计算类型')
         if not changed and not added: continue
         kinds = {}
         blockers = usage(root, project['id'], kinds)

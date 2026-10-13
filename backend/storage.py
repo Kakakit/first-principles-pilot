@@ -56,6 +56,10 @@ def validate_workspace(w):
                 from .node_editability import STAGE_SEQUENCES
                 if sequence != STAGE_SEQUENCES[n['data']['kind']]:
                     raise ValueError('新项目的阶段编号须与节点类型一致。')
+            if n['data'].get('scanSpec') is not None:
+                from .calculation_nodes import kind
+                if n['data']['kind'] != 'scan': raise ValueError('迭代设置只能属于迭代节点')
+                kind(n)
             nodes.add(n['id'])
             if 'structure' in n['data']:
                 if n['data']['kind'] != 'structure':

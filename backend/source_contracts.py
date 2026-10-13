@@ -1,3 +1,4 @@
+from .calculation_nodes import kind as calculation_kind, owner as attempt_owner, case_info, validate_case
 """One role-based VASP source policy for drafts, frozen inputs and chains."""
 import base64
 import copy
@@ -49,7 +50,7 @@ def wave_start(stage, values, continuing=False):
 def draft(project, node_id):
     nodes = {n['id']: n for n in project['nodes']}
     parent = next((e['source'] for e in project['edges'] if e['target'] == node_id), None)
-    parent_stage = nodes[parent]['data']['kind'] if parent else None
+    parent_stage = calculation_kind(nodes[parent], project) if parent else None
     value = {'mode': 'upstream' if parent_stage and parent_stage != 'structure' else 'new',
              'purpose': 'charge', 'files': 'charge', **(nodes[node_id]['data'].get('sourceDraft') or {})}
     if value['mode'] not in MODES or value['purpose'] not in ('charge', 'continue') or value['files'] not in ('charge', 'both'):
@@ -62,9 +63,9 @@ def draft(project, node_id):
 
 def plan(project, node_id, values=None):
     nodes = {n['id']: n for n in project['nodes']}
-    stage = nodes[node_id]['data']['kind']
+    stage = calculation_kind(nodes[node_id], project)
     value, parent = draft(project, node_id)
-    parent_stage = nodes[parent]['data']['kind'] if parent else None
+    parent_stage = calculation_kind(nodes[parent], project) if parent else None
     mode = value['mode']
     upstream = mode in ('new', 'upstream') and parent_stage not in (None, 'structure')
     if mode == 'upstream' and parent_stage in (None, 'structure'):
@@ -164,10 +165,6 @@ def eligible(record, mode, purpose, source_plan=None):
             reasons.append('缺少最终电子收敛证据')
         if stage == 'relax' and evidence.get('ionic_converged', evidence.get('ionic_accuracy')) is not True:
             reasons.append('缺少离子收敛证据')
-        if record.get('scan_batch_id'):
-            from . import scans
-            if (scans.get(record['scan_batch_id']).get('promotion') or {}).get('attempt_id') != record['id']:
-                reasons.append('扫描结果尚未提升')
     elif record.get('state') not in ('COMPLETED', 'FAILED'):
         reasons.append('请先确认本轮已终止，UNKNOWN 不能用作续算来源')
     return reasons
@@ -222,9 +219,9 @@ def resolve(project, node_id, execution_scope=None):
     for rec in ex.history(None, limit=10000):
         if not policy['required_files']:
             break
-        if upstream and (rec.get('project_id') != project['id'] or rec.get('node_id') != parent):
+        if upstream and (rec.get('project_id') != project['id'] or attempt_owner(rec) != parent):
             continue
-        if value['mode'] == 'self' and (rec.get('project_id') != project['id'] or rec.get('node_id') != node_id or rec.get('scan_batch_id')):
+        if value['mode'] == 'self' and (rec.get('project_id') != project['id'] or attempt_owner(rec) != node_id):
             continue
         reasons = eligible(rec, 'upstream' if upstream else value['mode'], value['purpose'], policy)
         if binding['alias'] and rec.get('config', {}).get('alias') != binding['alias']:
@@ -248,13 +245,14 @@ def resolve(project, node_id, execution_scope=None):
                            'warnings': review['warnings'], 'structure_file': policy['structure_file'],
                            'required_files': policy['required_files'], 'verification_status': verification,
                            'verified_at': checked.get('refreshed_at') if checked else None,
-                           'observed_files': [f for f in checked['files'] if f['path'] in policy['required_files']] if checked else []})
+                           **case_info(rec), 'observed_files': [f for f in checked['files'] if f['path'] in policy['required_files']] if checked else []})
     candidates.sort(key=lambda c: (c['created_at'], c['id']), reverse=True)
-    selected = value.get('attempt_id') or next((c['id'] for c in candidates if c['eligible']), None)
+    scan_parent = policy['parent_id'] and parent and next(n for n in project['nodes'] if n['id'] == parent)['data']['kind'] == 'scan'
+    selected = value.get('attempt_id') or (None if scan_parent else next((c['id'] for c in candidates if c['eligible']), None))
     chosen = next((c for c in candidates if c['id'] == selected), None)
-    blockers = chosen['blockers'] if chosen else candidates[0]['blockers'] if candidates else ['没有可用来源，请完成相连上游或选择已终止的同节点运行'] if policy['required_files'] else []
+    blockers = ['没有可用来源：所选来源不属于当前节点或已经不可用，请重新选择'] if value.get('attempt_id') and not chosen else ['请选择具体迭代 case，不能自动选取最新结果'] if scan_parent and not selected else chosen['blockers'] if chosen else candidates[0]['blockers'] if candidates else ['没有可用来源，请完成相连上游或选择已终止的同节点运行'] if policy['required_files'] else []
     return {'draft': value, 'source_plan': policy, 'candidates': candidates, 'selected_attempt_id': selected,
-            'blockers': blockers, 'binding': binding, 'initialization': policy['initialization'], 'required_files': policy['required_files']}
+            'blockers': blockers, 'binding': binding, 'parameter_source': report.get('parameter_source'), 'initialization': policy['initialization'], 'required_files': policy['required_files']}
 
 
 def structure_geometry(raw):
@@ -282,12 +280,12 @@ def bind(policy, record, report, verification_mode):
     from . import execution as ex, artifacts
     mode = 'upstream' if policy['parent_id'] else policy['mode']
     reasons = eligible(record, mode, policy['purpose'], policy)
-    if policy['parent_id'] and record.get('node_id') != policy['parent_id']:
+    if policy['parent_id'] and attempt_owner(record) != policy['parent_id']:
         raise ValueError('来源 attempt 与直接上游不符')
     if reasons:
         raise ValueError('来源不可用：'+'；'.join(reasons))
     old_manifest, old_files = actual_inputs(record)
-    if policy['parent_id'] and (record.get('node_id') != policy['parent_id'] or old_manifest.get('stage') != policy['parent_stage']):
+    if policy['parent_id'] and (attempt_owner(record) != policy['parent_id'] or old_manifest.get('stage') != policy['parent_stage']):
         raise ValueError('来源 attempt 与直接上游不符')
     review = compatibility(policy, record, report)
     if review['blockers']:
@@ -382,7 +380,7 @@ def freeze(project, node_id, report, verification_mode, execution_scope=None):
         if selection['blockers']:
             raise ValueError('来源不可用：'+'；'.join(selection['blockers']))
         record = ex.get(selection['selected_attempt_id'])
-        if policy['mode'] == 'self' and (record.get('project_id') != project['id'] or record.get('node_id') != node_id):
+        if policy['mode'] == 'self' and (record.get('project_id') != project['id'] or attempt_owner(record) != node_id):
             raise ValueError('同节点续算只能读取当前节点的历史运行')
         contract = bind(policy, record, report, verification_mode)
     branch_bindings.check(project, node_id, source_contract=contract, scope=execution_scope)

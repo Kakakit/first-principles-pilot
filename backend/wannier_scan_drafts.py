@@ -1,3 +1,4 @@
+from .calculation_nodes import kind as calculation_kind, standalone
 """One-parameter window tests from an audited current draft, without a prior freeze."""
 import copy
 import difflib
@@ -33,7 +34,7 @@ def preview(project,scan_node_id,base_node_id,draft,search):
     validate_workspace({'activeId':project['id'],'projects':[project]})
     recycle.assert_available('projects',project['id'])
     nodes={n['id']:n for n in project['nodes']}
-    if nodes.get(scan_node_id,{}).get('data',{}).get('kind')!='scan' or nodes.get(base_node_id,{}).get('data',{}).get('kind')!='wannier90' or [e['source'] for e in project['edges'] if e['target']==scan_node_id]!=[base_node_id]:raise ValueError('参数迭代须连接一个 Wannier90 节点')
+    if nodes.get(scan_node_id,{}).get('data',{}).get('kind')!='scan' or calculation_kind(nodes.get(base_node_id,{}), project)!='wannier90' or (not (base_node_id==scan_node_id and standalone(nodes[scan_node_id])) and [e['source'] for e in project['edges'] if e['target']==scan_node_id]!=[base_node_id]):raise ValueError('参数迭代须连接一个 Wannier90 节点')
     if not isinstance(draft,dict) or draft.get('pending'):raise ValueError('请先应用或解析基础节点的当前参数草稿')
     fields={k:draft.get(k) for k in ('parent_id','alias','win','seed','energy_reference','band_path')}
     bundle=w90.configuration_draft(project,base_node_id,input_reason=draft.get('input_reason') or '窗口测试草稿基线',**fields)

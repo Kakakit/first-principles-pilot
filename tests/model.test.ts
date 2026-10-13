@@ -62,12 +62,12 @@ test('reject historical workspace document shape',()=>{
   const old=demoWorkspace() as any;old.version=2;
   assert.throws(()=>parseWorkspace(JSON.stringify(old)));
 });
-test('scan is a container with one relax or SCF parent',()=>{
+test('independent SCF scan accepts ordinary sources and supplies downstream results',()=>{
   const structure=makeStep('structure'),scf=makeStep('scf'),scan=makeStep('scan');
   assert.equal(scan.data.executionMode,'scan');
   assert.equal(canConnect([structure,scf,scan],[],scf.id,scan.id),true);
-  assert.equal(canConnect([structure,scf,scan],[],structure.id,scan.id),false);
-  assert.equal(canConnect([structure,scf,scan],[],scan.id,scf.id),false);
+  assert.equal(canConnect([structure,scf,scan],[],structure.id,scan.id),true);
+  assert.equal(canConnect([structure,scf,scan],[],scan.id,scf.id),true);
   assert.equal(parseWorkspace(JSON.stringify({activeId:'p',projects:[{id:'p',name:'P',remoteSlug:'p',nodes:[scan],edges:[],updatedAt:new Date().toISOString()}]})).projects[0].nodes[0].data.kind,'scan');
   scan.data.executionMode='vasp';
   assert.throws(()=>parseWorkspace(JSON.stringify({activeId:'p',projects:[{id:'p',name:'P',remoteSlug:'p',nodes:[scan],edges:[],updatedAt:new Date().toISOString()}]})));

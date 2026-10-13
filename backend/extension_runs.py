@@ -137,9 +137,11 @@ def source_catalog(project_id):
     # None deliberately retains older records beyond the execution page's 100-row default.
     for record in ex.history(project_id,limit=None):
         if record.get('recycled') or record.get('path_schema')!='fpilot.remote-attempt-path':continue
-        stage,_=_stage(record);node=nodes.get(record.get('node_id'),{})
+        from .calculation_nodes import owner, case_info
+        stage,_=_stage(record);node=nodes.get(owner(record),{})
+        info=case_info(record)
         rows.append({'id':record['id'],'node_id':record.get('node_id'),'stage':stage,
-                     'name':node.get('label') or record.get('display_name') or stage,
+                     **info, 'name':((node.get('label') or record.get('display_name') or stage) + (' · Case '+str(info['case_index']+1)+' · '+info['parameter_summary'] if info else '')),
                      'input_reason':_input_note(record), 'seed':record.get('seed'),
                      'state':record['state'],'job_id':record.get('job_id'),'created_at':record.get('created_at'),
                      'alias':record['config']['alias'],'evidence':record.get('evidence') or {}})

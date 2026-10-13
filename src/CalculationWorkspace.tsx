@@ -1,3 +1,4 @@
+import IndependentScanWorkspace from './IndependentScanWorkspace';
 import type {WindowDraft,WindowAdoption} from './windowScan';
 import SourcePanel from './SourcePanel';
 import type {SourceDraft} from './SourcePanel';
@@ -11,7 +12,7 @@ import WannierPanel from './WannierPanel';
 import ScanPanel from './ScanPanel';
 
 type Props={
-  project:Project;nodeId:string;view:'config'|'run';bundleId?:string;
+  onProject:(project:Project)=>void;project:Project;nodeId:string;view:'config'|'run';bundleId?:string;
   onLayer:(nodeId:string|null,layer:ParameterLayer)=>void;
   onTemplates:(templates:NonNullable<NonNullable<Project['parameters']>['templates']>)=>void;
   onSource:(nodeId:string,value:SourceDraft)=>void;
@@ -35,7 +36,7 @@ export default function CalculationWorkspace(props:Props) {
   // review state belong to this exact project/node, not a new page instance.
   if(view==='run'&&!visitedRun)setVisitedRun(true);
   if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
-  if(node.data.kind==='scan')return <ScanPanel onWindowChange={props.onWindowChange} onWindowAdopt={props.onWindowAdopt} onSource={value=>props.onSource(nodeId,value)} project={project} scanNode={node} onDraft={props.onScanDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
+  if(node.data.kind==='scan')return <IndependentScanWorkspace {...props}/>;
   return <div className="calculation-workspace">
     <div hidden={view!=='config'} className="configuration-body">
       <nav className="configuration-parts" aria-label="计算配置步骤">

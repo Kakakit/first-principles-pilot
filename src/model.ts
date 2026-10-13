@@ -1,3 +1,4 @@
+import {calculationKind,independentScan,calculationKinds} from './scanNodes';
 import {validateLayer} from './parameters';
 import type {ParameterLayer,ParameterProject} from './parameters';
 import {validateStructure} from './structure';
@@ -28,7 +29,7 @@ export function slugify(value:string):string {
   return value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,64);
 }
 export function makeStep(kind: Kind, position = { x: 80, y: 80 }, stageSequence=STAGE_SEQUENCES[kind]): Step {
-  return { id: uid(), type: 'step', position, data: { kind, label: catalog[kind].label, note: '', executionMode:kind==='scan'?'scan':kind==='wannier90'?'wannier90':'vasp', stageSequence, stageSlug:kind, ...(Object.keys(staticDefaults(kind)).length?{parameters:{values:staticDefaults(kind)}}:{}), params: kind === 'structure' ? { material: '未指定' } : { functional: 'PBE', encut: '', kmesh: '', spin: '未设置' } } };
+  return { id: uid(), type: 'step', position, data: { kind, label: catalog[kind].label, note: '', executionMode:kind==='scan'?'scan':kind==='wannier90'?'wannier90':'vasp', stageSequence, stageSlug:kind, ...(kind==='scan'?{scanSpec:{calculationKind:'scf'},parameters:{values:staticDefaults('scf')}}:{}), ...(Object.keys(staticDefaults(kind)).length?{parameters:{values:staticDefaults(kind)}}:{}), params: kind === 'structure' ? { material: '未指定' } : { functional: 'PBE', encut: '', kmesh: '', spin: '未设置' } } };
 }
 export function newProject(name: string, demo = false): Project {
   const nodes = demo ? [makeStep('structure', {x: 40, y: 190},1), makeStep('relax', {x: 310, y: 190},2), makeStep('scf', {x: 580, y: 190},3), makeStep('bands', {x: 850, y: 85},4), makeStep('dos', {x: 850, y: 295},5)] : [makeStep('structure',undefined,1)];
@@ -61,6 +62,7 @@ export function parseWorkspace(raw: string): Workspace {
       if (!n || !nonempty(n.id) || nodeIds.has(n.id) || n.type !== 'step' || !n.position || !Number.isFinite(n.position.x) || !Number.isFinite(n.position.y) || Math.abs(n.position.x)>1e6 || Math.abs(n.position.y)>1e6 || !n.data || !kinds.includes(n.data.kind) || !nonempty(n.data.label) || !text(n.data.note) || !n.data.params || typeof n.data.params !== 'object' || Array.isArray(n.data.params) || Object.keys(n.data.params).length > 30 || !Object.values(n.data.params).every(v=>text(v,200))) throw new Error('流程节点格式无效。');
       if(!Number.isInteger(n.data.stageSequence)||n.data.stageSequence<1||n.data.stageSequence>999||!text(n.data.stageSlug,48)||!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(n.data.stageSlug)||!['vasp','wannier90','scan'].includes(n.data.executionMode)||((n.data.kind==='scan')!==(n.data.executionMode==='scan'))||((n.data.kind==='wannier90')!==(n.data.executionMode==='wannier90')))throw new Error('节点执行类型或远程阶段标识无效。');
       if(p.stagePolicy==='kind-fixed-v1'&&n.data.stageSequence!==STAGE_SEQUENCES[n.data.kind as Kind])throw new Error('新项目阶段编号须与节点类型一致。');
+      if(n.data.scanSpec!==undefined&&(n.data.kind!=='scan'||!calculationKinds.includes(n.data.scanSpec.calculationKind)))throw new Error('迭代计算类型无效。');
       if(n.data.structure!==undefined) {if(n.data.kind!=='structure')throw new Error('结构只能绑定输入结构节点。');validateStructure(n.data.structure);}
       if(n.data.parameters!==undefined)validateLayer(n.data.parameters);
       if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
@@ -77,9 +79,11 @@ export function parseWorkspace(raw: string): Workspace {
 }
 export function canConnect(nodes: Step[], edges: Edge[], source: string, target: string): boolean {
   if (source === target || !nodes.some(n=>n.id===source) || !nodes.some(n=>n.id===target) || nodes.find(n=>n.id===target)?.data.kind === 'structure' || edges.some(e=>e.source===source && e.target===target)) return false;
-  if(nodes.find(n=>n.id===target)?.data.kind==='scan'&&!['relax','scf','wannier90'].includes(nodes.find(n=>n.id===source)?.data.kind||''))return false;
-  if(nodes.find(n=>n.id===source)?.data.kind==='scan')return false;
-  if(nodes.find(n=>n.id===target)?.data.kind==='wannier90'&&nodes.find(n=>n.id===source)?.data.kind!=='vasp-wannier')return false;
+  const a=nodes.find(n=>n.id===source)!,b=nodes.find(n=>n.id===target)!,p={nodes,edges} as Project;
+  const from=calculationKind(a,p),to=calculationKind(b,p);
+  if(b.data.kind==='scan'&&!independentScan(b)&&!['relax','scf','wannier90'].includes(a.data.kind))return false;
+  if((a.data.kind==='scan'||independentScan(b))&&(['relax','scf'].includes(to||'')?!['structure','relax','scf'].includes(from||''):['bands','dos','vasp-wannier'].includes(to||'')?from!=='scf':to==='wannier90'?from!=='vasp-wannier':true))return false;
+  if(to==='wannier90'&&from!=='vasp-wannier')return false;
   const seen = new Set<string>();
   const visit = (id: string): boolean => { if(id === source) return true; if(seen.has(id)) return false; seen.add(id); return edges.filter(e=>e.source===id).some(e=>visit(e.target)); };
   return !visit(target);
@@ -91,9 +95,9 @@ export function inspectFlow(p: Project): Issue[] {
   for (const n of p.nodes) {
     const parents = p.edges.filter(e=>e.target===n.id).map(e=>p.nodes.find(x=>x.id===e.source)).filter(Boolean) as Step[];
     if (n.data.kind !== 'structure' && !parents.length) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」尚未连接上游节点。`});
-    if (['bands','dos','vasp-wannier'].includes(n.data.kind) && !parents.some(x=>x.data.kind==='scf')) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要连接静态自洽节点。`});
-    if (n.data.kind==='wannier90' && (parents.length!==1 || parents[0].data.kind!=='vasp-wannier')) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要直接连接一个 VASP→Wannier 接口节点。`});
-    if(n.data.kind==='scan'&&(parents.length!==1||!['relax','scf','wannier90'].includes(parents[0].data.kind)))out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要直接连接一个 relax、SCF 或 Wannier90 节点。`});
+    if (['bands','dos','vasp-wannier'].includes(calculationKind(n,p)||'') && !parents.some(x=>calculationKind(x,p)==='scf')) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要连接静态自洽节点。`});
+    if (calculationKind(n,p)==='wannier90' && (parents.length!==1 || calculationKind(parents[0],p)!=='vasp-wannier')) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要直接连接一个 VASP→Wannier 接口节点。`});
+    if(n.data.kind==='scan'&&!independentScan(n)&&(parents.length!==1||!['relax','scf','wannier90'].includes(parents[0].data.kind)))out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要直接连接一个 relax、SCF 或 Wannier90 节点。`});
     if (n.data.kind === 'structure' && parents.length) out.push({level:'error',nodeId:n.id,message:'输入结构不能接收上游连接。'});
   }
   const visiting = new Set<string>(), visited = new Set<string>();

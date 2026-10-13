@@ -1,3 +1,4 @@
+from .calculation_nodes import kind as calculation_kind, inheritance as case_inheritance
 """Local input recipes. Pending calculation artifacts never become runnable inputs."""
 from datetime import datetime
 import base64
@@ -110,14 +111,17 @@ def generate(project, node_id, context=None):
         raise ValueError('输入生成上下文与项目不一致')
     nodes = context.nodes
     node = nodes[node_id]
-    kind = node["data"]["kind"]
+    kind = calculation_kind(node, project)
     if kind not in ("relax", "scf", "bands", "dos", "vasp-wannier"):
         raise ValueError("请选择计算节点")
     errors, warnings, dependencies = [], [], []
     shared = project.get("parameters", {}).get("shared", {})
     local = node["data"].get("parameters", {})
     values, origins = {}, {}
+    inherited = case_inheritance(project, node)
     layers = [("共享设置", shared.get("values", {}))]
+    if inherited: layers.append(("继承 case · " + inherited["snapshot"]["parameter_summary"], inherited["values"]))
+    if inherited and kind != "relax": layers.append(("下游静态类型默认", {"NSW":"0", "IBRION":"-1"}))
     if local.get("preset") == "basic":
         layers.append(("阶段预设", {"IBRION": "2", "ISIF": "2"} if kind == "relax" else {"NSW": "0", "IBRION": "-1"}))
     layers.append(("节点覆盖", local.get("values", {})))
@@ -230,7 +234,7 @@ def generate(project, node_id, context=None):
         warnings.append('ICHARG=1 需要在计算配置中选择电子文件来源并重新冻结')
     if kind in ('scf', 'relax') and values.get('LCHARG') == 'false':
         for edge in project['edges']:
-            if edge['source'] != node_id or nodes[edge['target']]['data']['kind'] not in ('relax', 'scf', *source_contracts.FIXED):
+            if edge['source'] != node_id or calculation_kind(nodes[edge['target']], project) not in ('relax', 'scf', *source_contracts.FIXED):
                 continue
             try:
                 needs_charge = 'CHGCAR' in source_contracts.plan(project, edge['target'])['required_files']
@@ -249,7 +253,7 @@ def generate(project, node_id, context=None):
     kmesh_generation = None
     effective_potcar_id = options.get('potcar_id') or project.get('sharedPotcar', {}).get('id')
     effective_potcar_provenance = options.get('potcar_provenance_id') if options.get('potcar_id') else project.get('sharedPotcar', {}).get('provenance_id')
-    if kind in ("bands", "dos", "vasp-wannier") and parent and parent["data"]["kind"] == "scf":
+    if not inherited and kind in ("bands", "dos", "vasp-wannier") and parent and calculation_kind(parent, project) == "scf":
         parent_layer = parent["data"].get("parameters", {})
         parent_values = dict(shared.get("values", {}))
         parent_values.update(parent_layer.get("values", {}))
@@ -318,7 +322,11 @@ def generate(project, node_id, context=None):
         tags['WANNIER90_WIN'] = '"\nBegin Projections\n' + '\n'.join(selected) + '\nEnd Projections\n"'
         for tag in ('ISYM','NCORE','KPAR','LWANNIER90','LWANNIER90_RUN','LWRITE_MMN_AMN','NUM_WANN','WANNIER90_WIN'):
             origins[tag] = 'VASP-Wannier 节点合同'
-    moments = dict(shared.get("moments", {}), **local.get("moments", {}))
+    moments = dict(shared.get("moments", {}))
+    if inherited and inherited["moments"]:
+        if [a["element"] for a in geometry["atoms"]] != inherited["elements"]: errors.append("case 磁矩与当前结构元素或原子顺序不符")
+        else: moments.update(dict(zip([a["id"] for a in geometry["atoms"]], inherited["moments"])))
+    moments.update(local.get("moments", {}))
     if noncollinear:
         try:
             vectors = []
@@ -335,7 +343,7 @@ def generate(project, node_id, context=None):
             tags["MAGMOM"] = " ".join(str(number(moments.get(a["id"]))) for a in geometry["atoms"])
         except ValueError:
             errors.append("请按原子 ID 填写全部初始 MAGMOM")
-    hubbard = dict(shared.get("hubbard", {}), **local.get("hubbard", {}))
+    hubbard = dict(shared.get("hubbard", {}), **(inherited["hubbard"] if inherited else {}), **local.get("hubbard", {}))
     if values["LDAU"] == "true":
         if values.get("LDAUTYPE") not in ("1", "2"):
             errors.append("请明确 LDAUTYPE")
@@ -442,6 +450,7 @@ def generate(project, node_id, context=None):
             "parameter_catalog": {"revision": parameter_catalog.REVISION, "source": parameter_catalog.CATALOG['source'],
                                   "retrieved": parameter_catalog.CATALOG['retrieved'], "confirmed_custom_tags": sorted(confirmations)},
             "generated_tags": {k: v for k, v in tags.items() if k not in values}, "stage": kind,
+            **({"parameter_source": inherited["snapshot"]} if inherited else {}),
             "restart_required": restart_required, "source_draft": source_draft, "source_plan": source_plan,
             "band_path_source_sha256": options.get('path_structure_hash') if kind == 'bands' else None,
             "band_path_source_attempt_id": options.get('path_source_attempt_id') if kind == 'bands' else None,
@@ -477,6 +486,7 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
     else:
         source_contract = source_contracts.freeze(project, node_id, report, verification_mode, execution_scope)
     from . import branch_bindings
+    if source_contract and report.get("parameter_source"): source_contract["parameter_source"] = report["parameter_source"]
     branch_bindings.check(project,node_id,source_contract=source_contract,scope=execution_scope)
     if report["errors"]:
         raise ValueError("请先修正输入错误：" + "; ".join(report["errors"]))

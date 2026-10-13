@@ -1,3 +1,4 @@
+from .calculation_nodes import kind as calculation_kind, owner as attempt_owner
 """C2: one explicit Wannier90 attempt from a completed VASP interface attempt.
 
 Large matrices stay on the same host.  A PREPARED record freezes their hashes,
@@ -246,7 +247,7 @@ def _render_script(config, profile, template_id):
 def _parent(project, node_id, parent_id, alias):
     validate_workspace({'activeId': project['id'], 'projects': [project]})
     nodes = {item['id']: item for item in project['nodes']}
-    if node_id not in nodes or nodes[node_id]['data']['kind'] != 'wannier90':
+    if node_id not in nodes or calculation_kind(nodes[node_id], project) != 'wannier90':
         raise ValueError('请选择当前项目的 Wannier90 节点')
     parent = ex.get(parent_id)
     from . import recycle
@@ -255,7 +256,7 @@ def _parent(project, node_id, parent_id, alias):
         raise ValueError('需要已完成且路径可追溯的 VASP-Wannier attempt')
     if parent.get('project_id') != project['id'] or parent.get('config', {}).get('alias') != alias:
         raise ValueError('VASP-Wannier 来源须属于当前项目和同一服务器')
-    if not any(edge['source'] == parent.get('node_id') and edge['target'] == node_id for edge in project['edges']):
+    if not any(edge['source'] == attempt_owner(parent) and edge['target'] == node_id for edge in project['edges']):
         raise ValueError('请在画布上将 Wannier90 节点直接连接 VASP-Wannier 来源')
     manifest, _ = ex.bundle(parent['bundle_id'], allow_dependencies=True)
     if manifest['stage'] != 'vasp-wannier' or not (parent.get('evidence') or {}).get('vasp_timing'):

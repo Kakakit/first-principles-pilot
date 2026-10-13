@@ -1,0 +1,33 @@
+import {useEffect,useRef,useState} from 'react';
+import type {Project} from './model';
+import {catalog,canConnect,uid} from './model';
+import type CalculationWorkspace from './CalculationWorkspace';
+import {calculationKind,calculationKinds,calculationDefaults,independentScan,upgradeScan,copyCalculationDraft} from './scanNodes';
+import type {CalculationKind} from './scanNodes';
+import {requestJson,errorMessage} from './apiClient';
+import ParameterPanel from './ParameterPanel';
+import InputPanel from './InputPanel';
+import SourcePanel from './SourcePanel';
+import WannierPanel from './WannierPanel';
+import ScanPanel from './ScanPanel';
+
+export default function IndependentScanWorkspace(props:Parameters<typeof CalculationWorkspace>[0]){
+ const {project,nodeId,view,onProject}=props,node=project.nodes.find(n=>n.id===nodeId)!;
+ const independent=independentScan(node),kind=calculationKind(node,project);
+ const [editable,setEditable]=useState(false),[error,setError]=useState(''),[copy,setCopy]=useState(''),[proposed,setProposed]=useState<Project|null>(null);
+ const dialog=useRef<HTMLDialogElement>(null),cancel=useRef<HTMLButtonElement>(null);
+ useEffect(()=>{let active=true;const load=()=>{setEditable(false);void requestJson(`/api/projects/${encodeURIComponent(project.id)}/node-editability`,{project}).then(r=>{if(active)setEditable(Boolean(r.nodes[nodeId]?.can_switch_scan));}).catch(e=>{if(active)setError(errorMessage(e));});};load();window.addEventListener('fpilot:history-changed',load);return()=>{active=false;window.removeEventListener('fpilot:history-changed',load);};},[project.id,nodeId,kind]);
+ useEffect(()=>{if(proposed){dialog.current?.showModal();cancel.current?.focus();}else dialog.current?.close();},[proposed]);
+ const proposeUpgrade=()=>{try{setProposed(upgradeScan(project,node));setError('');}catch(e){setError(errorMessage(e));}};
+ const changeKind=(next:CalculationKind)=>{if(!editable){setError('已有冻结、批次或来源引用，请复制迭代节点后修改计算类型');return;}onProject({...project,nodes:project.nodes.map(n=>n.id===nodeId?calculationDefaults(n,next):n)});};
+ const copySettings=()=>{const source=project.nodes.find(n=>n.id===copy);if(!source)return;const target=calculationKind(source,project) as CalculationKind;if(!editable&&target!==kind){setError('已有历史，只能复制相同计算类型的设置');return;}const clean=copyCalculationDraft(source.data);setProposed({...project,nodes:project.nodes.map(n=>n.id===nodeId?{...n,data:{...clean,kind:'scan',executionMode:'scan',scanSpec:{calculationKind:target},label:n.data.label,note:n.data.note,stageSequence:n.data.stageSequence,stageSlug:n.data.stageSlug,scanDraft:n.data.scanDraft,windowScanDraft:n.data.windowScanDraft}}:n)});};
+ const proposedData=proposed?.nodes.find(n=>n.id===nodeId)?.data;
+ const proposedInput=proposedData?.inputDraft as Record<string,string>|undefined;
+ const parents=project.edges.filter(e=>e.target===nodeId),parentId=parents[0]?.source||'';
+ const connect=(id:string)=>onProject({...project,edges:[...project.edges.filter(e=>e.target!==nodeId),...(id?[{id:uid(),source:id,target:nodeId}]:[])],nodes:project.nodes.map(n=>n.id===nodeId?{...n,data:{...n.data,sourceDraft:undefined}}:n)});
+ const options=project.nodes.filter(n=>n.id!==nodeId&&canConnect(project.nodes,project.edges.filter(e=>e.target!==nodeId),n.id,nodeId));
+ return <div className="calculation-workspace"><section className="input-submit-card"><h2>参数迭代 · {node.data.label}</h2><p>{independent?'基础配置和全部 case 属于这个节点。选择具体 case 后可接续下游。':'旧模板模式；历史批次和远端目录保留，可预览升级为独立计算节点。'}</p>{view==='config'&&<>{!independent?<button className="button primary" onClick={proposeUpgrade}>改为独立迭代 · 预览</button>:<><label>本节点计算类型<select value={kind} disabled={!editable} onChange={e=>changeKind(e.target.value as CalculationKind)}>{calculationKinds.map(k=><option key={k} value={k}>{catalog[k].label}</option>)}</select></label>{!editable&&<p>已有冻结或批次时，计算类型保持；可复制节点后切换。</p>}<label>连接实际上游<select value={parentId} onChange={e=>connect(e.target.value)}><option value="">选择符合计算类型的上游</option>{options.map(n=><option value={n.id} key={n.id}>{n.data.label} · {catalog[calculationKind(n,project)!].label}</option>)}</select></label><label>复制已有计算节点的设置<select value={copy} onChange={e=>setCopy(e.target.value)}><option value="">选择节点</option>{project.nodes.filter(n=>n.id!==nodeId&&calculationKinds.includes(calculationKind(n,project) as CalculationKind)&&(n.data.kind!=='scan'||independentScan(n))).map(n=><option key={n.id} value={n.id}>{n.data.label}</option>)}</select></label><button className="button" disabled={!copy} onClick={copySettings}>预览复制设置</button><p>复制参数和输入草稿；来源重新核验，任务身份与授权不复制。</p></>}</>}{error&&<p role="alert" className="structure-error">{error}</p>}</section>
+ {independent&&<div hidden={view!=='config'}><details open className="input-submit-card"><summary>1 · 基础计算设置</summary>{kind==='wannier90'?<WannierPanel project={project} initialNodeId={nodeId} embedded batchBaseline view="config" onDraft={props.onWannierDraft}/>:<><ParameterPanel project={project} initialNodeId={nodeId} embedded onLayer={props.onLayer} onTemplates={props.onTemplates} onNumWann={props.onNumWann} onProjections={props.onProjections} sourcePanel={<SourcePanel project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/>}/><InputPanel project={project} initialNodeId={nodeId} embedded batchBaseline onDraft={props.onDraft} onSharedPotcar={props.onSharedPotcar}/></>}</details></div>}
+ <ScanPanel key={String(kind)} project={project} scanNode={node} onDraft={props.onScanDraft} view={view} onWindowChange={props.onWindowChange} onWindowAdopt={props.onWindowAdopt} onSource={independent?undefined:value=>props.onSource(nodeId,value)} onReview={()=>props.onReview()} onConfigure={props.onConfigure}/>
+ <dialog ref={dialog} className="history-confirm" aria-label="确认迭代配置修改" onCancel={e=>{e.preventDefault();setProposed(null);}}><h3>应用迭代配置？</h3><p>计算类型：{proposed&&catalog[calculationKind(proposed.nodes.find(n=>n.id===nodeId),proposed)!]?.label}</p><p>上游：{proposed?.nodes.find(n=>n.id===proposed.edges.find(e=>e.target===nodeId)?.source)?.data.label||'未连接'}</p><details><summary>核对基础参数与 k 点</summary><pre>{JSON.stringify({参数:proposedData?.parameters?.values,Hubbard:proposedData?.parameters?.hubbard,k网格:proposedInput?.grid,能带路径:proposedInput?.path,投影:proposedInput?.projections},null,2)}</pre></details><p>原基础节点、批次、冻结输入、远端目录和授权保留。应用后可通过工作台撤销；新来源须重新核验。</p><div className="action-row"><button className="button" ref={cancel} autoFocus onClick={()=>setProposed(null)}>取消</button><button className="button primary" onClick={()=>{if(proposed)onProject(proposed);setProposed(null);}}>应用到当前草稿</button></div></dialog></div>;
+}

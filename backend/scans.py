@@ -1,3 +1,4 @@
+from .calculation_nodes import kind as calculation_kind, standalone
 """Frozen VASP parameter scans and batch dispatch."""
 import copy
 import difflib
@@ -108,7 +109,9 @@ def case_project(project, base_id, dimensions, values, baseline=None):
     clone = copy.deepcopy(project)
     node = next(n for n in clone['nodes'] if n['id'] == base_id)
     layer = node['data'].setdefault('parameters', {'values': {}})
-    base_hubbard = project.get('parameters', {}).get('shared', {}).get('hubbard', {})
+    from .calculation_nodes import inheritance
+    inherited=inheritance(project,node) or {}
+    base_hubbard = {**project.get('parameters', {}).get('shared', {}).get('hubbard', {}), **inherited.get('hubbard', {})}
     for dimension, value in zip(dimensions, values):
         kind = dimension['kind']
         if kind == 'incar': layer.setdefault('values', {})[dimension['tag']] = value
@@ -163,17 +166,17 @@ def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', f
     validate_workspace({'activeId':project['id'], 'projects':[project]})
     nodes = {n['id']:n for n in project['nodes']}
     scan, base = nodes.get(scan_node_id), nodes.get(base_node_id)
-    if not scan or scan['data']['kind'] != 'scan' or not base or base['data']['kind'] not in ('relax','scf') or not any(e['source']==base_node_id and e['target']==scan_node_id for e in project['edges']):
+    independent = bool(scan and standalone(scan) and base_node_id == scan_node_id)
+    if not scan or scan['data']['kind'] != 'scan' or not base or (not independent and (base['data']['kind'] not in ('relax','scf') or not any(e['source']==base_node_id and e['target']==scan_node_id for e in project['edges']))) or independent and calculation_kind(base, project) not in ('relax','scf','bands','dos','vasp-wannier'):
         raise ValueError('迭代节点须直接连接一个 relax 或 SCF 基础节点')
     if not isinstance(dimensions, list) or not 1 <= len(dimensions) <= 4 or any(not isinstance(d, dict) for d in dimensions):
         raise ValueError('请输入 1–4 个扫描维度')
     keys = [(d.get('kind'), None if d.get('kind') == 'poscar' else d.get('tag') or d.get('element')) for d in dimensions]
     if len(keys) != len(set(keys)): raise ValueError('扫描维度重复')
     if any(d['kind'] in ('u','j') for d in dimensions):
-        effective = dict(project.get('parameters', {}).get('shared', {}).get('values', {}))
-        effective.update(base['data'].get('parameters', {}).get('values', {}))
-        if effective.get('LDAU') != 'true': raise ValueError('U/J 扫描要求基础计算启用 LDAU')
-    axes = [axis(d, base['data']['kind']) for d in dimensions]
+        effective = inputs.generate(project,base_node_id)['parameters']
+        if effective.get('LDAU',{}).get('value') != 'true': raise ValueError('U/J 扫描要求基础计算启用 LDAU')
+    axes = [axis(d, calculation_kind(base, project)) for d in dimensions]
     count = 1
     for values in axes: count *= len(values)
     if count > 64: raise ValueError('扫描超过 64 个 case')
@@ -208,7 +211,7 @@ def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', f
     definition = {'project':project,'scan_node_id':scan_node_id,'base_node_id':base_node_id,'dimensions':dimensions}
     if baseline:
         definition['geometry_baseline'] = {k:v for k,v in baseline.items() if k != 'text'}
-    result = {'project_id':project['id'], 'scan_node_id':scan_node_id, 'base_node_id':base_node_id, 'stage':base['data']['kind'], 'dimensions':dimensions, 'case_count':count, 'cases':cases, 'ready':all(not c['errors'] for c in cases), 'definition_hash':digest(definition)}
+    result = {'project_id':project['id'], 'scan_node_id':scan_node_id, 'base_node_id':base_node_id, 'stage':calculation_kind(base, project), 'dimensions':dimensions, 'case_count':count, 'cases':cases, 'ready':all(not c['errors'] for c in cases), 'definition_hash':digest(definition)}
     if _include_baseline: result['_geometry_baseline'] = baseline
     return result
 
@@ -330,7 +333,7 @@ def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_def
             base['data']['sourceDraft']=draft(case,base_node_id)[0]
         frozen = inputs.freeze(case,base_node_id,reason,execution_scope=scan_node_id)
         cases.append({**item,'id':hashlib.sha256((batch_id+':'+str(item['index'])+':'+packed(item['parameters'])).encode()).hexdigest()[:24], 'bundle_id':frozen['id'], 'state':'PENDING', 'attempt_id':None, 'attempt_history':[], 'retry_count':0})
-    batch = {'schema':SCHEMA,'id':batch_id,'project_id':project['id'],'scan_node_id':scan_node_id,'base_node_id':base_node_id,'stage':report['stage'],'definition_hash':report['definition_hash'],'dimensions':dimensions,'cases':cases,'state':'FROZEN','created_at':ex.now(),'reason':reason.strip()}
+    batch = {'schema':'fpilot.vasp-scan.v2' if base_node_id == scan_node_id else SCHEMA,'id':batch_id,'project_id':project['id'],'scan_node_id':scan_node_id,'base_node_id':base_node_id,'stage':report['stage'],'definition_hash':report['definition_hash'],'dimensions':dimensions,'cases':cases,'state':'FROZEN','created_at':ex.now(),'reason':reason.strip()}
     manifest,_=ex.bundle(cases[0]['bundle_id'],allow_dependencies=True)
     batch['requires_ncl']=any(str(manifest.get('incar_tags',{}).get(tag,{}).get('value','')).strip().upper() in ('.TRUE.','TRUE','T') for tag in ('LSORBIT','LNONCOLLINEAR'))
     batch['case_table_hash'] = digest([{k:c[k] for k in ('id','bundle_id','parameters','input_hashes')} for c in cases])

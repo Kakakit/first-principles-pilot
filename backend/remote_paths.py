@@ -118,7 +118,8 @@ def readable_identity(manifest: Mapping[str, Any], project: Mapping[str, Any]) -
     if not node or not isinstance(node.get("data"), Mapping):
         raise ValueError("冻结项目缺少当前节点路径信息")
     data = node["data"]
-    if data.get("executionMode") != "vasp" or data.get("kind") not in ("relax", "scf", "bands", "dos", "vasp-wannier"):
+    from .calculation_nodes import kind, standalone, VASP
+    if kind(node, project) not in VASP or (data.get("executionMode") != "vasp" and not (standalone(node) and data.get("executionMode") == "scan")):
         raise ValueError("此节点不能准备或提交 VASP 任务")
     sequence = data.get("stageSequence", nodes.index(node) + 1)
     if not isinstance(sequence, int) or not 1 <= sequence <= 999:

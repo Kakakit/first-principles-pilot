@@ -1,3 +1,4 @@
+from .calculation_nodes import kind as calculation_kind, owner as attempt_owner, case_info
 """Explicitly authorized VASP graph runs backed by the ordinary attempt ledger."""
 import copy
 import hashlib
@@ -146,7 +147,7 @@ def _selected(project, node_ids):
         if len(incoming) != 1:
             raise ValueError('每个计算节点须有唯一直接上游')
         parent = incoming[0]
-        kind, parent_kind = nodes[key]['data']['kind'], nodes[parent]['data']['kind']
+        kind, parent_kind = nodes[key]['data']['kind'], calculation_kind(nodes[parent], project)
         if kind in ('relax', 'scf') and parent_kind not in ('structure', 'relax', 'scf'):
             raise ValueError('relax / SCF 上游须为结构、relax 或 SCF')
         if kind in ('bands', 'dos', 'vasp-wannier') and parent_kind != 'scf':
@@ -184,7 +185,8 @@ def _workflow_project(project, ordered):
             values.setdefault('LCHARG', 'false')
         differences[key] = {tag: {'before': before[tag], 'after': values[tag]}
                             for tag in before if before[tag] != values.get(tag)}
-        if kind == 'bands':
+        direct_parent=next((e['source'] for e in result['edges'] if e['target']==key),None)
+        if kind == 'bands' and nodes.get(direct_parent,{}).get('data',{}).get('kind')!='scan':
             upstream = key
             while True:
                 upstream = next((e['source'] for e in result['edges'] if e['target'] == upstream), None)
@@ -229,7 +231,7 @@ def _reuse(project, nodes, parents, ordered, reports, source_alias, choices, mod
     required = {}
     for key in ordered:
         parent = parents[key]
-        if reports[key].get('dependencies') and parent not in ordered and nodes[parent]['data']['kind'] != 'structure':
+        if reports[key].get('dependencies') and parent not in ordered and nodes[parent]['data']['kind'] not in ('structure','scan'):
             required.setdefault(parent, set()).update(item['file'] for item in reports[key].get('dependencies', []))
     if set(choices) - set(required):
         raise ValueError('复用来源不属于本次未执行的直接上游')
@@ -240,7 +242,7 @@ def _reuse(project, nodes, parents, ordered, reports, source_alias, choices, mod
         draft = inputs.generate(project, parent, context)
         candidates = []
         for record in records:
-            if record.get('node_id') != parent:
+            if attempt_owner(record) != parent:
                 continue
             candidate = {'attempt_id': record['id'], 'job_id': record.get('job_id'),
                          'alias': record.get('config', {}).get('alias'), 'eligible': False,
@@ -316,6 +318,9 @@ def _preview(project, node_ids, source_alias=None, reuse_sources=None, verificat
             except ValueError as exc: report['errors'].append(str(exc))
         if report.get('restart_required'):
             report['errors'].append('计算链的原始节点不能预设 ICHARG=1；请使用图依赖或先单独完成手动续算')
+        if nodes[parents[key]]['data']['kind']=='scan':
+            selection=source_contracts.resolve(effective,key)
+            report['errors'].extend(selection['blockers'])
         reports[key] = report
         incar = report.get('files', {}).get('INCAR', '').encode()
         steps.append({'node_id': key, 'label': nodes[key]['data']['label'],
@@ -395,7 +400,9 @@ def freeze(project, node_ids, reason, expected_definition_hash, source_alias=Non
         raise ValueError('计算链输入或预览已变化；请重新预览')
     steps = []
     for item in report['steps']:
-        frozen = inputs.freeze(effective, item['node_id'], reason, report=reports[item['node_id']], verification_mode=verification_mode,defer_sources=True)
+        parent_id=next(e['source'] for e in effective['edges'] if e['target']==item['node_id'])
+        parent_node=next(n for n in effective['nodes'] if n['id']==parent_id)
+        frozen = inputs.freeze(effective, item['node_id'], reason, report=reports[item['node_id']], verification_mode=verification_mode, defer_sources=parent_node['data']['kind']!='scan')
         steps.append({**item, 'bundle_id': frozen['id'], 'state': 'PENDING',
                       'attempts': [], 'attempt_id': None, 'final_attempt_id': None,
                       'convergence': None, 'blocker': None})
@@ -814,7 +821,7 @@ def _advance(run_id):
                     files = snapshot(binding['alias'], binding['source_path'], sorted(binding['files']), ex.ssh, binding['verification_mode'])
                     if files != binding['files']:
                         raise ValueError('冻结的历史来源文件已变化，请重新预览和冻结')
-                if step['stage'] == 'bands' and not retry and not step.get('actual_band_path'):
+                if step['stage'] == 'bands' and source_id and not retry and not step.get('actual_band_path'):
                     _band_bundle(run, step, source_id)
                     run = save(run)
                 probe_key = digest(node_config)
