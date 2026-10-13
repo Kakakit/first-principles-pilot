@@ -8,7 +8,7 @@
 
 - **Windows 10/11 x64**：下载 `FPilot-1.1.0-beta.1-Windows-x64-Setup.exe`，双击安装。默认安装到当前用户的应用目录，无需管理员权限。开始菜单有启动、停止和导出诊断三个入口，可创建桌面快捷方式。
 - **Apple Silicon Mac**：下载名称含 `macos-arm64` 的 DMG，打开并把应用拖入 Applications。
-- **Intel Mac**：选择名称含 `macos-x64` 的 DMG，按同样方式安装。
+- 首版只发布 Windows x64 与 Apple Silicon Mac；暂不提供 Intel Mac 安装包。
 
 这是未使用商业代码签名证书的测试版。Windows SmartScreen/macOS Gatekeeper 可能提示发布者未验证；核对这是自己授权仓库的发布和 SHA256 后决定是否允许运行。Mac 的临时签名不等于 Developer ID 签名或公证。本轮不把打包成功当成用户机器安装验收。
 

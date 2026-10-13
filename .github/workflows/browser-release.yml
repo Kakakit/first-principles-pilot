@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: browser-installers-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   regression:
@@ -68,8 +68,6 @@ jobs:
             target: windows-x64
           - os: macos-15
             target: macos-arm64
-          - os: macos-15-intel
-            target: macos-x64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -104,6 +102,9 @@ jobs:
           $target = Join-Path $env:RUNNER_TEMP "中文 安装\First Principles Pilot"
           $installation = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$target`"") -PassThru -Wait
           if ($installation.ExitCode -ne 0) { throw "Installer failed: $($installation.ExitCode)" }
+          $runtime = Join-Path $target 'python\python.exe'
+          & $runtime -m unittest discover -s tests -p 'test_local_json.py'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python packaging/smoke_installer.py --app "$target" --receipt release-build/assets/windows-x64-native-startup.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $note = Join-Path $env:LOCALAPPDATA 'FirstPrinciplesPilot\keep-after-uninstall.txt'

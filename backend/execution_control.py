@@ -28,13 +28,16 @@ def validate_settings(value):
 
 def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent,delete=False) as f:
-        temp=f.name
-        try:
+    temp=None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent,delete=False) as f:
+            temp=f.name
             f.write((json.dumps(value,ensure_ascii=False,indent=2)+'\n').encode());f.flush();os.fsync(f.fileno())
-            os.replace(temp,path)
-        finally:
-            if os.path.exists(temp):os.unlink(temp)
+        # Windows cannot rename a NamedTemporaryFile while it is still open.
+        # Close first, then atomically replace; preserve the old record on error.
+        os.replace(temp,path)
+    finally:
+        if temp and os.path.exists(temp):os.unlink(temp)
 
 
 def save_settings(value):

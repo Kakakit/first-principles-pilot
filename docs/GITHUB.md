@@ -6,9 +6,9 @@
 
 ## 普通使用者下载安装器
 
-打开 [GitHub Releases](https://github.com/Kakakit/first-principles-pilot/releases)，下载 Windows x64 EXE 或适配 Mac 架构的 DMG。新安装器内置 Python 和锁定依赖，使用者无需克隆仓库、安装 Node 或运行 npm。源码 ZIP 不等于安装包；旧便携 ZIP 保留原流程。[安装与验收](INSTALLATION.md)。
+打开 [GitHub Releases](https://github.com/Kakakit/first-principles-pilot/releases)，下载 Windows x64 EXE 或 Apple Silicon Mac DMG；首版暂不提供 Intel Mac。新安装器内置 Python 和锁定依赖，使用者无需克隆仓库、安装 Node 或运行 npm。源码 ZIP 不等于安装包；旧便携 ZIP 保留原流程。[安装与验收](INSTALLATION.md)。
 
-`.github/workflows/browser-release.yml` 用同一份源码完成 Linux 回归、Windows 和两种 Mac 架构的原生构建/启动检查；全部通过才发布预发行版。修改 `packaging/release.json` 的版本后运行，既有同名 Release 不覆盖。Python 上游包锁定下载 URL 和 SHA256；发布资源不包含项目、SSH 配置、POTCAR 或私人脚本。首版安装器未作商业签名/公证。
+`.github/workflows/browser-release.yml` 用同一份源码完成 Linux 回归、Windows 和 Apple Silicon Mac 的原生构建/启动检查；全部通过才发布预发行版。修改 `packaging/release.json` 的版本后运行，既有同名 Release 不覆盖。Python 上游包锁定下载 URL 和 SHA256；发布资源不包含项目、SSH 配置、POTCAR 或私人脚本。首版安装器未作商业签名/公证。
 
 ## 新设备开发或打包
 

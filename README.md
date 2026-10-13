@@ -8,7 +8,7 @@
 
 ## 安装使用
 
-普通使用者下载 [GitHub Release](https://github.com/Kakakit/first-principles-pilot/releases) 的浏览器安装测试版：Windows 安装 EXE；Mac 按 Apple Silicon/Intel 选择 DMG。安装后点击应用图标，浏览器自动打开；自带 Python 与锁定依赖，无需 Node/Python/npm。首次仍须配置自己的 SSH、合法 POTCAR 与服务器脚本。详见 [安装与测试](docs/INSTALLATION.md)。
+普通使用者下载 [GitHub Release](https://github.com/Kakakit/first-principles-pilot/releases) 的浏览器安装测试版：Windows x64 安装 EXE；Apple Silicon Mac 安装 DMG。首版暂不提供 Intel Mac。安装后点击应用图标，浏览器自动打开；自带 Python 与锁定依赖，无需 Node/Python/npm。首次仍须配置自己的 SSH、合法 POTCAR 与服务器脚本。详见 [安装与测试](docs/INSTALLATION.md)。
 
 项目、配置和日志保存在独立用户数据目录，更新/卸载保留数据；旧开发目录不迁移。控制页提供停止、重启与退出，提交回执未完成时不强制停止。首版通过 Release 覆盖更新，安装测试版尚无商业签名证书，Windows/Mac 实机体验须进一步验收。
 
