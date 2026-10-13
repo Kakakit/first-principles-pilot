@@ -55,7 +55,7 @@ def runtime(target, destination, cache):
     if target=='macos-x64':
         # This exact pymatgen version has no CPython 3.11 Intel Mac wheel.
         # Build it on the native CI machine instead of changing its version.
-        formats.append('--no-binary=pymatgen')
+        formats.append('--no-binary=pymatgen,spglib')
     run([python, '-m', 'pip', 'install', *formats, '--no-compile',
          '-r', ROOT / 'packaging/requirements-runtime.txt'])
     run([python, '-m', 'pip', 'check'])

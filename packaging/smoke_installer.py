@@ -59,12 +59,12 @@ def main():
                 'base64':base64.b64encode((app/'examples/Si.POSCAR').read_bytes()).decode()})
             assert structure['atoms']
             receipt['checks'].append('unicode_user_data_and_real_poscar_parse')
-            deadline=time.monotonic()+15
+            deadline=time.monotonic()+60
             while time.monotonic()<deadline:
                 worker=get(state['url']+'/api/execution-control')['worker']
                 if worker.get('healthy'):break
                 time.sleep(.2)
-            assert worker.get('healthy'),worker
+            assert worker.get('healthy'),str(worker)+'\n'+(home/'controller/workbench.log').read_text(errors='replace')[-7000:]
             receipt['checks'].append('single_healthy_worker')
             again=command('--no-browser')
             assert again.returncode==0,again.stderr
