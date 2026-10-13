@@ -104,7 +104,7 @@ The original scripts contained useful parsing ideas but also system-specific ass
 
 - removes hard-coded FeCr2O4 titles and fixed Fermi energies;
 - removes the fixed `UNIFORM_KPOINTS = 150` assumption: `--path-selector auto` detects a zero-weight path when a positive-weight mesh and zero-weight path coexist;
-- removes the absolute dependency on `/Users/kafka/.agents/skills/...` and runs with only NumPy + Matplotlib;
+- removes the absolute dependency on `archived-development-source/...` and runs with only NumPy + Matplotlib;
 - supports both one-channel SOC/non-spin EIGENVAL and ordinary two-channel collinear EIGENVAL records;
 - derives reciprocal path distance from line-mode KPOINTS + POSCAR when supplied;
 - turns VASPKIT segment-local x coordinates into a continuous plotting coordinate;

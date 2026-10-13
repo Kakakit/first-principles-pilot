@@ -14,7 +14,7 @@ def check(request):
     values(request);return '完整 LCALCPOL 记录可读；端点不证明同分支路径'
 
 def analyze(request):
-    data=values(request);output=Path(request['output_dir'])/'polarization.json';dump(output,data)
+    data=values(request);data['source_labels']=[{'name':s.get('name',s.get('id','端点')),'id':s.get('id'),'files':{role:items[i]['name'] for role,items in request['inputs'].items()}} for i,s in enumerate(request['sources'])];output=Path(request['output_dir'])/'polarization.json';dump(output,data)
     warnings=['形式极化按极化量子定义；最近整数约化不是物理最小化。','端点不证明绝缘同分支路径，不能据此声明可切换或自发极化。']
     if len(request['sources'])==2:
         vector=data['comparison']['delta_p_raw_c_m2'];candidate=data['comparison']['delta_p_branch_reduced_candidate_c_m2']
@@ -24,6 +24,11 @@ def analyze(request):
     else:
         rows=[{'axis':a,'raw':x} for a,x in zip('xyz',data['raw']['polarization_c_m2'])]
         columns=[{'key':'axis','label':'方向','unit':''},{'key':'raw','label':'形式极化','unit':'C/m²'}];summary='形式极化已读取；物理分支未建立'
-    return {'summary':summary,'warnings':warnings,'scientific_validation':'INSUFFICIENT','tables':[{'title':'形式极化','columns':columns,'rows':rows}],'artifacts':[artifact(output,'完整数据、量子与假设')]}
+    details=[]
+    endpoints=[data['noSOC'],data['SOC']] if data.get('mode')=='compare' else [data]
+    for i,end in enumerate(endpoints):
+        entries=[('p[ion]',end['p_ion_e_ang']),('p[elc]',end['p_elc_e_ang']),('p[tot]',end['total_dipole_e_ang']),('总量约化代表',end['branch_reduced']['dipole_e_ang'])]
+        details.append({'title':chr(65+i)+' 原始与总量约化 dipole','columns':[{'key':'field','label':'字段','unit':''}]+[{'key':a,'label':a,'unit':'e Å'} for a in 'xyz'],'rows':[dict(field=k,**dict(zip('xyz',v))) for k,v in entries]})
+    return {'summary':summary,'warnings':warnings,'scientific_validation':'INSUFFICIENT','tables':[{'title':'形式极化','columns':columns,'rows':rows}]+details,'artifacts':[artifact(output,'完整数据、量子与假设')]}
 
 if __name__=='__main__':raise SystemExit(main(check,analyze))

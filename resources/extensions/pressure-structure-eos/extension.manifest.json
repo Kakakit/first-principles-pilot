@@ -1,0 +1,124 @@
+{
+  "schema": "fpilot.extension.v2",
+  "id": "pressure-structure-eos",
+  "name": "压力结构与 EOS 分析",
+  "version": "1.0.1",
+  "description": "提取最终完整离子步，切换能量/体积/晶格/压力/力坐标并拟合 E–V；含 a/b/c–V 预设。",
+  "entrypoint": "scripts/cli.py",
+  "contexts": [
+    "attempt"
+  ],
+  "stages": [
+    "scf",
+    "relax"
+  ],
+  "sources": {
+    "min": 1,
+    "max": 64
+  },
+  "inputs": [
+    {
+      "role": "outcar",
+      "title": "OUTCAR",
+      "names": [
+        "OUTCAR"
+      ],
+      "max_bytes": 1099511627776
+    },
+    {
+      "role": "structure",
+      "title": "结构核对（CONTCAR 最终 / POSCAR 初始）",
+      "names": [
+        "CONTCAR",
+        "POSCAR"
+      ],
+      "max_bytes": 10485760,
+      "required": false
+    },
+    {
+      "role": "incar",
+      "title": "计算设置 INCAR",
+      "names": [
+        "INCAR"
+      ],
+      "max_bytes": 262144,
+      "required": false
+    },
+    {
+      "role": "kpoints",
+      "title": "KPOINTS",
+      "names": [
+        "KPOINTS"
+      ],
+      "max_bytes": 10485760,
+      "required": false
+    }
+  ],
+  "evidence": [
+    "COMPLETED",
+    "vasp_timing",
+    "ediff_reached"
+  ],
+  "execution": {
+    "locations": [
+      "local",
+      "ssh"
+    ],
+    "preferred_location": "ssh",
+    "timeout_seconds": 600
+  },
+  "dependencies": [
+    "numpy",
+    "scipy",
+    "pymatgen"
+  ],
+  "options_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "energy": {
+        "type": "string",
+        "title": "拟合能量口径",
+        "enum": [
+          "energy_sigma0_ev",
+          "energy_without_entropy_ev",
+          "free_energy_ev"
+        ],
+        "default": "energy_sigma0_ev"
+      },
+      "model": {
+        "type": "string",
+        "title": "EOS 模型",
+        "enum": [
+          "birch_murnaghan",
+          "vinet",
+          "murnaghan"
+        ],
+        "default": "birch_murnaghan"
+      },
+      "force_tolerance": {
+        "type": "number",
+        "title": "力诊断阈值 / eV/Å",
+        "minimum": 0,
+        "default": 0.02
+      }
+    },
+    "required": [
+      "energy",
+      "model",
+      "force_tolerance"
+    ]
+  },
+  "ui_schema": {},
+  "outputs": [
+    "table",
+    "file"
+  ],
+  "fixtures": [
+    "fixtures/OUTCAR",
+    "fixtures/POSCAR"
+  ],
+  "presentation": {
+    "entrypoint": "scripts/presentation.py"
+  }
+}

@@ -1,0 +1,850 @@
+{
+  "schema": "fpilot.extension-distribution.v1",
+  "packages": [
+    {
+      "id": "crystal-structure-distortion-analysis",
+      "name": "配位多面体畸变",
+      "version": "2.0.0",
+      "schema": "fpilot.extension.v2",
+      "install_mode": "workbench-v2",
+      "source": "resources/extensions/crystal-structure-distortion-analysis",
+      "package": "extensions/packages/crystal-structure-distortion-analysis-2.0.0.zip",
+      "sha256": "fb966eb6e98fcbaa0a748631b27ad46ded115ac3b2fd46525a54e485f718b652",
+      "size_bytes": 28947,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "12a195c047588812f4a2122d68893cbfd8e702b8852ca619eb32bdc37e652440"
+        },
+        {
+          "path": "config/default_fecr2o4.json",
+          "sha256": "97508b01a0d9f54952dc9329de6760c5e018e4f180936106114ea298de0285b0"
+        },
+        {
+          "path": "contracts/input.md",
+          "sha256": "3ea9cf06255d3be1aa20be839eb7c7a9274ce188bc12b2153541e429f901904d"
+        },
+        {
+          "path": "contracts/output.md",
+          "sha256": "429feefa6328026c77ecc9c89340bce29b9eb3561a061c12523efdc964547221"
+        },
+        {
+          "path": "extension.json",
+          "sha256": "c9f0ebb8626be2ac58cf8f5a3af9aa3be8a61c5dc46a499c8532d5eae9b3338b"
+        },
+        {
+          "path": "extension.manifest.json",
+          "sha256": "2967c1c813f07758b334281be1d77973ed043dbe2f6e04405fdaeb4430d3294d"
+        },
+        {
+          "path": "extension.sdk.json",
+          "sha256": "0b98d7b8036764b147689f45f12eef9af42a6352461ecab657e69b7fdbd5e35e"
+        },
+        {
+          "path": "fixtures/POSCAR",
+          "sha256": "b8ced0e6c18ada17630003ea7e130064449d8a705bde2e73376b0e8a12b83578"
+        },
+        {
+          "path": "fixtures/ideal_fecr_polyhedra/POSCAR",
+          "sha256": "c8fe80ca135d51a37e3a0ec8077698337e37ab96967181dcd5c81828cc60de7b"
+        },
+        {
+          "path": "requirements.txt",
+          "sha256": "6bd31e587c06276bf231cec25395b5d4a0b1e38c4d2b00813b2dd96aad14f17a"
+        },
+        {
+          "path": "scripts/cli.py",
+          "sha256": "40b602516098e296a472048fd0b540813a307a26df599b856784bcbececfe4cf"
+        },
+        {
+          "path": "scripts/protocol_cli.py",
+          "sha256": "e0bff0c179fbfc98bc632c5707718d263dd6006d6e5f56c557f4c6b654abc826"
+        },
+        {
+          "path": "source/SOURCE.md",
+          "sha256": "5cdeba72e0f011635b3f13de83472599d3d20229d921d43afc0f7c6703704695"
+        },
+        {
+          "path": "source/original_polyhedral_distortion.py",
+          "sha256": "8156f1f8921ed7f9f2184b5ed9f35e012d2a79aadc383c26974961ce6b0c4845"
+        },
+        {
+          "path": "src/crystal_distortion.py",
+          "sha256": "3c2bce1b4312dd18d8841c8594b357c53c08e6e89435b5976f56843c5309e6a1"
+        },
+        {
+          "path": "tests/test_cli.py",
+          "sha256": "bd75f3696dafb875a6b4a75f167fa730b248a3d919ae8f980066db21fb77af36"
+        },
+        {
+          "path": "tests/test_geometry.py",
+          "sha256": "e06f68bc25efdea6f2ab8117aa346c1a1cf8976a5d6c136c35651a33bff7630d"
+        }
+      ]
+    },
+    {
+      "id": "electronic-structure-characterization",
+      "name": "electronic-structure-characterization",
+      "version": "0.3.0",
+      "schema": "fpilot.extension.v1",
+      "install_mode": "legacy-cli",
+      "source": "resources/extensions/electronic-structure-characterization",
+      "package": "extensions/packages/electronic-structure-characterization-0.3.0.zip",
+      "sha256": "4f1d61aa9cd5d9c855de4a73b17f8d04f388872e736a1d3e128e7c10ff52db97",
+      "size_bytes": 74242,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "3e543a101410b0956861451f02b2f2ed3c11638fe5cc2e2f58e2f7954e771963"
+        },
+        {
+          "path": "contracts/input.md",
+          "sha256": "df4d6c2ce046400a70af9798f0d25da49a4f627f4f2adb51cab713ae200055c3"
+        },
+        {
+          "path": "contracts/output.md",
+          "sha256": "4be3cdb2ab746fe00aa9926e82f1c4480e2ccdbb9a52c03c13140e8a8aaabef1"
+        },
+        {
+          "path": "extension.json",
+          "sha256": "fc2eca4785ebc137e26ef2ff65f3ede7fbac86a39d85c3d8adc3487d0f5d40b5"
+        },
+        {
+          "path": "fixtures/minimal/BAND_OUTCAR",
+          "sha256": "e57b91f7a85f08ac66427a197b854e57db02a0bc5147eeb985cb39a170107510"
+        },
+        {
+          "path": "fixtures/minimal/DOSCAR",
+          "sha256": "3860113b6a55bd35c06c08fdae625c2cdd416cdd254da00eecc12a3df6608498"
+        },
+        {
+          "path": "fixtures/minimal/DOSCAR_ONE",
+          "sha256": "ec9c16b96d87d531f6339fd6ae17d50bbdb03c43cdb905c62b1b0ff8f4ca8e43"
+        },
+        {
+          "path": "fixtures/minimal/EIGENVAL",
+          "sha256": "e01375a74e6f2f75c69460948d7e7d472d4121cd04ce1c40b864df038e58bb19"
+        },
+        {
+          "path": "fixtures/minimal/KPOINTS",
+          "sha256": "83fedf9b42d29090fb52b7cbe23e105225ec7cf547b89e288ca94dc001e7a3e5"
+        },
+        {
+          "path": "fixtures/minimal/KPOINTS_ONE",
+          "sha256": "28988a7b0d6f9c3f08df63f7b1f077fd0778dcb7447cc578dc011e9ef20cc494"
+        },
+        {
+          "path": "fixtures/minimal/KPOINTS_TWO",
+          "sha256": "d620995a0e676d75a6f0ee0c68a7dcc5c9d330cd9f063c4bf1d6bf569913a42a"
+        },
+        {
+          "path": "fixtures/minimal/OUTCAR",
+          "sha256": "eb1475398913d9b3114f6828074b2c769414f8000315996e552077e06df031b2"
+        },
+        {
+          "path": "fixtures/minimal/POSCAR",
+          "sha256": "b6c143c40018eec686b2a01685057f2f78a8444423bc8270c46556df31889566"
+        },
+        {
+          "path": "fixtures/minimal/PROCAR",
+          "sha256": "6371c4511822034a7f6c0d91b50077e5b8c671e70945d77ccc0c0bbc0f7aec2c"
+        },
+        {
+          "path": "fixtures/minimal/PROCAR_HEADERLESS_SPIN",
+          "sha256": "4fed96f74b92b7568a425bf8185bb080f01ba1a76d5bdccf0e925d752f309825"
+        },
+        {
+          "path": "fixtures/minimal/REFORMATTED_BAND_DW.dat",
+          "sha256": "6e9e0d8bd2f6586c021b30243f0077a52d49573078b1b1c344a59f5eb71a4e9a"
+        },
+        {
+          "path": "fixtures/minimal/REFORMATTED_BAND_UP.dat",
+          "sha256": "ea3ca3a589bf2dfc04d13956d61d63f6701e992900cee8cec908a25e9a05255a"
+        },
+        {
+          "path": "fixtures/minimal/wannier90.1_band.dat",
+          "sha256": "2b374285fc176b1c9a05d135d52b869e07ee4f13cb59597dd0e339333506b727"
+        },
+        {
+          "path": "fixtures/minimal/wannier90.1_band.labelinfo.dat",
+          "sha256": "6ef13c4b40164b2e53d99d8708b0702cab2f49b5694c93fcc75e39ca59807235"
+        },
+        {
+          "path": "fixtures/minimal/wannier90.2_band.dat",
+          "sha256": "f0ec7101d237f49a27e5718783dbf949480e00a7d1db7dd76dc5fc53142ff7f9"
+        },
+        {
+          "path": "fixtures/minimal/wannier90.2_band.labelinfo.dat",
+          "sha256": "6ef13c4b40164b2e53d99d8708b0702cab2f49b5694c93fcc75e39ca59807235"
+        },
+        {
+          "path": "requirements.txt",
+          "sha256": "bde68ffcfb53dd010e2ca394340aee83803b9f8e90ecfb32b1c600cd4d3db081"
+        },
+        {
+          "path": "scripts/compare_dft_wannier.py",
+          "sha256": "269c495a8ab6bd3208563d1d7f82a4081a7ced047b4681422f60bdc83d0800f2"
+        },
+        {
+          "path": "scripts/extract_bounded.py",
+          "sha256": "773bf06d46a404a5699c7b5bbae25e7aa46a536d9d3cd2ec6822ddd0878be7f4"
+        },
+        {
+          "path": "scripts/plot_band_dos.py",
+          "sha256": "b82a7bbbf80d4f00ff9c34dcc7426556ee11c4320461e28f81a834e68704bf8f"
+        },
+        {
+          "path": "scripts/plot_dos.py",
+          "sha256": "403e1662354faa12121b929b4f3d9d9893cc699253ae6a73556522d3a6033ea9"
+        },
+        {
+          "path": "scripts/plot_fatband.py",
+          "sha256": "1e1ddc9992dae13b26e2035375c74768865298e44495e7a67a387294f48ac3cf"
+        },
+        {
+          "path": "scripts/plot_vasp_band.py",
+          "sha256": "a4fe8a4d5f84c1909b46ec238554bd7d7adb8a0c7d2e0e2589a03f93b6443bb0"
+        },
+        {
+          "path": "scripts/plot_wannier_band.py",
+          "sha256": "71802bda0edd4765ea321b1f3dbfc863e35fbcb1721c4e344849ef17afa8c592"
+        },
+        {
+          "path": "source/SOURCE.md",
+          "sha256": "b18498d0c7875af02eaa591b67c2046452cf42515827713aa7c7c5649faabd42"
+        },
+        {
+          "path": "source/original_dft_wannier_compare.py",
+          "sha256": "88cb2f112dc12d66c5de8c2e973e49d1eef9edb1f699d7ceb008c9159dd88da5"
+        },
+        {
+          "path": "source/original_vasp_soc_band.py",
+          "sha256": "5d5a57537f1ac08a86c7d4878c36993352d3079a438441d55bb22ea7c01e8788"
+        },
+        {
+          "path": "source/original_wannier_band.py",
+          "sha256": "1c76043782280a5ea0931d4bbc62750fe939209a3f539228ba524a6f67ce341d"
+        },
+        {
+          "path": "src/banddos.py",
+          "sha256": "106e805030a8c032e9658f1c5efccb23dfc541fd31bfac04c21081117d3558be"
+        },
+        {
+          "path": "src/banddos_core/__init__.py",
+          "sha256": "91447944015cec709e8aa7655f7e9d64e1e4508e7023a57fe3746911c0fc6fed"
+        },
+        {
+          "path": "src/banddos_core/cli.py",
+          "sha256": "f7c46237ca69e1c0767b8c7373653f5c414e04fbff42a2ecd9fd62b37e24ec50"
+        },
+        {
+          "path": "src/banddos_core/common.py",
+          "sha256": "55da4322a4dbe5d4acc0cb5fc99ebaff228f88079e41b781b21d19da5219f11e"
+        },
+        {
+          "path": "src/banddos_core/model.py",
+          "sha256": "6587480902f52ce2eb82860dbfa7d6a78f0141bd2f05101eb8876ebb097205cf"
+        },
+        {
+          "path": "src/banddos_core/plotting.py",
+          "sha256": "2afdf544c56697277ceb1665eff33ba83cd8b13e1842b38470ae9f6c9c596938"
+        },
+        {
+          "path": "src/banddos_core/processed.py",
+          "sha256": "01e171c8667d5ca8e0d88f2a9238c93af7eea3881a41599da80cc34eb8603a23"
+        },
+        {
+          "path": "src/banddos_core/vasp.py",
+          "sha256": "519da508cf37365e490c80337381c2f9772304d8079f9729fc25967b36ff2aa2"
+        },
+        {
+          "path": "src/banddos_core/wannier.py",
+          "sha256": "72ca6dc940ff89505c94fa37c7bcad7c5a4243f513717af72efaa8eef82c97d2"
+        },
+        {
+          "path": "src/eschar.py",
+          "sha256": "11a2caa8fda0183be7cd74616baf06e000733d04de32b1e48db92ea55a165442"
+        },
+        {
+          "path": "tests/run_tests.py",
+          "sha256": "66b470d7c04219982ebf8268a092b0e798aef7c95038296262e1595d31887a3e"
+        },
+        {
+          "path": "tests/test_cli.py",
+          "sha256": "0f57f854c2fbae6a6412547801a90b60896253af9133e41a17fdea6aaeea025d"
+        },
+        {
+          "path": "tests/test_parsers.py",
+          "sha256": "b3ead1b8a87ba8722a56b5173e2ccf8bddc9e443d361c4ed0861f29ca30226f2"
+        }
+      ]
+    },
+    {
+      "id": "lcalcpol-polarization-analysis",
+      "name": "形式极化与双结果比较",
+      "version": "2.1.0",
+      "schema": "fpilot.extension.v2",
+      "install_mode": "workbench-v2",
+      "source": "resources/extensions/lcalcpol-polarization-analysis",
+      "package": "extensions/packages/lcalcpol-polarization-analysis-2.1.0.zip",
+      "sha256": "8beab6ac8e25ba6de2c8e30b9e5de5ffb6a77fcd39fc12e7e9030443b3a17b32",
+      "size_bytes": 30340,
+      "files": [
+        {
+          "path": "POLARIZATION_QUANTUM_SUBTRACTION_MATH.md",
+          "sha256": "50067f067d82c9b4897a026d3ac0b68968bff71c643b2016554f1b5b16825086"
+        },
+        {
+          "path": "README.md",
+          "sha256": "d35bc2b22bacf2d2b298e2f843057782ee20f1dedf91c52947c122a70db48598"
+        },
+        {
+          "path": "extension.json",
+          "sha256": "f44a415a597df2217ae9f27756e940a4381a446dafc046163abe4353e1abd760"
+        },
+        {
+          "path": "extension.manifest.json",
+          "sha256": "f2c4fe78d409ec8e9a4c95e99ceafe0ebb53cb9495ab353a322e94a15a45b642"
+        },
+        {
+          "path": "extension.sdk.json",
+          "sha256": "e4a720e747b1ddc9616b053f5754c169829c026140a6db367f556fcc826c402c"
+        },
+        {
+          "path": "fixtures/POSCAR",
+          "sha256": "b8ced0e6c18ada17630003ea7e130064449d8a705bde2e73376b0e8a12b83578"
+        },
+        {
+          "path": "scripts/calc_lcalcpol.py",
+          "sha256": "9ad91daf4aa6be5b746adca19f6c72363fbefcc925d9b60a8ae6d7f7e64a9156"
+        },
+        {
+          "path": "scripts/cli.py",
+          "sha256": "a7a225e446eef881f6358bcc1bef63c6b1f432a6bd60019031e0fc750a88a468"
+        },
+        {
+          "path": "scripts/presentation.py",
+          "sha256": "462c686143f54df9809449213de72c883056244a544730682dcec04cd0c76ff0"
+        },
+        {
+          "path": "scripts/protocol_cli.py",
+          "sha256": "e0bff0c179fbfc98bc632c5707718d263dd6006d6e5f56c557f4c6b654abc826"
+        },
+        {
+          "path": "tests/fixtures/OUTCAR",
+          "sha256": "b75b76afb965019d7953940974e8ce7fa80261291318f49e9fd29f3c3a007407"
+        },
+        {
+          "path": "tests/fixtures/POSCAR",
+          "sha256": "218502323d1cd1f54bc9e6b9f7f83d99a02f1f5ee194b4227934c1ac87b47af6"
+        },
+        {
+          "path": "tests/test_calc_lcalcpol.py",
+          "sha256": "d4c336c81bd92aa91b45c501d71dea320926d9f32e794a8db0d4d6363f9fcac9"
+        },
+        {
+          "path": "viewer/main.js",
+          "sha256": "cab3dcfc40664710b60e3027568cc05f2720dd5b8a4091087b387f9c7d960a5b"
+        },
+        {
+          "path": "viewer/model.js",
+          "sha256": "75a813f4f95bbcb58d1c8298b181eb07e1d9579c0ab5eba3704ea0c33c2afb6f"
+        },
+        {
+          "path": "viewer/shell.html",
+          "sha256": "f65c58b2fa6e8db00aeaa6d8ef044dcd31c68913d23b3236a396d0d84bf23e41"
+        }
+      ]
+    },
+    {
+      "id": "local-crystal-field-analysis",
+      "name": "local-crystal-field-analysis",
+      "version": "0.1.0",
+      "schema": "fpilot.extension.v1",
+      "install_mode": "legacy-cli",
+      "source": "resources/extensions/local-crystal-field-analysis",
+      "package": "extensions/packages/local-crystal-field-analysis-0.1.0.zip",
+      "sha256": "9e2c195ef51e86ae084968e35f20ce60ddcba51115e3fb7104d0c979bce9df71",
+      "size_bytes": 15678,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "fd4b27993a7d158aa6c7663632946395ec4e9e5d3a6d1cc2bd1743920b117974"
+        },
+        {
+          "path": "extension.json",
+          "sha256": "139bb593300321dc9eec88821255cc40b2b50226c524fb91db2b59b705a3cb82"
+        },
+        {
+          "path": "scripts/calc_local_crystal_field.py",
+          "sha256": "7a68d8e6f1a3c24751fdfd80c87de9850a5ab4469c1d92048b8852b7f48c9409"
+        },
+        {
+          "path": "scripts/compare_dense_coarse.py",
+          "sha256": "072dcded4e73ba7ae932286cc48be5a7b4f35da1803f2be31ca709f5fb30589f"
+        },
+        {
+          "path": "tests/test_calc_local_crystal_field.py",
+          "sha256": "3d65d7d39621cee469033fe2d829601c97f9a723a74b7c7fb3925fd0b0333a04"
+        }
+      ]
+    },
+    {
+      "id": "pressure-structure-eos",
+      "name": "压力结构与 EOS 分析",
+      "version": "1.0.1",
+      "schema": "fpilot.extension.v2",
+      "install_mode": "workbench-v2",
+      "source": "resources/extensions/pressure-structure-eos",
+      "package": "extensions/packages/pressure-structure-eos-1.0.1.zip",
+      "sha256": "34de8f4234651a6639e302d77415f033ee792ffdf80d64f44984b846bb3430f1",
+      "size_bytes": 238441,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "177c61570c7fd35eee75c7c201d609ba3542e73a362c9143b0ba0fbb141bf484"
+        },
+        {
+          "path": "extension.manifest.json",
+          "sha256": "5a81fb297125fa6ca4d4584fe89c7a56485daebfd7695cad088ee0691e20f47d"
+        },
+        {
+          "path": "fixtures/OUTCAR",
+          "sha256": "cd824a00bdb3c057bcfe54cf039774e5067b9bb6bf50d901ce742eb49f5a0467"
+        },
+        {
+          "path": "fixtures/POSCAR",
+          "sha256": "4142dda63a8218db45947ee8cdd041d3ecde6c42533292f769591df4589cd468"
+        },
+        {
+          "path": "protocol/manifest.schema.json",
+          "sha256": "a6e404f77a073907eeab35e0b4c0b9db4cd53146220ad61d252f7dedcec3ffaa"
+        },
+        {
+          "path": "protocol/request.schema.json",
+          "sha256": "27055889bddcacead46ba6b994fccfe576e8331382493eea3f92ad5667ca8337"
+        },
+        {
+          "path": "protocol/result.schema.json",
+          "sha256": "1fadd7afd227e35258201048451ecb08ea966d4a22196ce3bae7bd4537a80ddf"
+        },
+        {
+          "path": "scripts/cli.py",
+          "sha256": "e4c21b174bbac9839a51f368ff504eeca56534b76e05b76d165e614b1cdbe676"
+        },
+        {
+          "path": "scripts/eos_core.py",
+          "sha256": "a2efc445d5ccd40b0f58a880c763c4914e8516c26fe50c385e004035e1c2a1d4"
+        },
+        {
+          "path": "scripts/presentation.py",
+          "sha256": "2244be54d54febf5e9a8559b9cbc6d9a3d4db222cb4d41e9d1f6ff370cbc5f34"
+        },
+        {
+          "path": "tests/fixture_builder.py",
+          "sha256": "6c9fe89e2177b8bd48d0904408c6887ef2901a628cd66889930e9f19e2d62936"
+        },
+        {
+          "path": "tests/test_core.py",
+          "sha256": "62a632bb329f7a1949dddf21fdb52cbc71e7e870b642f678c58692ce691634ab"
+        },
+        {
+          "path": "viewer/ECHARTS-LICENSE.txt",
+          "sha256": "634293835b43a6dd2094fa39182a3d9a6b9ca43b7fdb9ac354e8037af2a3093a"
+        },
+        {
+          "path": "viewer/ZRENDER-LICENSE.txt",
+          "sha256": "a681e9d183c72b4af4856935893805eb48c08f0f5a3f260203db7444c20fb98a"
+        },
+        {
+          "path": "viewer/build.mjs",
+          "sha256": "be2ba569ea1a1e47b39464248ecdc00309c171c17b5029fffb551c3234b6f6a3"
+        },
+        {
+          "path": "viewer/main.js",
+          "sha256": "e84ac8164b733d90d55c8ad7e5991d520e3689c9aecb9ce4dca12eb96569171e"
+        },
+        {
+          "path": "viewer/model.js",
+          "sha256": "a88579c25484a4c8f54020ab8b8d6cd9500827e49927c7369ddee615542f1bcd"
+        },
+        {
+          "path": "viewer/shell.html",
+          "sha256": "62d8209d213822879334ad3137e6214c7265a499ff4e1ee8a0636366a10484aa"
+        },
+        {
+          "path": "viewer/viewer.html",
+          "sha256": "8361670691162cce0966ba6bea32a845b408516d6682a9b738d484e6549de24b"
+        }
+      ]
+    },
+    {
+      "id": "pyw90",
+      "name": "pyw90",
+      "version": "0.5.1",
+      "schema": "fpilot.extension.v1",
+      "install_mode": "legacy-cli",
+      "source": "resources/extensions/pyw90",
+      "package": "extensions/packages/pyw90-0.5.1.zip",
+      "sha256": "4a7a3bd7dd247388111d9dcb25741e08d63977f096a7d19d830852661537ae68",
+      "size_bytes": 62841,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "1fd3bf72c84a0f790c5aedd1c70287b9ea5911bb670f68abdcc2da49dfbbd385"
+        },
+        {
+          "path": "examples/compare_request.json",
+          "sha256": "0a9269f1d2171be1ab92b54911390bb83323288597fc98b1d5797a422d913162"
+        },
+        {
+          "path": "examples/request.json",
+          "sha256": "ac47918ab08f91412920b5e541f80a036e9061b557592146094c9c18920d575c"
+        },
+        {
+          "path": "examples/window_scan_request.json",
+          "sha256": "65f90b73732cbf585fdcaa34d7539274c41034b0b529a00cd652145d6e6ca140"
+        },
+        {
+          "path": "extension.json",
+          "sha256": "5674c79c72be9d06833a21a048cb4e93894f10a77f1feac0cd9d91353cc75bff"
+        },
+        {
+          "path": "references/pyw90.md",
+          "sha256": "2aca0d8dbc0e7665dcd468375528e487affcb4f244f49626f76db936768e8140"
+        },
+        {
+          "path": "scripts/pyw90.py",
+          "sha256": "9696f77e5026bd25b549c6eead4b5e2918244e7e46f00c70f354459dc4fad1f1"
+        },
+        {
+          "path": "scripts/pyw90_compare.py",
+          "sha256": "c871661726f5c71248c874093678109dc31aa3b09171c3a626def36b18bf155a"
+        },
+        {
+          "path": "scripts/pyw90_window_scan.py",
+          "sha256": "b53fbe28407f251197d68fa6615760307ae67562ae21544537ba2b10524353ac"
+        },
+        {
+          "path": "tests/fixtures/fake_pyw90.py",
+          "sha256": "107df3550a83fb5ed954aa24c04439a36ae3a63ffdde078cf64e62b1c15bae06"
+        },
+        {
+          "path": "tests/fixtures/wannier90.eig",
+          "sha256": "b16431dfef3107081b73c636dec48f22b7c3e31210df4040f7170d634f7771ae"
+        },
+        {
+          "path": "tests/test_pyw90.py",
+          "sha256": "ce06b07d71e4a29d3653fa3bb6f9b892b2f8f94b57e3719c101dc747a6cdb47c"
+        },
+        {
+          "path": "tests/test_pyw90_window_scan.py",
+          "sha256": "7ef7956997f6ae3aa94342b55955169a9b8a5524ae0987aa4042ed6f31093eb9"
+        }
+      ]
+    },
+    {
+      "id": "structure-symmetry",
+      "name": "空间对称性",
+      "version": "2.0.0",
+      "schema": "fpilot.extension.v2",
+      "install_mode": "workbench-v2",
+      "source": "resources/extensions/structure-symmetry",
+      "package": "extensions/packages/structure-symmetry-2.0.0.zip",
+      "sha256": "3ac057ffceced6ecac73477ba1df0c77f3643ba6d0dce652bfa82f59b837e5b9",
+      "size_bytes": 7665,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "c04e4555e0dd5bda20577a0f35562378dd5c82e71448e4707b54247a00504dcc"
+        },
+        {
+          "path": "extension.manifest.json",
+          "sha256": "57a6c24af28d9daf45bed5de59792ee9597604f4ee1a46a6846e019ffb53646b"
+        },
+        {
+          "path": "extension.sdk.json",
+          "sha256": "5eff160e6a2b0a2eb60f244add5aca111780e675c2c81f8593e055fb9b582ecc"
+        },
+        {
+          "path": "fixtures/POSCAR",
+          "sha256": "b8ced0e6c18ada17630003ea7e130064449d8a705bde2e73376b0e8a12b83578"
+        },
+        {
+          "path": "fixtures/Si.POSCAR",
+          "sha256": "b8ced0e6c18ada17630003ea7e130064449d8a705bde2e73376b0e8a12b83578"
+        },
+        {
+          "path": "scripts/cli.py",
+          "sha256": "505f231d813a12a581f2914446efa6b92e17555403e49fc5bcef66d687382f61"
+        },
+        {
+          "path": "scripts/protocol_cli.py",
+          "sha256": "e0bff0c179fbfc98bc632c5707718d263dd6006d6e5f56c557f4c6b654abc826"
+        },
+        {
+          "path": "scripts/symmetry.py",
+          "sha256": "be8939d192d0d7cc327ed9f65f5fe78e70c939ef4d6b9df08e681681f1490e37"
+        }
+      ]
+    },
+    {
+      "id": "structure-volume-statistics",
+      "name": "结构体积与元素统计",
+      "version": "2.0.0",
+      "schema": "fpilot.extension.v2",
+      "install_mode": "workbench-v2",
+      "source": "resources/extensions/structure-volume-statistics",
+      "package": "extensions/packages/structure-volume-statistics-2.0.0.zip",
+      "sha256": "fdded2fcf53ba96276f62d4e0cf62931f9413f2a6d784c179d543aeeeb361b8c",
+      "size_bytes": 5866,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "ef37deac0d8fe2ce1ef51e734797c656e76d0981ac7def61bce1bc12f83eb134"
+        },
+        {
+          "path": "extension.manifest.json",
+          "sha256": "87520ebc8c7fcc7c5a137929b20928f7af1b57538567f482b7fac6516a71184c"
+        },
+        {
+          "path": "fixtures/POSCAR",
+          "sha256": "b8ced0e6c18ada17630003ea7e130064449d8a705bde2e73376b0e8a12b83578"
+        },
+        {
+          "path": "scripts/cli.py",
+          "sha256": "a5c532f2625b84417549ee3ecbec8c30d56150ae450e7c8f171f88188a80ade6"
+        },
+        {
+          "path": "scripts/protocol_cli.py",
+          "sha256": "e0bff0c179fbfc98bc632c5707718d263dd6006d6e5f56c557f4c6b654abc826"
+        },
+        {
+          "path": "tests/test_standalone.py",
+          "sha256": "e8af6aa357b6097b147b81449abee5a25d1e0676ea0e0b841568370da38990ad"
+        }
+      ]
+    },
+    {
+      "id": "tb2j",
+      "name": "TB2J 交换参数与轨道分解",
+      "version": "2.1.0",
+      "schema": "fpilot.extension.v2",
+      "install_mode": "workbench-v2",
+      "source": "resources/extensions/tb2j",
+      "package": "extensions/packages/tb2j-2.1.0.zip",
+      "sha256": "4f9f91bfaacaa48892192c86a19cad8fef8283c0c28c2f977372633ba352b38d",
+      "size_bytes": 251842,
+      "files": [
+        {
+          "path": "README.md",
+          "sha256": "58c575709e6e3a13147c1c40384f435b4442b93d18e7df836033409dcbc5a84d"
+        },
+        {
+          "path": "examples/collinear.request.json",
+          "sha256": "9783ac061dc784c78528b7f3e68c6fa050c78d7f5052f7181f129ba0001b7efe"
+        },
+        {
+          "path": "examples/spinor.request.json",
+          "sha256": "1023b03bd51689e250646f06773ddb6ba6fec11e715c4de9d65af0ae43889427"
+        },
+        {
+          "path": "extension.json",
+          "sha256": "bc8e877619c70799543c5acd60c2612b0f50015ce65964a2c5ae3884e0015348"
+        },
+        {
+          "path": "extension.manifest.json",
+          "sha256": "57a1ced495b7606cc669eb03f248d7b11c93397e414c7210789f40856a4559e5"
+        },
+        {
+          "path": "references/tb2j-wannier90.md",
+          "sha256": "c167942c775bc9536e36bd719e6fd2935da2a57d934b0bd073cb7e83565ba4e1"
+        },
+        {
+          "path": "scripts/cli.py",
+          "sha256": "4d43bc77cfffde33e759d89c0b51390231df79e9047d258d3b91d7e64dfb7aca"
+        },
+        {
+          "path": "scripts/inputs_v2.py",
+          "sha256": "975e5435f0ddd0683d0344450931bad9dc2a5772f42746585514efdc275bf0ee"
+        },
+        {
+          "path": "scripts/presentation.py",
+          "sha256": "b467573853e9997ad93df99a67679fd52c9d00d042bb76ba01a3d8376155b86e"
+        },
+        {
+          "path": "scripts/results_v2.py",
+          "sha256": "7de5620f662ec1d89773bfedd7f5d265b403a0358ecdf4ba176b121ffb6288f0"
+        },
+        {
+          "path": "scripts/tb2j.py",
+          "sha256": "b1066208544e8b4b91d0932387455678ac7daa3eb483fa1a48947dc246fe8b42"
+        },
+        {
+          "path": "tests/fixtures/collinear/POSCAR",
+          "sha256": "88b249cfe51abd0ccf3e5206d8b9b67e198db04c32344f53bbde8a80ad646544"
+        },
+        {
+          "path": "tests/fixtures/collinear/wannier90.win",
+          "sha256": "cd46672b175a5b9da2c96b18593ec782cb4073506f418f59f93ac19239c20623"
+        },
+        {
+          "path": "tests/fixtures/collinear/wannier90_down_centres.xyz",
+          "sha256": "b58513596e9d3f5f1ebcf350f74ec8c060b39496d00b6719508019834d64150a"
+        },
+        {
+          "path": "tests/fixtures/collinear/wannier90_down_hr.dat",
+          "sha256": "72c74964f5611b06f5abfb01afe2ae99e4e96593ae98e64b8e7c3a8ad689f81b"
+        },
+        {
+          "path": "tests/fixtures/collinear/wannier90_up_centres.xyz",
+          "sha256": "58bbeaf11a9fc6bb3b46e6d40ffeddbb4e30d0b2a1e395903cd56d4035c8e8ca"
+        },
+        {
+          "path": "tests/fixtures/collinear/wannier90_up_hr.dat",
+          "sha256": "24cc24f4fd5fdedb08a49e05e0e301ebe9db2c59ead9925ea4c89a982e125a5f"
+        },
+        {
+          "path": "tests/fixtures/fake_tb2j/TB2J/__init__.py",
+          "sha256": "3f7181c3df4836d798883ce51ba4fc289489a4663fd7d38b57e1a34f500a8bf9"
+        },
+        {
+          "path": "tests/fixtures/fake_tb2j/TB2J/io_exchange/__init__.py",
+          "sha256": "c997f377affb428459b955504e57b8c501e421c9e3a570856daa4cba679f2d56"
+        },
+        {
+          "path": "tests/fixtures/fake_tb2j/TB2J/io_exchange/io_exchange.py",
+          "sha256": "5ffd484188027819e9aa9d3f4573991ce10886340a98a4989c7633e0038a44af"
+        },
+        {
+          "path": "tests/fixtures/fake_tb2j/TB2J/scripts/__init__.py",
+          "sha256": "7a63173ad72a4a608f7c9a4a5dda706d4698d4a609baca3914bd728ee4a0a9f5"
+        },
+        {
+          "path": "tests/fixtures/fake_tb2j/TB2J/scripts/wann2J.py",
+          "sha256": "0ecbac85ea31c174af80ec814693efd6b6bd1c4d55b429fc0a39ee4b561a6c82"
+        },
+        {
+          "path": "tests/fixtures/fake_tb2j/TB2J/versioninfo.py",
+          "sha256": "63734c82cc97375ab419d5b8665460eb84882b64b1f0b903323f64a703d64f46"
+        },
+        {
+          "path": "tests/fixtures/fake_wann2j.py",
+          "sha256": "5e3af9ea1dbd1308741cc53dd825d08c3537b949487b908e1820cbfbd5390326"
+        },
+        {
+          "path": "tests/fixtures/spinor/POSCAR",
+          "sha256": "88b249cfe51abd0ccf3e5206d8b9b67e198db04c32344f53bbde8a80ad646544"
+        },
+        {
+          "path": "tests/fixtures/spinor/wannier90.win",
+          "sha256": "63be35487da8272a6dbe102b817def7de32735189b2cd36b9db0c47bbaf3a8e3"
+        },
+        {
+          "path": "tests/fixtures/spinor/wannier90_centres.xyz",
+          "sha256": "0659d1de35b9378a6c9dc5f8f8fa27d4a32584baabf9e1c6787a2a1031e936c1"
+        },
+        {
+          "path": "tests/fixtures/spinor/wannier90_hr.dat",
+          "sha256": "dfa2bf6a9b646c7451ade12ecd6c2e2f45a519be595692f8459a9f1b11ec45cb"
+        },
+        {
+          "path": "tests/fixtures/v2/down/wannier90.2.win",
+          "sha256": "b2ecc0499998dac515a16a61bc3e3a5e43b04e25c45fa73bff6b906d046b4fb8"
+        },
+        {
+          "path": "tests/fixtures/v2/down/wannier90.2.wout",
+          "sha256": "2ce2de1dffac58ed2dac24a820f9371ae55e9a1a696df21e832bc080ceb9b8f6"
+        },
+        {
+          "path": "tests/fixtures/v2/down/wannier90.2_centres.xyz",
+          "sha256": "7831dce633558da0856d00ddeb251392511ad0bff3e6a0e6106fd66dc964aad5"
+        },
+        {
+          "path": "tests/fixtures/v2/down/wannier90.2_hr.dat",
+          "sha256": "609d2bc1828d7548f5c857a352f4e3e94a55cbfae9e0c1c7abfce15e5d26bd77"
+        },
+        {
+          "path": "tests/fixtures/v2/down/wannier90.2_tb.dat",
+          "sha256": "f51404522ed3c7a2916c3d1008008de0cbed1a4e65efbd651ef90552edef81ca"
+        },
+        {
+          "path": "tests/fixtures/v2/spinor/wannier90.win",
+          "sha256": "01200ec08af3933f343a5608e991d601d6c1e6b75a3e6d8c3cf0723eb4ed5773"
+        },
+        {
+          "path": "tests/fixtures/v2/spinor/wannier90.wout",
+          "sha256": "37463d9374f0f498cb07f25060a7b4a2f9b00e716d4d232e1acd99a109e5f7d7"
+        },
+        {
+          "path": "tests/fixtures/v2/spinor/wannier90_centres.xyz",
+          "sha256": "c20e6357afbd4873b494a85fe50f5919db7f0bdc121132cd8b1f22dbc0a05c1f"
+        },
+        {
+          "path": "tests/fixtures/v2/spinor/wannier90_hr.dat",
+          "sha256": "ccbdea6afaa87ce9dcde79ab4156a14df07ce8c05d1a134b03e93313e2b58585"
+        },
+        {
+          "path": "tests/fixtures/v2/spinor/wannier90_tb.dat",
+          "sha256": "d1edcf16aca4ffbb42a86ae4b05beb4a4637de2f2038a8e8775847628210fc2d"
+        },
+        {
+          "path": "tests/fixtures/v2/up/wannier90.1.win",
+          "sha256": "b2ecc0499998dac515a16a61bc3e3a5e43b04e25c45fa73bff6b906d046b4fb8"
+        },
+        {
+          "path": "tests/fixtures/v2/up/wannier90.1.wout",
+          "sha256": "2ce2de1dffac58ed2dac24a820f9371ae55e9a1a696df21e832bc080ceb9b8f6"
+        },
+        {
+          "path": "tests/fixtures/v2/up/wannier90.1_centres.xyz",
+          "sha256": "7831dce633558da0856d00ddeb251392511ad0bff3e6a0e6106fd66dc964aad5"
+        },
+        {
+          "path": "tests/fixtures/v2/up/wannier90.1_hr.dat",
+          "sha256": "609d2bc1828d7548f5c857a352f4e3e94a55cbfae9e0c1c7abfce15e5d26bd77"
+        },
+        {
+          "path": "tests/fixtures/v2/up/wannier90.1_tb.dat",
+          "sha256": "f51404522ed3c7a2916c3d1008008de0cbed1a4e65efbd651ef90552edef81ca"
+        },
+        {
+          "path": "tests/test_tb2j.py",
+          "sha256": "c0fe4591aa2cfd0bad9e8e07c37e8fa0be5d3b0b9c1594110f67ca22ba43c36d"
+        },
+        {
+          "path": "tests/test_v2.py",
+          "sha256": "2f87e811bb321c5ddde72d4d4a9498445fa3bb48dbe5a4bc7bbee860c488b604"
+        },
+        {
+          "path": "viewer/ECHARTS-LICENSE.txt",
+          "sha256": "634293835b43a6dd2094fa39182a3d9a6b9ca43b7fdb9ac354e8037af2a3093a"
+        },
+        {
+          "path": "viewer/ZRENDER-LICENSE.txt",
+          "sha256": "a681e9d183c72b4af4856935893805eb48c08f0f5a3f260203db7444c20fb98a"
+        },
+        {
+          "path": "viewer/build.mjs",
+          "sha256": "4d9993bbbc06132c66dddcf833dd0329771b29a28985f38b145a77767300975b"
+        },
+        {
+          "path": "viewer/main.js",
+          "sha256": "60364a710181cd0a224320b9013c2780965531adf2ccd2ecf31ff8e9a16ab164"
+        },
+        {
+          "path": "viewer/model.js",
+          "sha256": "f29c896900b3c6b77c35b10d11f3c23bee74a9ce81f7420b424af54978e07a30"
+        },
+        {
+          "path": "viewer/shell.html",
+          "sha256": "9d0a174a034d435756fc6fb91a8e5194d4a4bab8805c8e4caffd7b41a6a6c36f"
+        },
+        {
+          "path": "viewer/viewer.html",
+          "sha256": "41ed6001afc54517d3a6a8b335dcb7ef2668c044f356b86a055a7a16799c2996"
+        }
+      ]
+    }
+  ]
+}

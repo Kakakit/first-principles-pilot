@@ -1,0 +1,168 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "summary",
+    "warnings",
+    "scientific_validation",
+    "tables",
+    "curves",
+    "artifacts",
+    "sources"
+  ],
+  "properties": {
+    "schema": {
+      "const": "fpilot.extension-result.v2"
+    },
+    "status": {
+      "enum": [
+        "COMPLETED",
+        "FAILED",
+        "NOT_APPLICABLE"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "scientific_validation": {
+      "type": "string"
+    },
+    "tables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "columns",
+          "rows"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "key",
+                "label",
+                "unit"
+              ],
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "curves": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "x_label",
+          "x_unit",
+          "y_label",
+          "y_unit",
+          "series"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "x_label": {
+            "type": "string"
+          },
+          "x_unit": {
+            "type": "string"
+          },
+          "y_label": {
+            "type": "string"
+          },
+          "y_unit": {
+            "type": "string"
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "label",
+                "points"
+              ],
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "label",
+          "media_type"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

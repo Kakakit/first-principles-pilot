@@ -18,7 +18,7 @@ The original script was specifically written for FeO4/CrO6, with `Cr:6` and `Fe:
 ## Quick use
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python src/crystal_distortion.py POSCAR \
+python src/crystal_distortion.py POSCAR \
   --config config/default_fecr2o4.json \
   --output-prefix analysis/polyhedral_distortion
 ```
@@ -30,13 +30,13 @@ selects extensions.
 Compatibility with the original FeCr2O4 use case is the default even without `--config`:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python src/crystal_distortion.py POSCAR
+python src/crystal_distortion.py POSCAR
 ```
 
 Validate parsing/config without writing outputs:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python src/crystal_distortion.py POSCAR --config config/default_fecr2o4.json --dry-run
+python src/crystal_distortion.py POSCAR --config config/default_fecr2o4.json --dry-run
 ```
 
 Dry-run validates the structure and resolved configuration and writes no
@@ -47,7 +47,7 @@ No remote file is touched.
 If the nth and (n+1)th ligand distances are too close for a trustworthy nearest-neighbor shell, make that diagnostic fatal:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python src/crystal_distortion.py POSCAR --fail-on-ambiguous-shell
+python src/crystal_distortion.py POSCAR --fail-on-ambiguous-shell
 ```
 
 ## Scientific interpretation
@@ -64,7 +64,7 @@ For octahedra, the tool finds three opposite bond pairs by maximizing the sum of
 ## Tests
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python -m pytest -q tests
+python -m pytest -q tests
 ```
 
 The deterministic fixture contains one ideal CrO6 octahedron and one ideal FeO4 tetrahedron in a large periodic cell. Unit tests check ideal limits and a tetragonally elongated octahedron; CLI tests check dry-run parsing and all three outputs.

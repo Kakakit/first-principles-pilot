@@ -2,7 +2,7 @@
   "schema": "fpilot.extension.v2",
   "id": "lcalcpol-polarization-analysis",
   "name": "形式极化与双结果比较",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "读取 LCALCPOL 偶极；支持单结果或在共同晶格下比较两个端点。约化候选不等于同分支物理极化。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
@@ -47,7 +47,8 @@
     "timeout_seconds": 300
   },
   "dependencies": [
-    "numpy"
+    "numpy",
+    "pymatgen"
   ],
   "options_schema": {
     "type": "object",
@@ -71,5 +72,8 @@
   ],
   "fixtures": [
     "fixtures/POSCAR"
-  ]
+  ],
+  "presentation": {
+    "entrypoint": "scripts/presentation.py"
+  }
 }

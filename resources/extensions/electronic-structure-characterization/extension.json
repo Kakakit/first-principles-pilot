@@ -327,7 +327,7 @@
       }
     ],
     "migration_metadata": {
-      "source_package_root": "archived-development-source/band-dos-analysis",
+      "source_package_root": "/Users/kafka/Downloads/band-dos-analysis/extensions/band-dos-analysis",
       "preserved_source_copies": [
         "source/original_dft_wannier_compare.py",
         "source/original_vasp_soc_band.py",

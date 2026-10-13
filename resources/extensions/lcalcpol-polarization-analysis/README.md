@@ -1,14 +1,14 @@
 # LCALCPOL polarization analysis v0.3.0
 
-This local-only extension migrates `/Users/kafka/Downloads/calc_lcalcpol.py` while preserving its POSCAR/OUTCAR parsing, constants, unit conversion, and lattice-coordinate branch algorithm. The migration initially added polarization magnitudes; v0.3.0 also corrects the comparison order to subtract first and reduce second. The original source file remains unmodified.
+This local-only extension migrates `archived-development-source/calc_lcalcpol.py` while preserving its POSCAR/OUTCAR parsing, constants, unit conversion, and lattice-coordinate branch algorithm. The migration initially added polarization magnitudes; v0.3.0 also corrects the comparison order to subtract first and reduce second. The original source file remains unmodified.
 
 ## Inputs, outputs, and dependencies
 
 Run from a directory containing the matching files:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python \
-  /Users/kafka/Documents/FeCrO论文/plugins/first-principles-pilot/extensions/lcalcpol-polarization-analysis/scripts/calc_lcalcpol.py
+python \
+  resources/extensions/lcalcpol-polarization-analysis/scripts/calc_lcalcpol.py
 ```
 
 The parser uses `pymatgen` to read the POSCAR lattice and volume, `numpy` for vector, magnitude, and lattice-coordinate operations, and the fixed conversion `16.021766` from `(e Ang)/Angstrom^3` to `C/m^2`. It reads the last complete `p[ion]` and `p[elc]` records and accepts ordinary decimal and scientific notation (`E/e/D/d`).
@@ -26,7 +26,7 @@ To obtain a genuine spontaneous polarization, compare two structures on the same
 Compare noSOC and SOC endpoints with explicit paths:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python \
+python \
   scripts/calc_lcalcpol.py compare \
   --nosoc-outcar /path/noSOC/OUTCAR --nosoc-poscar /path/noSOC/POSCAR \
   --soc-outcar /path/SOC/OUTCAR --soc-poscar /path/SOC/POSCAR
@@ -53,7 +53,15 @@ The parser accepts the known LCALCPOL labels and takes the last complete record.
 From this extension directory, run the tests with the existing project environment:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python tests/test_calc_lcalcpol.py
+python tests/test_calc_lcalcpol.py
 ```
 
-The tests cover POSCAR lattice/volume parsing, `p[ion]`/`p[elc]` parsing, `dipole_to_p`, `polarization_magnitude`, orthogonal and non-orthogonal lattice branch reduction, missing-output errors, and numeric/label checks for the CLI magnitude report. The original source remains untouched at `/Users/kafka/Downloads/calc_lcalcpol.py`.
+The tests cover POSCAR lattice/volume parsing, `p[ion]`/`p[elc]` parsing, `dipole_to_p`, `polarization_magnitude`, orthogonal and non-orthogonal lattice branch reduction, missing-output errors, and numeric/label checks for the CLI magnitude report. The original source remains untouched at `archived-development-source/calc_lcalcpol.py`.
+
+## v2.1.0：完整过程与手动量子选择
+
+在“绘图与后处理”选择“形式极化与双结果比较”。检查/预览会刷新来源，亦可点击“刷新来源文件清单”；变化时重新准备，不重试旧失败记录。双结果按选择顺序显示 A、B，主结果 B−A 先相减再约化。电子、离子仅显示原值和原始差，不能把端点分别约化的差当作主要物理结果。
+
+展示包括 OUTCAR 原文/行号、晶格和体积、量子公式和向量、基底系数、整数选择、扣除向量、约化后 dipole 与极化。修改 n1/n2/n3 后点击“应用并重新计算”，或“恢复自动选择”；选择独立保存，原分析不变。JSON/CSV 导出本次计算过程。单结果允许调整总量，双结果只调整总端点差。主极化单位为 C/m²，另显示 μC/cm²（乘以 100）。
+
+OUTCAR 与结构晶格/体积不一致会阻止新分析，检查会考虑 OUTCAR 打印精度。旧分析点击“更新结果展示”只读取旧冻结 JSON；缺失原文标为未保存，旧产物不自动接受新晶格审核。量子代表仍不证明绝缘同分支路径或自发极化。

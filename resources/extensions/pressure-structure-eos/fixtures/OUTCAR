@@ -1,0 +1,31 @@
+ TITEL = PAW_PBE Ce 23Dec2003
+ ions per type = 1
+ NIONS = 1
+ ENCUT = 600.0 eV
+ PREC = Accurate
+ EDIFF = 1E-7
+ EDIFFG = -0.01
+ ISMEAR = 0
+ SIGMA = 0.05
+ ISPIN = 2
+ NKPTS = 64
+ PSTRESS = 0.0
+ NSW = 100
+ ISIF = 4
+ Iteration 1( 1)
+ aborting loop because EDIFF is reached
+ volume of cell : 40.00000000
+ direct lattice vectors                 reciprocal lattice vectors
+ 3.000000000 0.0 0.0 0 0 0
+ 0.0 3.200000000 0.0 0 0 0
+ 0.0 0.0 4.166666667 0 0 0
+ in kB 0.0 0.0 0.0 0 0 0
+ external pressure = 0.0 kB Pullay stress = 0 kB
+ POSITION                                       TOTAL-FORCE (eV/Angst)
+ -----------------------------------------------------------------------------------
+ 0.0 0.0 0.0 0.001 0.0 0.0
+ -----------------------------------------------------------------------------------
+ free  energy   TOTEN = -5.001000000000 eV
+ energy  without entropy= -5.000500000000 energy(sigma->0) = -5.000000000000
+ reached required accuracy - stopping structural energy minimisation
+ General timing and accounting informations for this job:

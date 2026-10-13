@@ -32,7 +32,7 @@ def read_poscar(filename="POSCAR"):
     return np.array(struct.lattice.matrix), float(struct.volume)
 
 
-def read_lcalcpol(filename="OUTCAR"):
+def read_lcalcpol(filename="OUTCAR", details=False):
     text = Path(filename).read_text(encoding="utf-8")
     ion_matches = list(ION_PATTERN.finditer(text))
     elc_matches = list(ELC_PATTERN.finditer(text))
@@ -56,7 +56,31 @@ def read_lcalcpol(filename="OUTCAR"):
         raise RuntimeError("Cannot find complete p[ion]/p[elc] pair")
     ion = np.array([_float(value) for value in last_complete[0].groups()])
     elc = np.array([_float(value) for value in last_complete[1].groups()])
-    return ion, elc
+    if not details:return ion, elc
+    def field(match):
+        line=text.count('\n',0,match.start())+1
+        raw=text[text.rfind('\n',0,match.start())+1:text.find('\n',match.end()) if text.find('\n',match.end())>=0 else len(text)]
+        return {'line':line,'text':raw,'numeric_tokens':list(match.groups()),'unit':'electrons Angst (e Å)'}
+    before=text[:last_complete[0].start()]
+    cells=list(re.finditer(r'direct lattice vectors.*\n((?:[^\n]*\n){3})',before,re.I))
+    cell=None
+    if cells:
+        lines=cells[-1].group(1).splitlines()
+        tokens=[line.split()[:3] for line in lines]
+        if all(len(row)==3 and all(re.fullmatch(NUMBER,v) for v in row) for row in tokens):
+            cell={'matrix':[[_float(v) for v in row] for row in tokens],'text':cells[-1].group(0),'line':text.count('\n',0,cells[-1].start())+1,
+                  'rounding_angstrom':max(_printed_error(v) for row in tokens for v in row)}
+    volumes=list(re.finditer(r'volume of cell\s*:\s*('+NUMBER+')',before,re.I))
+    vol=None
+    if volumes:
+        m=volumes[-1];vol={'value':_float(m.group(1)),'text':m.group(0),'line':text.count('\n',0,m.start())+1,'rounding_angstrom3':_printed_error(m.group(1))}
+    return ion,elc,{'ion':field(last_complete[0]),'electronic':field(last_complete[1]),'lattice':cell,'volume':vol}
+
+
+def _printed_error(token):
+    token=token.lower().replace('d','e');parts=token.split('e');power=int(parts[1]) if len(parts)>1 else 0
+    decimals=len(parts[0].split('.')[1]) if '.' in parts[0] else 0
+    return 0.5*10**(power-decimals)
 
 
 def dipole_to_p(p, volume):
@@ -94,12 +118,24 @@ def _sha256(path):
 
 def _single_result(outcar, poscar, lattice_tolerance=1e-8):
     lattice, volume = read_poscar(poscar)
-    p_ion, p_elc = read_lcalcpol(outcar)
+    p_ion, p_elc, evidence = read_lcalcpol(outcar,details=True)
+    cell=evidence['lattice'];vol=evidence['volume']
+    if cell and not np.allclose(lattice,cell['matrix'],rtol=0,atol=lattice_tolerance+cell['rounding_angstrom']+1e-12):
+        raise ValueError('OUTCAR 晶格与所选结构不一致，拒绝量子计算')
+    if vol and abs(volume-vol['value'])>vol['rounding_angstrom3']+1e-8+3*np.linalg.norm(lattice)**2*lattice_tolerance:
+        raise ValueError('OUTCAR 体积与所选结构不一致，拒绝量子计算')
+    # Retain full-precision frozen structure after checking rounded OUTCAR evidence.
+
     total = p_ion + p_elc
     branch_reduced, coeff, coeff_reduced, integer = reduce_branch(total, lattice)
     raw = dipole_to_p(total, volume)
     reduced = dipole_to_p(branch_reduced, volume)
     return {
+        "detail_schema": "fpilot.polarization-detail.v1",
+        "outcar_evidence": evidence,
+        "cell_source": "冻结结构（已核对 OUTCAR 打印值）" if cell else "冻结结构（OUTCAR 未提供晶格字段）",
+        "conversion_factor": EANG_TO_C_M2,
+        "component_polarizations_c_m2": {"ion":_vector(dipole_to_p(p_ion,volume)),"electronic":_vector(dipole_to_p(p_elc,volume))},
         "inputs": {
             "OUTCAR": {"path": str(Path(outcar).resolve()), "sha256": _sha256(outcar)},
             "POSCAR": {"path": str(Path(poscar).resolve()), "sha256": _sha256(poscar)},

@@ -105,7 +105,8 @@ def generate(record,view,dest,entry):
     from .extension_runs import directory,now
     output=dest/'outputs';output.mkdir()
     request={'schema':'fpilot.extension-presentation-request.v1','analysis_id':record['id'],
-             'source_dir':str(directory(record['id'])/'outputs'),'output_dir':str(output)}
+             'source_dir':str(directory(record['id'])/'outputs'),'output_dir':str(output),
+             'view_state':json.loads((dest/'state.json').read_text()) if (dest/'state.json').is_file() else {'revision':0,'value':{}}}
     if record['location']=='local':
         p.atomic_json(dest/'request.json',request)
         response=subprocess.run([view['python'],str(p.inside(dest/'package',entry)),'render','--request',str(dest/'request.json')],

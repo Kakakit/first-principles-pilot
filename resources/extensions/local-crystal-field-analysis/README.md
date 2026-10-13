@@ -31,16 +31,16 @@ The extension performs only `local_read` and `local_write`: it does not SSH, rea
 ## Run from the extension root
 
 ```bash
-cd /Users/kafka/Documents/FeCrO论文/plugins/first-principles-pilot/extensions/local-crystal-field-analysis
+cd resources/extensions/local-crystal-field-analysis
 
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python scripts/calc_local_crystal_field.py \
+python scripts/calc_local_crystal_field.py \
   /path/to/wannier90.1_hr.dat \
   --poscar /path/to/POSCAR \
   --sites 'Cr:l=2,Fe:l=2,O:l=1' \
   --coord 'Cr:6,Fe:4' \
   --mp-grid 8 7 7 --occ 60 --spin up
 
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python scripts/compare_dense_coarse.py \
+python scripts/compare_dense_coarse.py \
   --module scripts/calc_local_crystal_field.py \
   --coarse /path/to/coarse \
   --dense /path/to/dense \
@@ -54,13 +54,13 @@ The comparison output is indented JSON with `coarse`, `dense`, and `dense_minus_
 From this directory, the synthetic test can be run without relying on the caller's current working directory:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python tests/test_calc_local_crystal_field.py
+python tests/test_calc_local_crystal_field.py
 ```
 
 The extension metadata is checked separately by the plugin manager:
 
 ```bash
-/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python \
+python \
   ../../scripts/fpilot_extensions.py validate .
 ```
 
