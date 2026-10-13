@@ -2,10 +2,11 @@
 
 ## 2026-10-13：自包含浏览器安装测试版
 
-保留浏览器界面，新增完整 CPython 与锁定依赖的原生安装器、用户数据独立保存及 Python 控制中心。Windows 使用 Inno Setup，Mac 输出两种架构的应用/DMG；一套源码由 GitHub Actions 构建、原生启动和发布预发行版。重复打开复用身份，停止等待已进行的回执，不强杀研究提交；更新/卸载须退出控制中心，用户数据保留。原开发入口和研究记录不迁移。
+已发布 [v1.1.0-beta.1](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.1)：Windows x64 使用 Inno Setup EXE，Apple Silicon Mac 使用应用/DMG；按用户取舍，Intel Mac 不进入首版范围。共用浏览器界面与本机后端，自带 CPython 和锁定依赖。安装目录与用户数据分开，重复打开复用身份，控制页提供启动/停止/重启/退出/日志，更新和卸载保留数据。Windows 关闭临时文件后再原子替换，修复 worker 状态和设置写入；POSIX 干净停止后的立即重启也已核验。
 
-依赖可用性核对 60 项 Windows 二进制包通过；控制/归档/真实端口边界专项 7 项通过。公开副本全量 655 项（3 跳过），其中沙箱阻止监听的两项已在允许本机监听后通过原 11 项便携专项复核；后续新增端口回归也通过。前端 126 项及类型/构建通过。Mac 完整运行环境的实际 API、worker、POSCAR 导入、中文目录、重复打开及停止/重启/数据保持通过；发布产物由 CI 重新构建，Windows 用户安装尚待验收。说明见 [安装与测试](docs/INSTALLATION.md)，私人证据留 `workspace-data/development-backups/browser-installer-20261013`。
+[原生 CI](https://github.com/Kakakit/first-principles-pilot/actions/runs/38400942242) 的 Windows 实际安装/启动/卸载、Apple Silicon 启动以及 Release 发布全部成功；中文目录、实际 POSCAR 解析、健康 worker、重复打开、安全停止/重启及数据保持通过。控制/端口与 JSON 专项共 9 项通过，前端 126 项及类型/构建通过。干净环境全量对照基线 649 项、当前 658 项，70 个原环境相关失败继续记录，新增失败为零；不能据此宣称干净环境全量通过。Release 附两平台启动回执、完整回归差异和 SHA256。
 
+安装验收使用独立用户目录，不迁移原研究数据，不连接 SSH 或提交研究任务。Windows 10/11 用户实机、SSH/POTCAR/脚本及科学流程仍由用户后续验收；首版未签商业证书或作 Apple 公证。见 [安装步骤](docs/INSTALLATION.md) 与 [实施验收](docs/release-d/BROWSER_INSTALLER_ACCEPTANCE.md)。私人证据留 `workspace-data/development-backups/browser-installer-20261013`。
 
 ## 2026-10-13：迭代配置滚动与按核数负载门禁
 

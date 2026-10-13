@@ -2,8 +2,7 @@
 
 ## 2026-10-13：自包含浏览器安装测试版
 
-浏览器界面与业务代码共用，打包完整 CPython/锁定依赖并生成 Windows 安装器、Mac 应用/DMG。安装目录只存程序，用户目录保存项目/配置/日志；统一 Python 控制中心复用身份、拒绝中途停止派发并安全等待退出，覆盖更新和卸载保留数据。GitHub Actions 完成回归、原生构建/启动后发布预发行版，不自动迁移研究数据或提供赝势/凭据。验收与首次配置见 [安装说明](INSTALLATION.md)。
-
+已发布 [v1.1.0-beta.1](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.1) 的 Windows x64 EXE 与 Apple Silicon Mac DMG，首版不提供 Intel Mac。使用同一份浏览器和后端，内置 CPython/锁定依赖；用户目录独立，控制中心提供重复打开复用、安全停止/重启、日志和更新保护。原工作区、冻结包和远端任务不自动迁移。Windows 实际安装/启动/卸载和 Mac 原生启动均通过；干净克隆全量基线比较零新增失败，已有环境失败继续保留。使用与边界见 [安装说明](INSTALLATION.md) 和 [实施验收](release-d/BROWSER_INSTALLER_ACCEPTANCE.md)。后续先由用户 Windows 实机按步骤验收 SSH 与实际流程。
 
 ## 2026-10-13：迭代配置滚动与按核数负载门禁
 
