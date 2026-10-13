@@ -427,7 +427,7 @@ def availability_command(config):
     gpu_command = ('if command -v nvidia-smi >/dev/null 2>&1; then\n'
                    + shlex.quote(interpreter) + ' -c ' + shlex.quote(gpu_source) + ' || true\nfi\n')
     return ("printf '\\n===== %s =====\\n' "+shlex.quote(config['alias'])+'\n'
-            +'(\nMOM_MAX_AGE=300\nUNTRACKED_LOAD_THRESHOLD=1.0\nEXCLUDED_NODES='+shlex.quote(excluded)+'\n'+body+'\n)\n' + gpu_command)
+            +'(\nMOM_MAX_AGE=300\nUNTRACKED_LOAD_THRESHOLD=auto\nEXCLUDED_NODES='+shlex.quote(excluded)+'\n'+body+'\n)\n' + gpu_command)
 
 
 def _probe_parts(config, commands):

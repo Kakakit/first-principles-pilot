@@ -15,7 +15,7 @@
 #
 # Optional environment variables:
 #   MOM_MAX_AGE=300               maximum acceptable PBS MOM heartbeat age (s)
-#   UNTRACKED_LOAD_THRESHOLD=1.0  load allowed on a scheduler-idle node
+#   UNTRACKED_LOAD_THRESHOLD=auto  max(1, CPU count * 0.10); numeric override allowed
 #   EXCLUDED_NODES="node06"        space/comma-separated policy exclusions
 
 set -uo pipefail
@@ -23,8 +23,12 @@ set -uo pipefail
 SSH_CONFIG="${SSH_CONFIG:-$HOME/.ssh/config}"
 CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-8}"
 MOM_MAX_AGE="${MOM_MAX_AGE:-300}"
-UNTRACKED_LOAD_THRESHOLD="${UNTRACKED_LOAD_THRESHOLD:-1.0}"
+UNTRACKED_LOAD_THRESHOLD="${UNTRACKED_LOAD_THRESHOLD:-auto}"
 EXCLUDED_NODES="${EXCLUDED_NODES:-}"
+if [[ "$UNTRACKED_LOAD_THRESHOLD" != auto ]] && ! [[ "$UNTRACKED_LOAD_THRESHOLD" =~ ^([0-9]+([.][0-9]+)?|[.][0-9]+)$ ]]; then
+  echo "UNTRACKED_LOAD_THRESHOLD must be auto or a nonnegative number" >&2
+  exit 2
+fi
 
 if [[ $# -gt 0 ]]; then
   hosts=("$@")
@@ -57,6 +61,11 @@ if command -v sinfo >/dev/null 2>&1; then
   sinfo -h -o "%P AVAILABLE=%a NODES=%D STATE=%t" 2>&1 || true
   echo "-- node capacity (unique nodes) --"
   scontrol show nodes -o 2>&1 | awk -v load_threshold="$UNTRACKED_LOAD_THRESHOLD" '
+    function load_limit(cpus, limit) {
+      if (load_threshold != "auto") return load_threshold + 0
+      limit = cpus * 0.10
+      return limit > 1 ? limit : 1
+    }
     function value(prefix,    i, pair) {
       for (i = 1; i <= NF; i++) {
         split($i, pair, "=")
@@ -80,7 +89,9 @@ if command -v sinfo >/dev/null 2>&1; then
       total = value("CPUEfctv")
       if (total == "") total = value("CPUTot")
       alloc = value("CPUAlloc")
-      load = value("CPULoad")
+      load_text = value("CPULoad")
+      load_valid = load_text ~ /^[0-9]+([.][0-9]+)?$/
+      load = load_valid ? load_text + 0 : 0
       mem = value("RealMemory")
       parts = value("Partitions")
       gres = value("CfgTRES")
@@ -93,9 +104,9 @@ if command -v sinfo >/dev/null 2>&1; then
       if (node == "" || total == "") next
       total += 0
       alloc += 0
-      load += 0
       free = total - alloc
       if (free < 0) free = 0
+      unallocated = free
 
       upper = toupper(state)
       unavailable = upper ~ /(DOWN|DRAIN|FAIL|MAINT|REBOOT|RESERVED|UNKNOWN|NO_RESPOND)/
@@ -103,7 +114,7 @@ if command -v sinfo >/dev/null 2>&1; then
         status = "UNAVAILABLE"
         free = 0
         unavailable_nodes++
-      } else if (alloc == 0 && free == total && upper ~ /IDLE/ && load > load_threshold) {
+      } else if (alloc == 0 && free == total && upper ~ /IDLE/ && (!load_valid || load > load_limit(total))) {
         status = "SUSPECT_LOAD"
         free = 0
         suspect_nodes++
@@ -120,8 +131,8 @@ if command -v sinfo >/dev/null 2>&1; then
         busy_nodes++
       }
       available_cpus += free
-      printf "NODE=%s STATUS=%s STATE=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d LOAD=%.2f MEM_MB=%s PARTITIONS=%s GRES=%s GPUS_TOTAL=%s GPUS_ALLOC=%s GPUS_FREE=%s\n", \
-        node, status, state, total, alloc, free, load, mem, parts, gres, gpu_total_display, gpu_alloc_display, gpu_free
+      printf "NODE=%s STATUS=%s STATE=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d CPUS_UNALLOCATED=%d LOAD=%s LOAD_VALID=%d LOAD_LIMIT=%.2f LOAD_PER_CPU=%s MEM_MB=%s PARTITIONS=%s GRES=%s GPUS_TOTAL=%s GPUS_ALLOC=%s GPUS_FREE=%s\n", \
+        node, status, state, total, alloc, free, unallocated, (load_valid ? sprintf("%.2f",load) : "unknown"), load_valid, load_limit(total), (load_valid && total > 0 ? sprintf("%.3f",load/total) : "unknown"), mem, parts, gres, gpu_total_display, gpu_alloc_display, gpu_free
     }
     END {
       printf "SUMMARY FULLY_IDLE_NODES=%d PARTIAL_NODES=%d BUSY_NODES=%d UNAVAILABLE_NODES=%d SUSPECT_LOAD_NODES=%d FREE_CPUS=%d\n", \
@@ -132,6 +143,11 @@ elif command -v pbsnodes >/dev/null 2>&1; then
   echo "SCHEDULER=PBS/Torque"
   echo "-- node capacity --"
   pbsnodes -a 2>&1 | awk -v now="$(date +%s)" -v max_mom_age="$MOM_MAX_AGE" -v load_threshold="$UNTRACKED_LOAD_THRESHOLD" -v excluded_nodes="$EXCLUDED_NODES" '
+    function load_limit(cpus, limit) {
+      if (load_threshold != "auto") return load_threshold + 0
+      limit = cpus * 0.10
+      return limit > 1 ? limit : 1
+    }
     BEGIN { RS=""; FS="\n" }
     function trim(text) {
       gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
@@ -181,6 +197,7 @@ elif command -v pbsnodes >/dev/null 2>&1; then
       mom_health = "UNKNOWN"
       mom_failure = 0
       load = 0
+      load_valid = 0
       for (line = 2; line <= NF; line++) {
         text = trim($line)
         if (text ~ /^state[[:space:]]*=/) state = rhs(text)
@@ -209,7 +226,7 @@ elif command -v pbsnodes >/dev/null 2>&1; then
           load_text = status_text
           sub(/^.*loadave=/, "", load_text)
           sub(/,.*$/, "", load_text)
-          if (load_text ~ /^[0-9.]+$/) load = load_text + 0
+          if (load_text ~ /^[0-9]+([.][0-9]+)?$/) { load = load_text + 0; load_valid = 1 }
 
           # pbsnodes can retain state=free while the MOM is rejecting requests.
           # Keep explicit failure evidence separate from generic administrative
@@ -230,6 +247,7 @@ elif command -v pbsnodes >/dev/null 2>&1; then
       if (assigned < 0) assigned = count_job_slots(jobs, used)
       free = total - assigned
       if (free < 0) free = 0
+      unallocated = free
 
       lower = tolower(state)
       policy_excluded = is_policy_excluded(node)
@@ -268,7 +286,7 @@ elif command -v pbsnodes >/dev/null 2>&1; then
         status = "SUSPECT_MOM"
         free = 0
         suspect_mom_nodes++
-      } else if (assigned == 0 && lower ~ /free/ && load > load_threshold) {
+      } else if (assigned == 0 && lower ~ /free/ && (!load_valid || load > load_limit(total))) {
         status = "SUSPECT_LOAD"
         free = 0
         suspect_nodes++
@@ -294,8 +312,8 @@ elif command -v pbsnodes >/dev/null 2>&1; then
       gsub(/[[:space:]]+/, "_", note_display)
       if (note_display == "") note_display = "none"
       policy_display = policy_excluded ? "YES" : "NO"
-      printf "NODE=%s STATUS=%s STATE=%s POWER=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d LOAD=%.2f MOM_AGE_SEC=%s MOM_HEALTH=%s POLICY_EXCLUDED=%s MOM_NOTE=%s JOBS=%s GPUS_TOTAL=%s GPUS_ALLOC=%s\n", \
-        node, status, state, power, total, assigned, free, load, mom_display, mom_health, policy_display, note_display, compact_jobs, gpu_total, gpu_assigned
+      printf "NODE=%s STATUS=%s STATE=%s POWER=%s CPUS_TOTAL=%d CPUS_ALLOC=%d CPUS_FREE=%d CPUS_UNALLOCATED=%d LOAD=%s LOAD_VALID=%d LOAD_LIMIT=%.2f LOAD_PER_CPU=%s MOM_AGE_SEC=%s MOM_HEALTH=%s POLICY_EXCLUDED=%s MOM_NOTE=%s JOBS=%s GPUS_TOTAL=%s GPUS_ALLOC=%s\n", \
+        node, status, state, power, total, assigned, free, unallocated, (load_valid ? sprintf("%.2f",load) : "unknown"), load_valid, load_limit(total), (load_valid && total > 0 ? sprintf("%.3f",load/total) : "unknown"), mom_display, mom_health, policy_display, note_display, compact_jobs, gpu_total, gpu_assigned
       if (free > 0) {
         chunk = node ":ppn=" free
         exact_spec = exact_spec == "" ? chunk : exact_spec "+" chunk
