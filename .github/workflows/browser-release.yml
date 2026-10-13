@@ -42,7 +42,21 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - run: python -m unittest discover -s tests -p 'test_*.py'
+      - uses: actions/checkout@v4
+        with:
+          ref: 2cc910feedaed0bd34a0d385b88ff81255a47770
+          path: baseline
+      - name: Full regression against pre-installer baseline
+        shell: bash
+        run: |
+          cp -R dist baseline/dist
+          python packaging/regression.py --baseline baseline --receipt regression-evidence/clean-regression.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clean-regression-evidence
+          path: regression-evidence/*regression.json
+          retention-days: 7
 
   installers:
     needs: regression
@@ -122,6 +136,10 @@ jobs:
           pattern: installer-*
           path: release-assets
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: clean-regression-evidence
+          path: release-assets
       - name: Publish tested installers
         env:
           GH_TOKEN: ${{ github.token }}
