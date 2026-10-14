@@ -11,7 +11,8 @@
     "start": "node scripts/start.mjs",
     "stop": "node scripts/start.mjs stop",
     "restart": "node scripts/start.mjs restart",
-    "status": "node scripts/start.mjs status"
+    "status": "node scripts/start.mjs status",
+    "dev:launcher": "node scripts/create-dev-launcher.mjs"
   },
   "dependencies": {
     "@rjsf/core": "6.11.0",

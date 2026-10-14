@@ -1897,7 +1897,30 @@ def local_setup_save(payload:dict):
 @app.get('/api/sites')
 def site_records():
     from . import site_registration
-    return {'hosts':site_registration.records(),'ssh_aliases':site_registration.ssh_aliases()}
+    return {'hosts':site_registration.records(),'removed_hosts':site_registration.removed_records(),'ssh_aliases':site_registration.ssh_aliases()}
+
+
+@app.post('/api/sites/{alias}/remove-preview')
+def site_remove_preview(alias:str):
+    from . import site_registration
+    try:return site_registration.removal_preview(alias)
+    except (OSError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/sites/{alias}/remove')
+def site_remove(alias:str,payload:dict):
+    from . import site_registration
+    try:
+        if payload.get('confirm') is not True:raise ValueError('请确认移除本机服务器登记')
+        return site_registration.remove(alias,payload.get('revision'))
+    except (OSError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/sites/{alias}/restore')
+def site_restore(alias:str):
+    from . import site_registration
+    try:return site_registration.restore(alias)
+    except (OSError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
 @app.post('/api/sites')

@@ -25,6 +25,9 @@
 - resources/：运行资源与内置扩展；extension-templates/：独立模板。安装校验依赖的 fixture 必须随包提供。
 - tests/：长期回归与小型模拟 fixture。一次性远端验收脚本、原始计时输出放项目外的开发备份目录，交付后从活动区移出。
 - packaging/：一个打包工具，共用依赖锁；macos/windows 仅放各平台启动入口与说明。
+- packaging/icons/：同一个 SVG 标记及 PNG/ICO/ICNS。图标生成器仅用于开发，已生成资源直接随包使用，不增加运行依赖。
+- packaging/macos/dev-launcher/：Mac 开发入口的普通源码模板。`npm run dev:launcher` 只在活动根目录生成一个应用；复制源码进行验收时不复制 `.app`。
+- workspace-data/development-archives/：已完成验收的压缩备份与逐文件校验清单；development-backups/ 只保留当前工作的短回执与必要副本。完成后归档，不保留可被 Mac 索引的应用备份。
 - docs/：按功能保存说明与验收，历史交接进入 history；当前 CHECKPOINT 保持短小。
 - workspace-data/ 与 fpilot.local.json：机器数据与配置，不进入软件分享包。大数据、环境和 node_modules 不复制到隔离开发目录。
 

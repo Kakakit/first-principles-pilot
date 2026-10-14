@@ -275,6 +275,9 @@ def action(value, name):
 
 
 def main(argv=None):
+    if sys.platform=='win32':
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('org.fpilot.workbench')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--serve', action='store_true')
     parser.add_argument('--stop', action='store_true')

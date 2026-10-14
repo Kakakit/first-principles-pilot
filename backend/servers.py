@@ -35,7 +35,7 @@ DEFAULT = {'alias':'jutai-1', 'name':'FP_VASP', 'queue':'batch', 'walltime':'01:
            'pmi_library':'','pmi_type':''}
 
 
-def load_registry(path=None):
+def load_registry(path=None, include_removed=False):
     """Read the local cluster registry without contacting or changing a host."""
     registry_path = Path(path or REGISTRY_PATH)
     if path is None and not registry_path.exists():
@@ -47,8 +47,15 @@ def load_registry(path=None):
     if not isinstance(value, dict) or not isinstance(value.get('hosts'), dict):
         raise ValueError('集群登记表缺少 hosts 对象')
     if path is None:
-        from .site_registration import records
-        value={**value,'hosts':{**value['hosts'],**records()}}
+        from .site_registration import records, removed_records
+        removed=removed_records()
+        hosts={**value['hosts'],**records()}
+        if include_removed:
+            for alias,record in removed.items():
+                snapshot=record.get('host_snapshot') or record.get('host')
+                if snapshot is not None:hosts[alias]=snapshot
+        else:hosts={k:v for k,v in hosts.items() if k not in removed}
+        value={**value,'hosts':hosts}
     return value
 
 
@@ -362,6 +369,9 @@ def runtime_config(config):
 def read_config():
     path = ROOT/'server-config.json'
     config=json.loads(path.read_text()) if path.exists() else default_config()
+    removed_alias=None
+    if config.get('alias') not in load_registry()['hosts']:
+        removed_alias=config.get('alias');config=default_config()
     latest=None
     for probe_path in sorted((ROOT/'server-probes').glob('*'),key=lambda p:p.stat().st_mtime,reverse=True):
         raw=probe_path.read_bytes()
@@ -369,7 +379,7 @@ def read_config():
         report=json.loads(raw)
         if runtime_config(report['config'])==runtime_config(config):
             latest=dict(report,id=probe_path.name);break
-    return {'config':config, 'saved':path.exists(),'probe':latest,
+    return {'config':config, 'saved':path.exists() and removed_alias is None,'probe':latest,'removed_alias':removed_alias,
             'registered_profiles':registered_profiles()}
 
 

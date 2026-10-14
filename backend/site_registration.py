@@ -1,11 +1,15 @@
 """Machine-local SSH aliases and runtime paths, without inherited run evidence."""
-import glob,json,re,shlex,subprocess
+import glob,hashlib,json,re,shlex,sqlite3,subprocess
+from contextlib import contextmanager, closing
+from contextvars import ContextVar
+from datetime import datetime, timezone
 from pathlib import Path
 from .storage import ROOT
 from .execution_control import write_json
 
 ALIAS = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}')
 _RESOLVED = {}
+_HOST_HELD=ContextVar('site_operation_locks',default=frozenset())
 
 
 def ssh_config_files():
@@ -35,12 +39,96 @@ def connection_identity(alias):
     return _RESOLVED[key][1]
 
 
-def records():
+def registry():
     path=ROOT/'site-registry.json'
-    return json.loads(path.read_text(encoding='utf-8')).get('hosts',{}) if path.exists() else {}
+    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'schema':'fpilot.site-registry.v1','hosts':{}}
+
+
+def records():
+    return registry().get('hosts',{})
+
+
+def removed_records():
+    return registry().get('removed_hosts',{})
+
+
+@contextmanager
+def registry_operation():
+    from .platform_runtime import exclusive_lock
+    ROOT.mkdir(parents=True,exist_ok=True)
+    with exclusive_lock(ROOT/'site-registry.lock') as acquired:
+        if not acquired:raise ValueError('正在更新服务器登记，请稍后重试')
+        yield
+
+
+@contextmanager
+def host_operation(alias):
+    from .platform_runtime import exclusive_lock
+    if not isinstance(alias,str) or not ALIAS.fullmatch(alias):raise ValueError('SSH 别名无效')
+    identity=(str(ROOT),alias);owned=_HOST_HELD.get()
+    if identity in owned:
+        yield;return
+    base=ROOT/'site-operation-locks';base.mkdir(parents=True,exist_ok=True)
+    with exclusive_lock(base/(alias+'.lock')) as acquired:
+        if not acquired:
+            from .attempt_operations import AttemptBusy
+            raise AttemptBusy('服务器正在派发或更新登记，请稍后重试')
+        token=_HOST_HELD.set(owned|{identity})
+        try:yield
+        finally:_HOST_HELD.reset(token)
+
+
+def removal_preview(alias):
+    from . import servers
+    host=servers.load_registry()['hosts'].get(alias)
+    if host is None:raise ValueError('服务器未登记或已移除')
+    attempts=[];path=ROOT/'execution.sqlite3'
+    if path.exists():
+        with closing(sqlite3.connect(path.as_uri()+'?mode=ro',uri=True)) as db:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='attempts'").fetchone():
+                for row in db.execute('SELECT body FROM attempts'):
+                    record=json.loads(row[0])
+                    if (record.get('config') or {}).get('alias')==alias:
+                        attempts.append({'id':record['id'],'state':record['state'],'job_id':record.get('job_id')})
+    revision=hashlib.sha256(json.dumps(host,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+    return {'alias':alias,'revision':revision,'attempts':attempts,
+            'blocked':any(a['state']=='DISPATCHING' for a in attempts),
+            'note':'仅移除本机登记；远端作业、目录、SSH 配置、历史和脚本保留。恢复前不能在该服务器派发新任务。'}
+
+
+def remove(alias, revision):
+    with host_operation(alias),registry_operation():
+        preview=removal_preview(alias)
+        if preview['blocked']:raise ValueError('存在正在派发的任务，请等待提交回执完成后再移除')
+        if preview['revision']!=revision:raise ValueError('服务器登记已变化，请重新预览')
+        value=registry();local=value.setdefault('hosts',{}).pop(alias,None)
+        from . import servers
+        snapshot=servers.load_registry()['hosts'][alias]
+        value.setdefault('removed_hosts',{})[alias]={'host':local,'host_snapshot':snapshot,'removed_at':datetime.now(timezone.utc).isoformat()}
+        write_json(ROOT/'site-registry.json',value)
+    return status()
+
+
+def restore(alias):
+    with host_operation(alias),registry_operation():
+        value=registry();removed=value.setdefault('removed_hosts',{}).pop(alias,None)
+        if removed is None:raise ValueError('没有可恢复的服务器登记')
+        if removed.get('host') is not None:value.setdefault('hosts',{})[alias]=removed['host']
+        write_json(ROOT/'site-registry.json',value)
+    return status()
+
+
+def status():
+    from . import servers
+    return {**servers.read_config(),'removed_hosts':removed_records()}
 
 
 def register(value):
+    with host_operation(value.get('alias')),registry_operation():
+        return _register(value)
+
+
+def _register(value):
     alias=value.get('alias','')
     if not isinstance(alias,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}',alias):raise ValueError('请输入 SSH config 中的明确别名，只允许英文、数字、点、横线与下划线')
     if alias not in ssh_aliases():
@@ -70,11 +158,12 @@ def register(value):
         'registration_evidence':'USER_CONFIGURATION_ONLY','program_validation':'NOT_PERFORMED'}
     if script_mode:host['runtime_source']='script'
     from . import servers
-    current=servers.load_registry()['hosts'].get(alias)
+    current=servers.load_registry(include_removed=True)['hosts'].get(alias)
     if current and current.get('status')!='USER_CONFIGURED':raise ValueError('内置服务器原记录保留；请使用另一个 SSH 别名，或在运行时设置中修改本次配置')
     path=ROOT/'site-registry.json';previous=path.read_bytes() if path.exists() else None
-    sites=records();sites[alias]=host
-    write_json(path,{'schema':'fpilot.site-registry.v1','hosts':sites})
+    registry_value=registry();registry_value.setdefault('hosts',{})[alias]=host
+    registry_value.setdefault('removed_hosts',{}).pop(alias,None)
+    write_json(path,registry_value)
     try:
         config=servers.select_profile(alias);config['remote_workspace_root']=remote_root
         servers.save_config(config)

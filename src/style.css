@@ -886,3 +886,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .node-type-dialog th,.node-type-dialog td{text-align:left;padding:8px;border-bottom:1px solid var(--color-border)}
 .node-type-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
 .flow-check-results{max-height:60vh;padding:0}
+.band-edge-summary{padding:16px;border:1px solid var(--color-border);border-radius:12px;margin:16px 0;background:var(--color-surface)}
+.band-edge-summary h4{margin:0 0 12px}.band-edge-values{display:flex;flex-wrap:wrap;gap:18px 36px}
+.band-edge-values>div{display:flex;flex-direction:column;gap:4px}.band-edge-values strong{font-size:24px;font-variant-numeric:tabular-nums}
+.server-registration-actions{display:grid;gap:12px;margin-top:12px}.server-registration-actions details{overflow-wrap:anywhere}

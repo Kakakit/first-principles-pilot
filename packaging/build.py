@@ -5,6 +5,10 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES={'launch.py':'launch.py','scripts/watch_execution.py':'scripts/watch_execution.py',
        'scripts/collect_diagnostics.py':'scripts/collect_diagnostics.py',
+       'packaging/icons/fpilot.ico':'branding/fpilot.ico',
+       'packaging/icons/fpilot.icns':'branding/fpilot.icns',
+       'packaging/icons/fpilot.png':'branding/fpilot.png',
+       'packaging/icons/fpilot.svg':'branding/fpilot.svg',
        'packaging/requirements-runtime.txt':'requirements-runtime.txt'}
 PLATFORMS={
     'windows':{'target':'Windows 10/11 x64; CPython 3.11','archive':'FPilot-Windows-Test-20261004-r2.zip',

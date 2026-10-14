@@ -59,7 +59,9 @@ def _options(alias):
 
 def _interpreter(alias):
     from .servers import load_registry
-    host = load_registry()['hosts'].get(alias, {})
+    # Removed aliases cannot be dispatched, but their exact historical runtime
+    # remains available for status/file reads through frozen attempt identities.
+    host = load_registry(include_removed=True)['hosts'].get(alias, {})
     python = host.get('python', {})
     value = python.get('known_interpreter') or next(iter(python.get('known_interpreters', [])), None)
     if not isinstance(value, str) or not value.startswith('/'):

@@ -132,11 +132,12 @@ def package_mac(app, version, output, target):
     (contents / 'MacOS').mkdir(parents=True)
     (contents / 'Resources').mkdir()
     shutil.move(str(app), str(contents / 'Resources/FPilot'))
+    shutil.copyfile(contents/'Resources/FPilot/branding/fpilot.icns',contents/'Resources/fpilot.icns')
     import plistlib
     with (contents / 'Info.plist').open('wb') as f:
         plistlib.dump({'CFBundleExecutable':'launcher', 'CFBundleIdentifier':'org.fpilot.workbench',
             'CFBundleName':'First Principles Pilot', 'CFBundleDisplayName':'First Principles Pilot',
-            'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':version.split('-')[0],
+            'CFBundlePackageType':'APPL', 'CFBundleIconFile':'fpilot.icns', 'CFBundleShortVersionString':version.split('-')[0],
             'CFBundleVersion':'1101', 'LSMinimumSystemVersion':'11.0', 'NSHighResolutionCapable':True}, f)
     launcher = contents / 'MacOS/launcher'
     launcher.write_text('#!/bin/sh\nAPP_PATH="$(CDPATH= cd -- "$(dirname -- "$0")/../Resources/FPilot" && pwd)"\nexec "$APP_PATH/python/bin/python3" -X utf8 "$APP_PATH/scripts/installed_launcher.py"\n')

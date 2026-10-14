@@ -50,9 +50,15 @@ def serialized_submit(function):
         record = execution.get(key)
         try:
             from .project_sync import dispatch_guard
+            from .site_registration import host_operation, removed_records
             with dispatch_guard(record):
                 with locked({key} | source_ids(record)):
-                    return function(key, *args, **kwargs)
+                    alias=(record.get('config') or {}).get('alias')
+                    if record['state'] != 'PREPARED' or not alias:return function(key, *args, **kwargs)
+                    with host_operation(alias):
+                        if alias in removed_records():
+                            raise ValueError('服务器登记已移除，请先在设置中恢复；未派发任务')
+                        return function(key, *args, **kwargs)
         except AttemptBusy:
             # Keep an authorized PREPARED task waiting; a brief read-only preview
             # must not turn an unrelated chain into BLOCKED or dispatch twice.

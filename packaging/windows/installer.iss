@@ -29,6 +29,8 @@ CloseApplications=no
 RestartApplications=no
 UninstallDisplayName=First Principles Pilot
 SetupMutex=FirstPrinciplesPilotInstaller
+SetupIconFile={#RuntimeDir}\branding\fpilot.ico
+UninstallDisplayIcon={app}\branding\fpilot.ico
 
 [Languages]
 Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
@@ -41,11 +43,11 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: checkedonce
 Source: "{#RuntimeDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\First Principles Pilot"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"""; WorkingDir: "{app}"
-Name: "{group}\停止工作台"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"" --stop"; WorkingDir: "{app}"
-Name: "{group}\导出启动诊断"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"" --diagnostics"; WorkingDir: "{app}"
-Name: "{autodesktop}\First Principles Pilot"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"""; WorkingDir: "{app}"; Tasks: desktopicon
-Name: "{group}\卸载 First Principles Pilot"; Filename: "{uninstallexe}"
+Name: "{group}\First Principles Pilot"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"""; WorkingDir: "{app}"; IconFilename: "{app}\branding\fpilot.ico"; AppUserModelID: "org.fpilot.workbench"
+Name: "{group}\停止工作台"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"" --stop"; WorkingDir: "{app}"; IconFilename: "{app}\branding\fpilot.ico"; AppUserModelID: "org.fpilot.workbench"
+Name: "{group}\导出启动诊断"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"" --diagnostics"; WorkingDir: "{app}"; IconFilename: "{app}\branding\fpilot.ico"; AppUserModelID: "org.fpilot.workbench"
+Name: "{autodesktop}\First Principles Pilot"; Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"""; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\branding\fpilot.ico"; AppUserModelID: "org.fpilot.workbench"
+Name: "{group}\卸载 First Principles Pilot"; Filename: "{uninstallexe}"; IconFilename: "{app}\branding\fpilot.ico"; AppUserModelID: "org.fpilot.workbench"
 
 [Run]
 Filename: "{app}\python\pythonw.exe"; Parameters: "-X utf8 ""{app}\scripts\installed_launcher.py"""; Description: "打开 First Principles Pilot"; Flags: nowait postinstall skipifsilent

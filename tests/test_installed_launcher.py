@@ -23,6 +23,22 @@ launch=module('installed_backend','launch.py')
 
 
 class InstalledLauncherTests(unittest.TestCase):
+    def test_platform_icons_are_valid_and_macos_bundle_carries_resource(self):
+        from PIL import Image
+        import plistlib
+        for extension in ('png','ico','icns'):
+            with Image.open(ROOT/'packaging/icons'/('fpilot.'+extension)) as image:
+                image.load();self.assertGreaterEqual(min(image.size),256)
+                if extension=='ico':self.assertIn((16,16),image.ico.sizes());self.assertIn((256,256),image.ico.sizes())
+        with tempfile.TemporaryDirectory() as tmp:
+            output=Path(tmp);app=output/'FPilot';(app/'branding').mkdir(parents=True)
+            import shutil
+            shutil.copyfile(ROOT/'packaging/icons/fpilot.icns',app/'branding/fpilot.icns')
+            (output/'build.json').write_text('{}')
+            with patch.object(builder,'run'):builder.package_mac(app,'1.1.0-beta.1',output,'macos-arm64')
+            contents=output/'dmg/First Principles Pilot.app/Contents'
+            info=plistlib.loads((contents/'Info.plist').read_bytes())
+            self.assertEqual((contents/'Resources'/info['CFBundleIconFile']).read_bytes(),(ROOT/'packaging/icons/fpilot.icns').read_bytes())
     @unittest.skipIf(os.name=='nt','POSIX TIME_WAIT reuse policy')
     def test_closed_listener_port_is_reusable_but_live_listener_is_not(self):
         with socket.socket() as listener:
