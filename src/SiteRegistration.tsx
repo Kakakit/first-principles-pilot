@@ -55,7 +55,7 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
       <div className="submit-grid"><label>调度器<select value={form.scheduler} onChange={e=>field('scheduler',e.target.value)}><option value="pbs">PBS / Torque</option><option value="slurm">Slurm</option></select></label>
         <label>运行方式<select value={form.runtime_source} onChange={e=>field('runtime_source',e.target.value)}><option value="script">导入可用任务脚本（推荐）</option><option value="registered">高级：填写程序和环境路径</option></select></label>
         <label>{form.scheduler==='pbs'?'队列':'分区'}{form.runtime_source==='script'?'（可由脚本填写）':''}<input value={form.queue} onChange={e=>field('queue',e.target.value)}/></label>
-        <label>服务器工作区根目录<input value={form.remote_workspace_root} onChange={e=>field('remote_workspace_root',e.target.value)}/></label></div>
+        <label>新计算的工作区根目录<input value={form.remote_workspace_root} onChange={e=>field('remote_workspace_root',e.target.value)}/></label></div>
       <p>任务将保存在此根目录内的 <code>material-projects/项目目录名/</code>。支持 $HOME/fpilot、包含 fpilot 的专用绝对目录及原登记工作区。原有服务器使用自己的已保存目录。</p>
       <details open={form.runtime_source==='registered'||Boolean(connection?.connected&&!connection.python)}><summary>高级路径与服务器 Python</summary>
         <p>连接测试会发现服务器已有 Python 3.8+，供软件查询与传输使用；这与任务脚本中的计算环境分别配置。</p>

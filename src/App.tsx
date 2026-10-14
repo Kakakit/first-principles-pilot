@@ -62,7 +62,7 @@ export default function App() {
   const [storageError,setStorageError]=useState(initial.error);
   const disk=useDiskWorkspace(workspace,setWorkspace,storageError);const saveState=disk.status;
   const [syncReadOnly,setSyncReadOnly]=useState(false);
-  useEffect(()=>{let active=true;const update=()=>{requestJson(`/api/projects/${workspace.activeId}/sync`).then(s=>{if(active)setSyncReadOnly(Boolean(s.local&&s.local.mode!=='ACTIVE'));}).catch(()=>{});};setSyncReadOnly(false);update();window.addEventListener('fpilot:project-sync-changed',update);return()=>{active=false;window.removeEventListener('fpilot:project-sync-changed',update);};},[workspace.activeId]);
+  useEffect(()=>{let active=true;const update=()=>{requestJson(`/api/projects/${workspace.activeId}/sync`).then(s=>{if(active)setSyncReadOnly(Boolean(s.draft_read_only??(s.local&&s.local.mode!=='ACTIVE')));}).catch(()=>{});};setSyncReadOnly(false);update();window.addEventListener('fpilot:project-sync-changed',update);return()=>{active=false;window.removeEventListener('fpilot:project-sync-changed',update);};},[workspace.activeId]);
   const [selected,setSelected]=useState<string|null>(initial.workspace.projects[0].nodes[1]?.id??null);
   const [canvasSelectedIds,setCanvasSelectedIds]=useState<string[]>([]);
   const [datasetFocus,setDatasetFocus]=useState('');

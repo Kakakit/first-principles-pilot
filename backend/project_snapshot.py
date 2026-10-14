@@ -221,7 +221,9 @@ def migrate(value, old_root, new_root):
         # Bodies are JSON strings. Keep the DB format while mapping local paths.
         if value.startswith('{') or value.startswith('['):
             try:
-                return json.dumps(migrate(json.loads(value), old_root, new_root), ensure_ascii=False, sort_keys=True)
+                parsed=json.loads(value)
+                changed=migrate(parsed,old_root,new_root)
+                return value if changed==parsed else json.dumps(changed,ensure_ascii=False,sort_keys=True)
             except ValueError:
                 pass
         return value
@@ -233,7 +235,7 @@ def migrate(value, old_root, new_root):
 
 
 def validate(manifest, objects):
-    if manifest.get('schema') != SCHEMA:
+    if manifest.get('schema') not in (SCHEMA,'fpilot.project-snapshot.v2'):
         raise ValueError('快照版本不支持')
     project = manifest['project']
     validate_workspace({'projects': [project], 'activeId': project['id']})
@@ -262,7 +264,7 @@ def validate(manifest, objects):
         raise ValueError('快照附件超过大小上限')
 
 
-def restore(root, manifest, objects, expected_revision):
+def restore(root, manifest, objects, expected_revision, pause_automatic=False):
     """Caller holds the project gate and saves an immutable local backup first."""
     root = Path(root).resolve()
     validate(manifest, objects)
@@ -342,7 +344,9 @@ def restore(root, manifest, objects, expected_revision):
                     value = migrate(json.loads(raw), manifest['origin_root'], str(root))
                     if relative.startswith(('analyses/', 'analyses-v2/', 'plots/')) and Path(relative).name == 'analysis.json':
                         state = value.get('state')
-                        if state in ('QUEUED', 'WAIT_RESOURCE') or (value.get('location') == 'local' and state in ('RUNNING', 'DISPATCHING')):
+                        if pause_automatic and state in ('QUEUED','WAIT_RESOURCE'):
+                            value.update(state='PAUSED',snapshot_origin_state=state,snapshot_pause_reason='跨设备快照传输')
+                        elif state in ('QUEUED', 'WAIT_RESOURCE') or (value.get('location') == 'local' and state in ('RUNNING', 'DISPATCHING')):
                             value.update(state='UNKNOWN', sync_origin_state=state, error='原设备分析尚未完成；接续只保留证据，不自动重新执行')
                     if Path(relative).name in ('analysis.json', 'record.json'):
                         missing = {v['path']: v['reason'] for v in manifest['missing']}

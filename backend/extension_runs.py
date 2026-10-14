@@ -444,6 +444,7 @@ def _remote(record):
 
 def _execute(key):
     from .project_sync import dispatch_guard, locally_executable, SyncStopped
+    from .attempt_operations import AttemptBusy
     if inactive('analyses',key):return
     with lock(key) as owned:
         if not owned:return
@@ -452,9 +453,11 @@ def _execute(key):
         if not locally_executable(record.get('project_id')):return
         try:
             with dispatch_guard(record):
+                record=get(key)
+                if record['state'] not in ('QUEUED','WAIT_RESOURCE'):return
                 if record['location']=='local':_local(record)
                 else:_remote(record)
-        except SyncStopped:
+        except (SyncStopped,AttemptBusy):
             return  # Retain the queued analysis; ownership never becomes retry authority.
         except Exception as exc:
             # A submission timeout is uncertainty, not a reason to resubmit.

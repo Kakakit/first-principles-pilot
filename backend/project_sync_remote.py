@@ -16,11 +16,16 @@ from pathlib import Path
 
 def run(root, request, payload=b''):
     root = Path(root).expanduser()
-    if not root.is_absolute() or not root.is_dir():
+    lightweight=bool(request.get('snapshot_directory'))
+    if not root.is_absolute() or (not lightweight and not root.is_dir()) or (root.exists() and not root.is_dir()):
         raise ValueError('登记工作区不存在')
     if any(p.is_symlink() for p in [root, *root.parents]):
         raise ValueError('同步目录不能经过符号链接')
-    base = root / '.fpilot' / 'project-sync'
+    if lightweight:
+        ancestor=root
+        while not ancestor.exists():ancestor=ancestor.parent
+        if not ancestor.is_dir() or not os.access(ancestor,os.W_OK):raise ValueError('快照目录或最近存在的父目录不可写')
+    base = root if lightweight else root / '.fpilot' / 'project-sync'
     if base.is_symlink() or base.parent.is_symlink():
         raise ValueError('同步目录含符号链接')
     action = request['action']
@@ -145,7 +150,7 @@ def run(root, request, payload=b''):
             path = directory / 'objects' / entry['sha256']
             if path.is_symlink() or not path.is_file() or path.stat().st_size != entry['size'] or hashlib.sha256(path.read_bytes()).hexdigest() != entry['sha256']:
                 raise ValueError('附件缺失或损坏；未发布快照')
-        state.update(version=sha, owner=None, generation=state['generation'] + 1,
+        state.update(version=sha, owner=state.get('owner') if manifest.get('schema')=='fpilot.project-snapshot.v2' else None, generation=state['generation'] + 1,
                      name=manifest['project']['name'], counts=manifest['counts'], updated_at=request['at'], uploader=request['device'])
         versions = directory / 'versions'
         if versions.is_symlink():

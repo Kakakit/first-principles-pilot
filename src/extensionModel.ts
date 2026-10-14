@@ -9,7 +9,7 @@ export function defaults(schema:Record<string,any>):any {
  return undefined;
 }
 export const runningAnalysis=(state:string)=>['QUEUED','RUNNING','DISPATCHING','SUBMITTED','WAIT_RESOURCE'].includes(state);
-export const analysisLabel=(state:string)=>({QUEUED:'等待本机执行',RUNNING:'分析中',DISPATCHING:'准备远端分析',SUBMITTED:'已提交，等待结束证据',WAIT_RESOURCE:'等待资源',UNKNOWN:'状态待核对',COMPLETED:'分析程序完成',NOT_APPLICABLE:'输入不适用',FAILED:'分析失败'}[state]||state);
+export const analysisLabel=(state:string)=>({PAUSED:'已暂停，等待手动继续',QUEUED:'等待本机执行',RUNNING:'分析中',DISPATCHING:'准备远端分析',SUBMITTED:'已提交，等待结束证据',WAIT_RESOURCE:'等待资源',UNKNOWN:'状态待核对',COMPLETED:'分析程序完成',NOT_APPLICABLE:'输入不适用',FAILED:'分析失败'}[state]||state);
 export const manageExtensions=()=>window.dispatchEvent(new Event('fpilot:manage-extensions'));
 export type EnvironmentDoctor={ready:boolean;python?:string;python_version?:string;version?:string;versions?:Record<string,string>;missing?:string[];reason?:string};
 export type PythonRuntime={python:string;inherited?:boolean;alias?:string;scope?:string};

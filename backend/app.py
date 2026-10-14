@@ -25,9 +25,9 @@ def sync_hosts():
 
 
 @app.get('/api/project-sync/catalog')
-def sync_catalog(alias: str):
+def sync_catalog(alias: str, snapshot_directory: str = None):
     from . import project_sync
-    try:return project_sync.catalog(alias)
+    try:return project_sync.catalog(alias, snapshot_directory)
     except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
 
 
@@ -39,16 +39,16 @@ def sync_status(project_id: str, check: bool = False):
 
 
 @app.get('/api/projects/{project_id}/sync/versions')
-def sync_versions(project_id: str, alias: str):
+def sync_versions(project_id: str, alias: str, snapshot_directory: str = None):
     from . import project_sync
-    try:return project_sync.versions(project_id, alias)
+    try:return project_sync.versions(project_id, alias, snapshot_directory)
     except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
 
 
 @app.post('/api/projects/{project_id}/sync/preview')
 def sync_preview(project_id: str, payload: dict):
     from . import project_sync
-    try:return project_sync.preview(project_id, payload['alias'], payload['direction'], payload.get('version'))
+    try:return project_sync.preview(project_id, payload['alias'], payload['direction'], payload.get('version'), payload.get('snapshot_directory'))
     except (ValueError, OSError, KeyError) as exc:raise HTTPException(422, str(exc)) from exc
 
 
@@ -71,6 +71,36 @@ def sync_refresh(project_id: str):
     from . import project_sync
     try:return project_sync.refresh(project_id)
     except (ValueError, OSError) as exc:raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/projects/{project_id}/sync/convert')
+def snapshot_convert(project_id: str):
+    from .snapshot_sync import convert
+    try:return convert(project_id)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/projects/{project_id}/sync/location')
+def snapshot_location(project_id: str, payload: dict):
+    from .snapshot_sync import remember
+    try:return remember(project_id,payload['alias'],payload['snapshot_directory'])
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/analyses/{analysis_id}/resume')
+def resume_paused_analysis(analysis_id: str):
+    from . import extension_runs
+    from .project_sync import project_lock
+    try:
+        record=extension_runs.get(analysis_id)
+        with project_lock(record['project_id']), extension_runs.lock(analysis_id) as owned:
+            if not owned:raise ValueError('分析正在执行，请稍后重试')
+            record=extension_runs.get(analysis_id)
+            if record['state']!='PAUSED' or record.get('submission_started'):raise ValueError('只可继续尚未启动的暂停分析')
+            record['state']='QUEUED';extension_runs.save(record)
+        extension_runs.schedule(analysis_id)
+        return extension_runs.get(analysis_id)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
 @app.get('/api/problem-records')

@@ -54,13 +54,18 @@ def registered(alias):
 def remote(config, action, pid=None, data=b'', **values):
     from .remote_transport import _interpreter
     source = Path(__file__).with_name('project_sync_remote.py').read_text()
-    command = shlex.quote(_interpreter(config['alias'])) + ' -c ' + shlex.quote(source) + ' ' + remote_paths.shell_path(config['root'])
+    from .snapshot_sync import shell_directory
+    path=shell_directory(config['root']) if config.get('snapshot_directory') else remote_paths.shell_path(config['root'])
+    command = shlex.quote(_interpreter(config['alias'])) + ' -c ' + shlex.quote(source) + ' ' + path
     request = {'action': action, **values}
+    if config.get('snapshot_directory'):request['snapshot_directory']=True
     if pid is not None:request['project_id'] = pid
     receipt = ex.ssh(config['alias'], command, snapshot.packed(request) + b'\n' + data,
                      timeout=180, stdout_limit=4 * 1024 * 1024, mutating=action not in ('status', 'catalog', 'missing', 'get', 'attempt', 'versions'))
     if receipt.get('exit_code') is None or receipt.get('stdout_truncated'):
-        raise SyncStopped('SSH 回执不明，已停止派发；请先核查同步状态')
+        from .execution_control import redact
+        detail=redact(receipt.get('stderr',''))[-600:]
+        raise SyncStopped('SSH 回执不明，请核查原地址；未确认的传输不要重复执行'+('：'+detail if detail else ''))
     try:
         value = json.loads(receipt.get('stdout', ''))
     except ValueError:
@@ -98,6 +103,9 @@ identity must be checked afresh before permitting that difference.
     if saved == current:return True
     for path in (ex.ROOT / 'project-sync').glob('*.json'):
         value = json.loads(path.read_bytes())
+        if value.get('transfer_mode')=='snapshot' and value.get('imported'):
+            known=value.get('calculation_connections',{}).get(alias,[])
+            if saved in known and {k:v for k,v in saved.items() if k!='identityfile'}=={k:v for k,v in current.items() if k!='identityfile'}:return True
         binding = value.get('servers', {}).get(alias)
         if value.get('imported') and binding:
             fact = remote(registered(alias), 'status', 'connection-verification')['server']
@@ -122,6 +130,20 @@ def dispatch_guard(record):
         value = local(pid)
         if not value:
             yield;return  # Projects never opted into sync retain existing behavior.
+        if value.get('transfer_mode')=='snapshot':
+            if not locally_executable(pid):raise SyncStopped('快照操作回执待核验，自动流程保持暂停')
+            # A worker may have passed its state check before this lock was
+            # acquired. Recheck the owning plan here, immediately before dispatch.
+            from contextlib import closing
+            from .attempt_operations import AttemptBusy
+            with closing(ex.db()) as db:
+                for field,table in (('chain_run_id','chain_runs'),('scan_batch_id','scan_batches')):
+                    if not record.get(field):continue
+                    row=db.execute('SELECT body FROM '+table+' WHERE id=?',(record[field],)).fetchone()
+                    plan=json.loads(row[0]) if row else None
+                    if plan and plan.get('state')=='PAUSED' and plan.get('snapshot_pause_reason'):
+                        raise AttemptBusy('该自动流程已因快照传输暂停，请通过原入口手动继续')
+            yield;return
         if value.get('mode') != 'ACTIVE':
             raise SyncStopped('项目已交接或回执待核验；本机只能查看和刷新')
         token = uuid.uuid4().hex
@@ -164,7 +186,7 @@ def hosts():
 def locally_executable(pid):
     if not pid:return True
     value = local(pid)
-    return value is None or value.get('mode') == 'ACTIVE'
+    return value is None or (value.get('mode') in ('ACTIVE','SNAPSHOT') and not value.get('restore_required'))
 
 
 def assert_draft_edits(root, workspace):
@@ -173,8 +195,9 @@ def assert_draft_edits(root, workspace):
     for project in workspace['projects']:
         path = Path(root) / 'project-sync' / (snapshot.digest(project['id'].encode()) + '.json')
         if path.exists() and project['id'] in old:
-            mode = json.loads(path.read_bytes()).get('mode')
-            if mode != 'ACTIVE' and snapshot.packed(project) != snapshot.packed(old[project['id']]):
+            value=json.loads(path.read_bytes());mode=value.get('mode')
+            writable=(mode in ('ACTIVE','SNAPSHOT') or (value.get('transfer_mode')=='snapshot' and mode=='STOPPED' and not value.get('restore_started'))) and not value.get('restore_required')
+            if not writable and snapshot.packed(project) != snapshot.packed(old[project['id']]):
                 raise ValueError('项目已交接或正在核验，草稿只读；请先下载并接管')
 
 
@@ -195,12 +218,14 @@ def draft_gate(root, workspace):
         yield
 
 
-def catalog(alias):
-    return remote(registered(alias), 'catalog')
+def catalog(alias, snapshot_directory=None):
+    from .snapshot_sync import location
+    return remote(location(alias,snapshot_directory) if snapshot_directory is not None else registered(alias), 'catalog')
 
 
-def versions(pid, alias):
-    return remote(registered(alias), 'versions', pid)
+def versions(pid, alias, snapshot_directory=None):
+    from .snapshot_sync import location
+    return remote(location(alias,snapshot_directory) if snapshot_directory is not None else registered(alias), 'versions', pid)
 
 
 def status(pid, check=False):
@@ -208,9 +233,16 @@ def status(pid, check=False):
     attempts = ex.history(pid, limit=1)
     result = {'device': device(), 'local': value, 'pending': None,
               'default_alias': attempts[0].get('config', {}).get('alias') if attempts else servers.read_config().get('alias')}
+    result['needs_conversion']=bool(value and value.get('transfer_mode')!='snapshot')
+    result['draft_read_only']=bool(value and (value.get('restore_required') or (value.get('mode') not in ('ACTIVE','SNAPSHOT') and not (value.get('transfer_mode')=='snapshot' and value.get('mode')=='STOPPED' and not value.get('restore_started')))))
+    preference=ex.ROOT/'project-sync/locations'/(snapshot.digest(pid.encode())+'.json')
+    if preference.exists():result['location']=json.loads(preference.read_bytes())
     if value:
         try:
-            manifest, _ = snapshot.capture(ex.ROOT, pid)
+            if value.get('transfer_mode')=='snapshot':
+                from .snapshot_sync import capture
+                manifest,_=capture(pid)
+            else:manifest, _ = snapshot.capture(ex.ROOT, pid)
             result['pending'] = snapshot.fingerprint(manifest) != value.get('fingerprint')
         except ValueError as exc:result['local_error'] = str(exc)
         if check:
@@ -236,7 +268,10 @@ def get_object(config, pid, sha):
     return bytes(raw)
 
 
-def preview(pid, alias, direction, version=None):
+def preview(pid, alias, direction, version=None, snapshot_directory=None):
+    if snapshot_directory is not None:
+        from .snapshot_sync import preview as snapshot_preview
+        return snapshot_preview(pid,alias,direction,snapshot_directory,version)
     with project_lock(pid):
         config = registered(alias)
         existing = local(pid)
@@ -299,6 +334,9 @@ def transfer(pid, preview_id, choose_server=False):
     info = json.loads(path.read_bytes())
     if info['project_id'] != pid or (datetime.now(timezone.utc) - datetime.fromisoformat(info['created_at'])).total_seconds() > 600:
         raise ValueError('同步预览已过期，请重新预览')
+    if info.get('transfer_mode')=='snapshot':
+        from .snapshot_sync import transfer as snapshot_transfer
+        return snapshot_transfer(pid,path,info,choose_server)
     with project_lock(pid):
         current = WorkspaceStore(ex.ROOT).read()
         if current['revision'] != info['workspace_revision']:
@@ -372,6 +410,9 @@ def transfer(pid, preview_id, choose_server=False):
 
 
 def recover(pid):
+    if (local(pid) or {}).get('transfer_mode')=='snapshot':
+        from .snapshot_sync import recover as snapshot_recover
+        return snapshot_recover(pid)
     with project_lock(pid):
         value = local(pid)
         if not value:raise ValueError('项目尚未登记同步')
@@ -413,9 +454,9 @@ def refresh(pid):
     for row in manifest['tables'].get('attempts', []):
         record = json.loads(row['body'])
         try:
-            config = registered(record['config']['alias'])
+            config = {'alias':record['config']['alias'],'root':record.get('remote_workspace_root_abs') or record.get('remote_workspace_root') or registered(record['config']['alias'])['root']}
             fact = remote(config, 'status', pid)
-            binding = (local(pid) or {}).get('servers', {}).get(config['alias'])
+            binding = (local(pid) or {}).get('servers', {}).get(config['alias']) if (local(pid) or {}).get('transfer_mode')!='snapshot' else None
             if binding:verify_server({'server': binding}, fact['server'])
             elif record.get('remote_workspace_root_abs') and record['remote_workspace_root_abs'] != fact['server']['root']:
                 raise ValueError('登记目录与原任务根目录不符')
