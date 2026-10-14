@@ -12,7 +12,7 @@ from .storage import ROOT
 from . import servers
 
 FIELDS = ('name', 'queue', 'node', 'ppn', 'walltime')
-GPU_FIELDS = ('gpus', 'mpi_ranks', 'gpu_resource_registered', 'gpu_type')
+GPU_FIELDS = ('gpus', 'mpi_ranks', 'required_gpus', 'gpu_resource_registered', 'gpu_type')
 MAX_BYTES = 65536
 SCHEMA = 'fpilot.job-template.v1'
 
@@ -50,12 +50,12 @@ def resources_checked(values):
         if isinstance(value, bool) or value is None:
             raise ValueError(key + ' 无效')
         value = str(value)
-        pattern = r'[1-9][0-9]*' if key in ('ppn', 'gpus', 'mpi_ranks') else r'[0-9]+:[0-5][0-9]:[0-5][0-9]' if key == 'walltime' else r'(?:yes|no)' if key == 'gpu_resource_registered' else r'[A-Za-z0-9_.-]+'
+        pattern = r'[1-9][0-9]*' if key in ('ppn', 'gpus', 'mpi_ranks', 'required_gpus') else r'[0-9]+:[0-5][0-9]:[0-5][0-9]' if key == 'walltime' else r'(?:yes|no)' if key == 'gpu_resource_registered' else r'[A-Za-z0-9_.-]+'
         if not re.fullmatch(pattern, value) or len(value) > 120:
             raise ValueError(key + ' 格式无效')
         if key == 'walltime' and servers.seconds(value) == 0:
             raise ValueError('walltime 必须为正值')
-        result[key] = int(value) if key in ('ppn', 'gpus', 'mpi_ranks') else value
+        result[key] = int(value) if key in ('ppn', 'gpus', 'mpi_ranks', 'required_gpus') else value
     return result
 
 
@@ -280,6 +280,7 @@ def code_lines(text):
 def render_gpu_ranks(text, ranks):
     """Only rewrite a known resource-derived NPROCS assignment in execution copy."""
     expressions = (r'`\s*cat\s+[\"\']?\$(?:PBS_NODEFILE|\{PBS_NODEFILE\})[\"\']?\s*\|\s*wc\s+-l\s*`',
+                   r'`\s*wc\s+-l\s*<\s*[\"\']?\$(?:PBS_NODEFILE|\{PBS_NODEFILE\})[\"\']?\s*`',
                    r'\$\(\s*wc\s+-l\s*<\s*[\"\']?\$(?:PBS_NODEFILE|\{PBS_NODEFILE\})[\"\']?\s*\)',
                    r'[\"\']?\$(?:SLURM_NTASKS|\{SLURM_NTASKS\})[\"\']?')
     pattern = r'(?m)^([ \t]*(?:export[ \t]+)?NPROCS[ \t]*=)[ \t]*(?:' + '|'.join(expressions) + r')[ \t]*$'
@@ -340,6 +341,8 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
                           config['vasp_executable'], rendered)
     runtime_ok = bool(rendered)
     execution_blockers = list(blockers) + variant_blockers
+    if gpu_mode and expected in ('vasp_std','vasp_ncl') and values.get('required_gpus') is not None and int(values['mpi_ranks'])!=int(values['required_gpus']):
+        execution_blockers.append('VASP OpenACC 每张使用的 GPU 对应一个 MPI 进程；请使 MPI 进程数与使用 GPU 数量相等')
     warnings=['脚本正文由用户管理；预览和实时资源检查仍需完成']
     if script_mode or record.get('adapter_version')==2:
         # Preserve arbitrary environment setup; reject only concrete mapping/exit conflicts.

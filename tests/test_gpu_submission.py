@@ -72,6 +72,15 @@ class GpuSubmissionTests(unittest.TestCase):
         choice,reason=candidate_pool.select(self.config,self.probe(active=2),candidates)
         self.assertIsNone(choice);self.assertIn('暂时占用',reason)
         self.assertEqual(candidate_pool.select(self.config,self.probe(),candidates)[0],candidates[0])
+    def test_partial_cpu_allocation_waits_without_user_override_error_or_script_drift(self):
+        idle=self.render(self.probe())
+        report=self.probe(active=2,status='PARTIAL');report.pop('id')
+        report['preflight']['hosts'][0]['nodes'][0].update(CPUS_FREE='8',CPUS_ALLOC='2',JOBS='2113.node01')
+        busy=self.render(servers._store_probe(report))
+        self.assertFalse(busy['resource_ready']);self.assertTrue(candidate_pool.capacity_wait(busy),busy['blockers'])
+        self.assertEqual(idle['profile'],busy['profile']);self.assertEqual(idle['script'],busy['script'])
+        self.assertIn('GPU compute processes',busy['blockers'][0])
+        self.assertFalse(any('user override' in reason for reason in busy['blockers']))
     def test_unregistered_gpu_fallback_requires_direct_inventory_and_process_check(self):
         text=PBS.replace(':gpus=1','').replace('CUDA_VISIBLE_DEVICES=1','CUDA_VISIBLE_DEVICES=0,1,2').replace('mpirun -np 1','mpirun -np $NPROCS').replace('ppn=1','ppn=3')
         self.record=job_templates.import_template(text,'gpu','gpu_vasp','fixture','unregistered GPU');self.config['template_id']=self.record['id']
@@ -98,6 +107,15 @@ class GpuSubmissionTests(unittest.TestCase):
         self.assertIsNone(gpu_requests.resolve({**self.config,'program':'vasp_ncl'},None))
     def test_walltime_four_digit_hours_is_validated_without_truncation(self):
         self.assertEqual(servers.validate(self.config)['walltime'],'1000:00:00')
+    def test_vasp_used_cards_require_one_rank_each_without_changing_legacy_contract(self):
+        text=PBS.replace('mpirun -np 1','mpirun -np $NPROCS').replace('export CUDA_VISIBLE_DEVICES=1\n','')
+        template=job_templates.import_template(text,'gpu','gpu_vasp','fixture','selectable cards')
+        resources={'name':'test','queue':'batch','node':'node01','ppn':10,'walltime':'01:00:00','gpus':3,'mpi_ranks':2,'required_gpus':2}
+        result=job_templates.render_template(template['id'],resources,'gpu',self.config)
+        self.assertTrue(result['submission_supported'],result['execution_blockers'])
+        self.assertIn('NPROCS=2',result['rendered_text'])
+        wrong=job_templates.render_template(template['id'],{**resources,'required_gpus':1},'gpu',self.config)
+        self.assertFalse(wrong['submission_supported']);self.assertTrue(any('每张使用的 GPU' in b for b in wrong['execution_blockers']))
     def test_final_remote_guard_rejects_gpu_busy_before_any_dispatch(self):
         idle=self.render(self.probe());busy=self.probe(active=1)
         import sys,io

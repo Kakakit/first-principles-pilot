@@ -91,6 +91,13 @@ def _parse_host(host_name, block_text):
             if len(matches) == 1:
                 matches[0].update({k: v for k, v in gpu.items() if k != 'GPU_NODE'})
                 matches[0]['GPU_IDENTITY'] = 'DIRECT_NODE'
+                if gpu.get('GPU_DETAIL_B64'):
+                    import base64
+                    try:
+                        devices=json.loads(base64.b64decode(gpu['GPU_DETAIL_B64'],validate=True))
+                        if not isinstance(devices,list) or any(not isinstance(d,dict) for d in devices):raise ValueError('invalid GPU details')
+                        matches[0]['GPU_DEVICES_JSON']=json.dumps(devices,separators=(',',':'))
+                    except (ValueError,TypeError):matches[0]['GPU_DETAIL_ERROR']='GPU details unreadable'
     classification, availability, scheduler_error, error_class = _host_classification(fields)
     host = host_name or fields.get("HOST")
     result = {

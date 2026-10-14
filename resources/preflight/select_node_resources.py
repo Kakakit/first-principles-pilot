@@ -58,22 +58,24 @@ def gpu_resources(preflight, host, selected_node, request, allow_wait=False):
         if len(devices) != required:
             raise ResourceSelectionError('所需 GPU 数量与脚本固定设备列表不一致，请编辑适配副本')
     blockers = []
+    active = facts.get('GPU_ACTIVE_PROCESSES')
+    if active not in (None, '', 'unknown') and _integer(active, 'GPU_ACTIVE_PROCESSES') > 0:
+        blockers.append('GPU compute processes are active: 所选节点仍有 GPU 计算；剩余显存不代表可独占，等待现有 GPU 计算结束')
     try:
-        selection = select_resources(preflight, host, selected_node,
-                                     user_override=total, user_override_evidence='GPU 整节点占用')
+        # A whole-node GPU reservation is not a user override of currently
+        # free CPU slots. Partial allocation must wait, rather than invalidate
+        # the frozen request as an oversized user override.
+        selection = select_resources(preflight, host, selected_node)
     except ResourceSelectionError as exc:
         if not str(exc).startswith(CAPACITY_BLOCKERS):
             raise
         blockers.append(str(exc))
         selection = {}
     status = str(facts.get('STATUS', '')).upper()
-    if facts.get('JOBS') not in (None, '', 'none') or status in ('BUSY', 'PARTIAL', 'SUSPECT_LOAD'):
+    if (facts.get('JOBS') not in (None, '', 'none') or status in ('BUSY', 'PARTIAL', 'SUSPECT_LOAD')
+            or _integer(facts.get('CPUS_FREE'), 'CPUS_FREE') < total):
         blockers.append('GPU node is occupied: 等待整节点空闲')
-    active = facts.get('GPU_ACTIVE_PROCESSES')
-    if active not in (None, '', 'unknown'):
-        if _integer(active, 'GPU_ACTIVE_PROCESSES') > 0:
-            blockers.append('GPU compute processes are active: 等待现有 GPU 计算结束')
-    elif not declared or facts.get('GPU_IDENTITY') == 'DIRECT_NODE':
+    if active in (None, '', 'unknown') and (not declared or facts.get('GPU_IDENTITY') == 'DIRECT_NODE'):
         raise ResourceSelectionError('GPU 活动进程检查未完成，无法确认节点空闲')
     allocated = facts.get('GPUS_ALLOC')
     if allocated not in (None, '', 'unknown'):

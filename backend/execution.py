@@ -42,6 +42,7 @@ def template_resources(profile):
     if profile.get('resource_mode') == 'gpu':
         result.update(mpi_ranks=profile['mpi_ranks'], gpus=profile['gpus'],
                       gpu_resource_registered='yes' if profile['gpu_resource_registered'] else 'no')
+        if profile.get('required_gpus'):result['required_gpus']=profile['required_gpus']
         if profile.get('gpu_type'): result['gpu_type'] = profile['gpu_type']
     return result
 

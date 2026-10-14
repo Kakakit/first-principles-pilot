@@ -1,5 +1,7 @@
 # 后续具体实施方案
 
+本包完成 GPU 逐卡显存与占用诊断、重复驱动查询优化、可选卡数脚本与真实独立执行；见 [使用及验收](submission/GPU_TELEMETRY_SCRIPTS_ACCEPTANCE.md)。本轮不增加 AMD 适配或发布安装包。
+
 本包已落实服务器移除/恢复、能带 VBM/CBM、两平台软件图标与旧开发副本归档；使用、恢复和平台验收边界见 [验收记录](submission/SERVER_BAND_BRANDING_ACCEPTANCE.md)。日常仅同步源码，Release 继续按用户明确指令发布。
 
 ## 2026-10-14：自由文本参数与矩阵生成前的投影诊断
