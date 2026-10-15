@@ -1,8 +1,10 @@
 # 当前开发交接 · 2026-10-11
 
-## 2026-10-15：准备 v1.1.0-beta.2 安装测试版
+## 2026-10-15：v1.1.0-beta.2 安装测试版已发布
 
-用户明确要求发布。以已验收的轻量快照传输版本为基线，更新版本及安装说明，发布 Windows x64 EXE 与 Apple Silicon Mac DMG；保留手动触发流程。未完成的 PyW90 分析区间／能量注释修改保留在开发目录，不进入本版。安装器原生 CI、干净环境回归差异及下载资产尚待本轮发布任务确认，不能据此声称已发布或实机验收通过。
+按用户明确要求沿用上次流程，已发布 [v1.1.0-beta.2](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.2)：Windows x64 EXE 与 Apple Silicon Mac DMG，保留手动触发。以已验收的轻量快照传输源码为基线，包含服务器移除、能带 VBM/CBM、应用图标、GPU 诊断与可选卡数脚本、自由文本和矩阵生成前 pre dos。暂停中的 PyW90 分析区间／能量注释修改保留在开发目录，不进入本版。
+
+[原生 CI](https://github.com/Kakakit/first-principles-pilot/actions/runs/38695529349) 全流程成功；Windows 实际安装/启动/卸载保留数据、Mac 原生启动通过。前端 136 项及类型/构建通过；后端干净环境基线 649 项／当前 699 项，70 个原有环境相关失败保持，新增失败为零，不声称干净环境全量通过。Release 的 10 个资产均已上传，含校验文件与原生验收回执。安装验收未发出 SSH 请求，未提交研究任务；两端用户实机验收仍待完成。详见 [本版发布记录](docs/release-d/BETA2_ACCEPTANCE.md)。
 
 
 ## 2026-10-14：轻量项目快照传输
