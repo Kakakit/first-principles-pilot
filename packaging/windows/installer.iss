@@ -2,7 +2,7 @@
   #error RuntimeDir must point to the clean self-contained FPilot directory
 #endif
 #ifndef ReleaseVersion
-  #define ReleaseVersion "1.1.0-beta.1"
+  #define ReleaseVersion "1.1.0-beta.2"
 #endif
 #ifndef OutputDir
   #define OutputDir "."
