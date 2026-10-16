@@ -110,8 +110,9 @@ class WorkspaceCommandTests(unittest.TestCase):
 
     def test_template_read_does_not_rehash_body_as_a_security_gate(self):
         preset=self.preset()
-        (self.root/'job-templates/scripts'/preset['script_hash']).write_text('echo changed by user\n')
+        (self.root/'job-templates/scripts'/preset['script_hash']).write_bytes(b'echo changed by user\n')
         self.assertEqual(job_templates.get_template(preset['id'])['original_text'],'echo changed by user\n')
+        self.assertEqual(job_templates.execution_text('echo CRLF\r\necho CR\r'),'echo CRLF\necho CR\n')
 
     def test_connection_test_preserves_user_multiplexing_configuration(self):
         resolved={'resolved':{'hostname':'example','user':'user','port':'22'}}
