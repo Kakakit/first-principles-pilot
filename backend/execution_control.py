@@ -7,7 +7,7 @@ import tempfile
 from contextlib import closing
 from . import execution as ex
 
-ACTIVE = ('DISPATCHING','SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN')
+ACTIVE = ('COMMAND_RUNNING','DISPATCHING','SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN')
 DEFAULT = {'max_inflight_total':2, 'max_inflight_per_host':1, 'max_cores_per_host':None}
 
 

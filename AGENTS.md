@@ -8,3 +8,5 @@
 - 科研原件保留原位；清理应可恢复。大文件留在服务器处理，只通过受控入口回传每个明确、普通、已知大小且不超过 10 MiB 的文件。
 - 检查与改动成比例。普通文案/布局不新增镜像用例；只运行相关验证，不重复已通过且未变化的检查或构建。核心来源、派发和数据清理需要针对性审核。
 - 一次性验收脚本与旧截图归档在开发区之外。源码结构、同步排除及平台打包见 docs/DEVELOPMENT.md 和 docs/GITHUB.md。
+
+- New attempts use the configured project/workspace root and flows/main/stages/.../attempts/... layout. Keep historical paths unchanged.

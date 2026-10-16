@@ -21,7 +21,7 @@ export const catalog: Record<Kind, {label: string; en: string; description: stri
 };
 export type StepData = { kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
 export type Step = Node<StepData, 'step'>;
-export type Project = { stagePolicy?:'kind-fixed-v1'; parameters?:ParameterProject; sharedPotcar?:{id:string;provenance_id?:string}; recipeRuntime?:unknown; id: string; name: string; remoteSlug?:string; nodes: Step[]; edges: Edge[]; updatedAt: string };
+export type Project = { remoteWorkspaceRoot?:string; remotePathPolicy?:'project-directory-v2'; remoteDirectories?:Record<string,string>; stagePolicy?:'kind-fixed-v1'; parameters?:ParameterProject; sharedPotcar?:{id:string;provenance_id?:string}; recipeRuntime?:unknown; id: string; name: string; remoteSlug?:string; nodes: Step[]; edges: Edge[]; updatedAt: string };
 export type Workspace = { activeId: string; projects: Project[] };
 export type Issue = { level: 'error' | 'info'; message: string; nodeId?: string };
 export const uid = () => crypto.randomUUID();
@@ -35,7 +35,7 @@ export function newProject(name: string, demo = false): Project {
   const nodes = demo ? [makeStep('structure', {x: 40, y: 190},1), makeStep('relax', {x: 310, y: 190},2), makeStep('scf', {x: 580, y: 190},3), makeStep('bands', {x: 850, y: 85},4), makeStep('dos', {x: 850, y: 295},5)] : [makeStep('structure',undefined,1)];
   if (demo) { nodes[0].data.params.material = 'Si · 硅（演示）'; nodes.forEach(n => {n.data.note = n.data.kind === 'structure' ? '可导入真实结构' : '仅展示流程组织，尚未生成计算输入';}); }
   const edges = demo ? [[0,1],[1,2],[2,3],[2,4]].map(([a,b]) => ({id:uid(),source:nodes[a].id,target:nodes[b].id})) : [];
-  const id=uid();return { id, name, stagePolicy:'kind-fixed-v1', remoteSlug:slugify(name)||`project-${id.slice(0,8)}`, nodes, edges, updatedAt: new Date().toISOString() };
+  const id=uid();return { id, name, remotePathPolicy:'project-directory-v2', remoteWorkspaceRoot:'$HOME/fpilot', stagePolicy:'kind-fixed-v1', remoteSlug:slugify(name)||`project-${id.slice(0,8)}`, nodes, edges, updatedAt: new Date().toISOString() };
 }
 export function demoWorkspace(): Workspace { const p = newProject('Si · 电子结构', true); return { activeId:p.id, projects:[p] }; }
 export function initialWorkspace(): Workspace { const p = newProject('新项目'); return { activeId:p.id, projects:[p] }; }
@@ -52,6 +52,9 @@ export function parseWorkspace(raw: string): Workspace {
   const projectIds = new Set();
   for (const p of w.projects) {
     if (!p || !nonempty(p.id) || projectIds.has(p.id) || !nonempty(p.name) || !text(p.updatedAt, 100) || !Array.isArray(p.nodes) || !Array.isArray(p.edges) || p.nodes.length > 500 || p.edges.length > 2000) throw new Error('项目内容或大小无效。');
+    if(p.remotePathPolicy!==undefined&&p.remotePathPolicy!=='project-directory-v2')throw new Error('项目目录规则无效。');
+    if(p.remoteWorkspaceRoot!==undefined&&(typeof p.remoteWorkspaceRoot!=='string'||!(/^(\/|\$HOME(?:\/|$))/.test(p.remoteWorkspaceRoot))||/[\0\r\n]/.test(p.remoteWorkspaceRoot)))throw new Error('通用工作区需为绝对路径或 $HOME 路径。');
+    if(p.remoteDirectories!==undefined&&(!p.remoteDirectories||typeof p.remoteDirectories!=='object'||Array.isArray(p.remoteDirectories)||Object.values(p.remoteDirectories).some(v=>typeof v!=='string'||!v.startsWith('/')||/[\0\r\n]/.test(v))))throw new Error('项目目录需为绝对路径。');
     if(p.stagePolicy!==undefined&&p.stagePolicy!=='kind-fixed-v1')throw new Error('项目阶段编号规则无效。');
     if(!text(p.remoteSlug,64)||!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(p.remoteSlug))throw new Error('远程项目标识无效。');
     if(p.sharedPotcar!==undefined&&(!p.sharedPotcar||!/^[a-f0-9]{64}$/.test(p.sharedPotcar.id)||p.sharedPotcar.provenance_id!==undefined&&!/^[a-f0-9]{64}$/.test(p.sharedPotcar.provenance_id)))throw new Error('项目共享 POTCAR 无效。');
@@ -106,11 +109,11 @@ export function inspectFlow(p: Project): Issue[] {
   if (!out.length) out.push({level:'info',message:'流程连接检查通过。尚未检查物理参数或生成计算输入。'});
   return out;
 }
-export function mergeWorkspace(current: Workspace, imported: Workspace): Workspace {
+export function mergeWorkspace(current: Workspace, imported: Workspace, workspaceRoot='$HOME/fpilot'): Workspace {
   const projects = imported.projects.map(p=>{
     const ids = new Map(p.nodes.map(n=>[n.id,uid()]));
     const id=uid(),base=(p.remoteSlug||slugify(p.name)||'project').slice(0,55).replace(/-+$/,'');
-    return {...p,id,stagePolicy:'kind-fixed-v1' as const,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data=clearExecutionBindings(n.data);if(Object.keys(staticDefaults(data.kind)).length)data.parameters={...data.parameters,values:{...staticDefaults(data.kind),...data.parameters?.values}};data.stageSequence=STAGE_SEQUENCES[data.kind];return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
+    return {...p,id,remotePathPolicy:'project-directory-v2' as const,remoteWorkspaceRoot:workspaceRoot,remoteDirectories:{},stagePolicy:'kind-fixed-v1' as const,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data=clearExecutionBindings(n.data);if(Object.keys(staticDefaults(data.kind)).length)data.parameters={...data.parameters,values:{...staticDefaults(data.kind),...data.parameters?.values}};data.stageSequence=STAGE_SEQUENCES[data.kind];return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
   });
   if(current.projects.length+projects.length>100) throw new Error('最多保存 100 个项目，请先导出备份并整理。');
   return {...current,activeId:projects[0].id,projects:[...current.projects,...projects]};

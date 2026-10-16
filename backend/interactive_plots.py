@@ -292,7 +292,9 @@ def _download(source: dict, target: Path, job: dict) -> dict:
 
 
 def _cleanup_remote_pbands(host: str, scratch: str) -> None:
-    if not re.fullmatch(r'\$HOME/230269265lht/fpilot-pband-tmp/[a-f0-9]{32}', scratch):
+    from . import servers
+    prefix=servers.scratch_root(host,'pbands')+'/'
+    if not scratch.startswith(prefix) or not re.fullmatch('[a-f0-9]{32}',scratch[len(prefix):]):
         raise ValueError('远端临时目录标识异常，拒绝清理')
     receipt = execution.ssh(host, 'rm -rf -- ' + remote_paths.shell_path(scratch), timeout=120)
     if receipt['exit_code'] != 0:
@@ -302,7 +304,8 @@ def _cleanup_remote_pbands(host: str, scratch: str) -> None:
 def _generate_pbands(record: dict, elements: list[str]) -> tuple[str, str, list[dict], dict]:
     host = record['config']['alias']
     source = remote_paths.shell_path(artifacts._root(record))
-    scratch = '$HOME/230269265lht/fpilot-pband-tmp/' + uuid.uuid4().hex
+    from . import servers
+    scratch = servers.scratch_root(host,'pbands')+'/' + uuid.uuid4().hex
     target = remote_paths.shell_path(scratch)
     tool_receipt = execution.ssh(host, 'command -v vaspkit', timeout=30, stdout_limit=500)
     tool = tool_receipt['stdout'].strip().splitlines()[-1] if tool_receipt['stdout'].strip() else ''
@@ -311,7 +314,7 @@ def _generate_pbands(record: dict, elements: list[str]) -> tuple[str, str, list[
     before = _remote_hashes(record, VASPKIT_INPUTS)
     command = '\n'.join([
         'set -eu', 'umask 077',
-        'mkdir -p -- ' + remote_paths.shell_path('$HOME/230269265lht/fpilot-pband-tmp'),
+        'mkdir -p -- ' + remote_paths.shell_path(servers.scratch_root(host,'pbands')),
         'test ! -e ' + target,
         'mkdir -- ' + target,
         'source_dir=' + source, 'scratch_dir=' + target,

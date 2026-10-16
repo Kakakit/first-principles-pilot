@@ -35,6 +35,7 @@ def tick(refresh=None, notify=False):
     checked=0;errors=[]
     for row in rows:
         r=json.loads(row[0])
+        if r.get('config',{}).get('scheduler')=='custom':continue
         if recycle.inactive('attempts',r['id'],r):continue
         if r['state']=='DISPATCHING':
             try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(r['dispatch_started_at'])).total_seconds()

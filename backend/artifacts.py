@@ -18,7 +18,6 @@ from .storage import ROOT
 MAX_PULL_BYTES = 10 * 1024 * 1024
 MAX_PREVIEW_BYTES = 256 * 1024
 MAX_ENTRIES = 2000
-SCHOOL_HOSTS = {*(f'jutai-{index}' for index in range(1, 6)), 'gengzi-187'}
 
 
 def attempts(project_id, node_id):
@@ -224,8 +223,6 @@ def pull(key, relative):
     relative = _relative(relative)
     remote = _root(record).rstrip('/') + '/' + relative
     alias = record['config']['alias']
-    if alias not in SCHOOL_HOSTS:
-        raise ValueError('该 SSH 别名不在 Web App 允许的学校集群清单中')
     root_q = remote_paths.shell_path(_root(record))
     rel_q = shlex.quote(relative)
     command = r'''set -e

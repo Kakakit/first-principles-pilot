@@ -64,14 +64,16 @@ python packaging/build.py --target windows --output /你的输出目录/Windows
 
 提交顺序是选择冻结输入 → 选服务器与导入脚本、编辑基础字段 → 检测节点并选择资源 → 准备并确认一次。检测后修改名称、walltime、核数或同服务器脚本会保留节点选择，更新最终预览；派发前自动实时复核。计算来源在配置中冻结，UNKNOWN 核查原 job ID，不自动重投。同一远端文件依赖分支保持服务器绑定；独立分支可分别选择服务器。
 
-新建项目时填写“远端项目目录名”：默认从项目名称生成，也可手动修改，窗口直接预览默认服务器的完整项目路径。导入副本自动使用独立目录名，保留原项目和历史 attempt。已有远端派发或 UNKNOWN 记录后目录名锁定；仅本地准备且确认未派发的记录不永久锁定目录名。
+新建项目时填写“远端项目目录名”和通用工作区根目录，所有服务器默认沿用，无需先选服务器。目录名默认从项目名称生成，可手动修改；窗口直接预览完整路径。导入副本使用独立目录名，保留原项目和历史。已有派发或 UNKNOWN 记录后目录名锁定；仅本地准备且确认未派发的记录不永久锁定目录名。
 
-本机数据默认在 `workspace-data/`，也可由设置或 `FPILOT_WORKSPACE` 指定。远端唯一布局仍为：
+本机数据默认在 `workspace-data/`，也可由设置或 `FPILOT_WORKSPACE` 指定。新项目默认布局为：
 
 ```text
-$HOME/fpilot/material-projects/<project-slug>/flows/main/stages/<NN>-<stage-slug>/attempts/<timestamp>-<suffix>/
+<workspace-root>/<project-slug>/flows/main/stages/<NN>-<stage-slug>/attempts/<timestamp>-<suffix>/
 ```
 
-新服务器默认使用 `$HOME/fpilot`；可选择包含 `fpilot` 的专用绝对目录，原服务器的登记根目录与旧 attempt 不迁移。只读检查不创建目录，正式确认后才创建本次运行目录。已有 attempt 的准确来源、路径与冻结策略保持；小文件使用受控入口，大于 10 MiB 的结果留在服务器处理。回收在本机隐藏对象并暂停后续派发，恢复后须手动继续。原科研文件和服务器任务不随本机回收删除。
+设置中保存所有服务器共用的新项目默认根目录，新建项目时仍可修改。可用任意绝对路径或 `$HOME` 下的路径，HOME 在各服务器解析；新目录使用英文命名，不要求包含 fpilot。单服务器项目目录覆盖保留在高级设置。旧项目保留原布局，旧 attempt 不迁移。只读检查不创建目录，确认后才创建本次运行目录。来源与冻结策略保持，大型结果留在服务器处理。回收仅隐藏本机对象、暂停后续派发，不删除研究文件或取消服务器任务。
+
+其它/自定义执行可保存原样多行命令，手动运行并查看 stdout、stderr 和退出码；不解析自定义队列或自动推进链/扫描。系统 OpenSSH 复用已有密钥、agent、跳板和认证会话，要求软件进程可免交互执行命令。详见 [通用路径与自定义命令](docs/submission/CUSTOM_PATH_COMMAND_ACCEPTANCE.md)。
 
 详细使用与证据按需查阅：[首次配置与脚本使用](docs/submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)、[提交流程](docs/submission/ACCEPTANCE.md)、[能窗迭代](docs/wannier-window/README.md)、[扩展协议](docs/extensions-b/PROTOCOL.md)、[主题格式](docs/appearance/THEME_FORMAT.md)、[回收站](docs/trash-flow/ACCEPTANCE.md)、[远端性能](docs/remote-speed/ACCEPTANCE.md)、[D 包验收](docs/release-d/ACCEPTANCE.md)。历史长版说明保存在 [history](docs/history/README_through_20261004.md)。

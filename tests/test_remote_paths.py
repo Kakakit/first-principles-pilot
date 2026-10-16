@@ -26,7 +26,7 @@ class RemotePathTests(unittest.TestCase):
         (ex.ROOT/'inputs').mkdir(parents=True);(ex.ROOT/'inputs'/(key+'.zip')).write_bytes(raw)
         return key
     def test_bad_roots_and_ids(self):
-        for root in ('$HOME/other','/tmp/230269265lht/../outside','relative','/tmp/no-workspace','$HOME/230269265lht/$(whoami)'):
+        for root in ('relative','/bad\npath','/bad\x00path'):
             with self.subTest(root=root),self.assertRaises(ValueError):paths.validate_root(root)
         with self.assertRaises(ValueError):paths.attempt_relative_path('../escape',3,'scf','20260921-120000-aaaa')
     def test_identity_mismatch(self):

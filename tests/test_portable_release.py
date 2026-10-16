@@ -126,7 +126,7 @@ class SetupTests(unittest.TestCase):
                 self.assertTrue(report['connected']);self.assertTrue(report['workspace']['ready'])
                 self.assertFalse(report['remote_mutation']);self.assertEqual(report['python']['path'],'/usr/bin/python3')
                 argv=remote.call_args_list[1].args[0]
-                self.assertIn('ControlMaster=no',argv);self.assertIn('ControlPath=none',argv);self.assertIn('BatchMode=yes',argv)
+                self.assertNotIn('ControlMaster=no',argv);self.assertNotIn('ControlPath=none',argv);self.assertIn('BatchMode=yes',argv)
                 self.assertNotIn('mkdir',argv[-1]);self.assertNotIn('source ',argv[-1])
                 self.assertEqual(report['schedulers'],['pbs'])
                 denied=Mock(returncode=255,stdout='',stderr='Permission denied (publickey)')

@@ -34,16 +34,14 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(audit_incar({'LCALCPOL':'.TRUE.','NCORE':'1'},[],[],'static','vasp_ncl')[0], [])
 
     def test_remote_root_policy_and_attempt_layout(self):
-        self.assertEqual(remote_paths.normalize_workspace_root(), '$HOME/230269265lht')
+        self.assertEqual(remote_paths.normalize_workspace_root(), '$HOME')
         self.assertEqual(remote_paths.normalize_workspace_root('$HOME/fpilot'), '$HOME/fpilot')
         self.assertEqual(remote_paths.normalize_workspace_root('$HOME/230269265lht/scratch'),
                          '$HOME/230269265lht/scratch')
         self.assertEqual(remote_paths.normalize_workspace_root('/mnt/work/230269265lht'),
                          '/mnt/work/230269265lht')
-        with self.assertRaises(ValueError):
-            remote_paths.normalize_workspace_root('$HOME/other')
-        with self.assertRaises(ValueError):
-            remote_paths.normalize_workspace_root('/tmp/230269265lht/../outside')
+        self.assertEqual(remote_paths.normalize_workspace_root('$HOME/other'),'$HOME/other')
+        self.assertEqual(remote_paths.normalize_workspace_root('/tmp/230269265lht/../outside'),'/tmp/outside')
         relative = remote_paths.attempt_relative_path('project-1', 3, 'scf', '20260921-120000-abcd')
         self.assertEqual(relative, 'material-projects/project-1/flows/main/stages/03-scf/attempts/20260921-120000-abcd')
 

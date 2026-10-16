@@ -24,5 +24,5 @@ test('candidate pool reserves whole-node cores and treats occupancy as waiting',
   assert.equal(capacityWait({resource_ready:false,node_status:status,blockers:['selected node CPUS_FREE must be greater than zero'],script:'s',note:''}),status==='SUSPECT_LOAD');
  }
  assert.equal(capacityWait({resource_ready:false,node_status:'SUSPECT_LOAD',blockers:['selected node CPUS_FREE must be greater than zero','walltime 超过队列上限'],script:'s',note:''}),false);
- assert.equal(poolNodes({preflight:{hosts:[{nodes:[...nodes,{NODE:'node06',STATUS:'FULLY_IDLE'}]}]}} as never,'jutai-1').length,2);
+ assert.equal(poolNodes({preflight:{hosts:[{nodes:[...nodes,{NODE:'node06',STATUS:'FULLY_IDLE'}]}]}} as never,'jutai-1').length,3);
 });

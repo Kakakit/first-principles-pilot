@@ -135,10 +135,10 @@ def _register(value):
         resolved=check_ssh(alias)['resolved']
         if resolved.get('hostname')==alias:raise ValueError('SSH 配置中没有该明确别名，请先配置本机 SSH')
     scheduler=str(value.get('scheduler','')).lower()
-    if scheduler not in ('pbs','slurm'):raise ValueError('请选择 PBS 或 Slurm')
+    if scheduler not in ('pbs','slurm','custom'):raise ValueError('请选择 PBS、Slurm 或其它／自定义')
     queue=value.get('queue','')
-    script_mode=value.get('runtime_source','registered')=='script'
-    if (queue or not script_mode) and not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',queue):raise ValueError('请填写队列或分区名称')
+    script_mode=scheduler=='custom' or value.get('runtime_source','registered')=='script'
+    if scheduler != 'custom' and (queue or not script_mode) and not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',queue):raise ValueError('请填写队列或分区名称')
     for key in ('python','mpi_executable','vasp_executable','environment_script','ncl_executable'):
         item=value.get(key,'')
         if not isinstance(item,str) or any(c in item for c in '\r\n\x00'):raise ValueError('路径包含无效字符：'+key)
@@ -147,19 +147,20 @@ def _register(value):
     if not script_mode and scheduler=='pbs' and (not value.get('mpi_executable') or not value.get('environment_script')):raise ValueError('PBS 需填写 MPI 与环境脚本路径')
     module=value.get('module','')
     if not script_mode and scheduler=='slurm' and not re.fullmatch(r'[A-Za-z0-9_.+-]+/[A-Za-z0-9_.+-]+',module):raise ValueError('Slurm 需填写 module/version')
-    from .remote_paths import normalize_workspace_root
-    remote_root=normalize_workspace_root(value.get('remote_workspace_root'))
+    from .remote_paths import new_directory
+    remote_root=new_directory(value.get('remote_workspace_root'))
     runtimes=[]
     for variant,key in (('vasp_std','vasp_executable'),('vasp_ncl','ncl_executable')):
         if value.get(key):runtimes.append({'variant':variant,'status':'USER_CONFIGURED','executable':value[key],'mpi':value.get('mpi_executable',''),
             'environment_script':value.get('environment_script',''),'module':module,'launcher':'mpirun','environment':{}})
+    if not value.get('remote_workspace_root'): raise ValueError('请填写服务器默认工作区绝对路径')
     host={'status':'USER_CONFIGURED','scheduler':scheduler,'queue':queue,'partition':queue,'runtimes':runtimes,
         'python':{'known_interpreter':value.get('python','')},'remote_workspace_root':remote_root,
         'registration_evidence':'USER_CONFIGURATION_ONLY','program_validation':'NOT_PERFORMED'}
     if script_mode:host['runtime_source']='script'
+    host['pyw90']={'python':value.get('pyw90_python',''),'package':value.get('pyw90_package','')}
     from . import servers
     current=servers.load_registry(include_removed=True)['hosts'].get(alias)
-    if current and current.get('status')!='USER_CONFIGURED':raise ValueError('内置服务器原记录保留；请使用另一个 SSH 别名，或在运行时设置中修改本次配置')
     path=ROOT/'site-registry.json';previous=path.read_bytes() if path.exists() else None
     registry_value=registry();registry_value.setdefault('hosts',{})[alias]=host
     registry_value.setdefault('removed_hosts',{}).pop(alias,None)
@@ -195,12 +196,13 @@ def check_ssh(alias):
     fields={}
     for line in result.stdout.splitlines():
         parts=line.split(None,1)
-        if len(parts)==2 and parts[0] in ('hostname','user','port','proxyjump','proxycommand','identityfile'):
+        if len(parts)==2 and parts[0] in ('hostname','user','port','proxyjump','proxycommand','identityfile','controlpath','controlmaster','controlpersist'):
             fields[parts[0]]=parts[1] if parts[0] not in fields else fields[parts[0]]+';'+parts[1]
     return {'alias':alias,'resolved':fields,'evidence':'LOCAL_CONFIG_ONLY','note':'本机配置已解析，未连接服务器。首次连接请在终端执行 ssh '+alias+' exit，核对主机指纹并完成认证。'}
 
 
 def test_connection(alias, python='', remote_workspace_root=None):
+    from .platform_runtime import ssh_options
     resolved=check_ssh(alias)
     if python and (not isinstance(python,str) or not python.startswith('/') or any(c in python for c in '\r\n\x00')):
         raise ValueError('服务器 Python 应为单行 Linux 绝对路径')
@@ -215,7 +217,7 @@ def test_connection(alias, python='', remote_workspace_root=None):
         from .remote_paths import workspace_probe_command
         command+='(\n'+workspace_probe_command(remote_workspace_root)+"\n) && printf 'FPILOT_ROOT_READY=1\\n' || printf 'FPILOT_ROOT_READY=0\\n'\n"
     try:
-        result=subprocess.run(['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ControlMaster=no','-o','ControlPath=none',alias,command],capture_output=True,text=True,timeout=25)
+        result=subprocess.run(['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=8',*ssh_options(alias,resolved['resolved']),alias,command],capture_output=True,text=True,timeout=25)
     except subprocess.TimeoutExpired as exc:raise ValueError('连接超时；请检查 VPN/校园网、服务器地址与端口') from exc
     except OSError as exc:raise ValueError('无法启动系统 OpenSSH Client') from exc
     if result.returncode or not re.search(r'^FPILOT_SSH_OK$',result.stdout,re.M):
@@ -243,3 +245,30 @@ def test_connection(alias, python='', remote_workspace_root=None):
     return {**resolved,'evidence':'SSH_CONNECTION_ONLY','connected':True,'python':interpreter,
             'tools':tools,'schedulers':schedulers,'workspace':workspace,'remote_mutation':False,
             'note':'软件可免交互连接；'+('已发现控制通道 Python，未执行计算程序。' if interpreter else '未发现可用的 Python 3.8+；请展开高级设置填写服务器已有解释器。')}
+
+
+def update_paths(alias, value):
+    from . import servers, remote_paths
+    with host_operation(alias), registry_operation():
+        host=dict(servers.load_registry()['hosts'][alias])
+        if 'remote_workspace_root' in value:
+            if not value['remote_workspace_root']: raise ValueError('请填写服务器默认工作区绝对路径')
+            host['remote_workspace_root']=remote_paths.new_directory(value['remote_workspace_root'],host.get('remote_workspace_root'))
+        if 'pyw90_python' in value or 'pyw90_package' in value:
+            runtime=dict(host.get('pyw90') or {})
+            for field,key in (('pyw90_python','python'),('pyw90_package','package')):
+                if field in value:
+                    path=value[field]
+                    if path and (not isinstance(path,str) or not path.startswith('/') or any(c in path for c in '\x00\r\n')):
+                        raise ValueError('PyW90 路径需为 Linux 绝对路径')
+                    runtime[key]=path
+            host['pyw90']=runtime
+        data=registry();data.setdefault('hosts',{})[alias]=host
+        write_json(ROOT/'site-registry.json',data)
+        config_path=ROOT/'server-config.json'
+        if config_path.exists():
+            config=json.loads(config_path.read_text(encoding='utf-8'))
+            if config.get('alias')==alias:
+                config['remote_workspace_root']=host.get('remote_workspace_root',config.get('remote_workspace_root'))
+                write_json(config_path,config)
+    return status()

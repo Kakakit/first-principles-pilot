@@ -32,7 +32,7 @@ def run(root, request, payload=b''):
     if action == 'attempt':
         relative = request['relative']
         parts = Path(relative).parts
-        if Path(relative).is_absolute() or '..' in parts or len(parts) != 8 or parts[0] != 'material-projects' or parts[2:5] != ('flows', 'main', 'stages') or parts[6] != 'attempts':
+        if Path(relative).is_absolute() or '..' in parts or not parts:
             raise ValueError('历史 attempt 路径不受控')
         target = root.joinpath(*parts)
         if any(p.is_symlink() for p in [target, *target.parents]):

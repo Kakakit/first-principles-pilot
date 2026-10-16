@@ -1,0 +1,11 @@
+import {useEffect,useState} from 'react';
+import type {Project} from './model';
+import {requestJson,errorMessage} from './apiClient';
+export default function ProjectRemoteDirectories({project,onChange}:{project:Project;onChange:(value:Project)=>void}){
+ const [hosts,setHosts]=useState<{alias:string;remote_workspace_root?:string}[]>([]),[error,setError]=useState(''),[drafts,setDrafts]=useState<Record<string,string>>({});
+ const [common,setCommon]=useState(project.remoteWorkspaceRoot||'');
+ useEffect(()=>setCommon(project.remoteWorkspaceRoot||''),[project.id,project.remoteWorkspaceRoot]);
+ useEffect(()=>setDrafts({}),[project.id]);
+ useEffect(()=>{void requestJson('/api/server').then(v=>setHosts(v.registered_profiles||[])).catch(e=>setError(errorMessage(e)));},[]);
+ return <section className="project-directory-settings"><h4>项目工作区 · 所有服务器通用</h4><label className="field">工作区根目录<input value={common} placeholder="旧项目留空沿用原服务器设置" onChange={e=>{const value=e.target.value;setCommon(value);if(value&&(!/^(\/|\$HOME(?:\/|$))/.test(value)||/[^\x20-\x7e]/.test(value)))return;onChange({...project,remoteWorkspaceRoot:value||undefined});}}/></label>{common!== (project.remoteWorkspaceRoot||'')&&<small role="alert">尚未应用：请填写英文绝对路径或 $HOME 下的英文路径。</small>}<p>无需先选计算服务器。目录预览：{common||'原服务器根目录'}/{project.remotePathPolicy?'':'material-projects/'}{project.remoteSlug}。已有任务保持原路径，修改后重新冻结输入。</p><details><summary>高级：单台服务器的项目目录覆盖</summary>{hosts.map(h=>{const value=drafts[h.alias]??project.remoteDirectories?.[h.alias]??'';const invalid=value!==project.remoteDirectories?.[h.alias]&&value&&(!value.startsWith('/')||/[^\x20-\x7e]/.test(value));return <label className="field" key={h.alias}>{h.alias} · 项目绝对目录（可选）<input aria-label={h.alias+' 项目绝对目录'} placeholder={(common||h.remote_workspace_root||'服务器根目录').replace(/\/$/,'')+'/'+(project.remotePathPolicy?'':'material-projects/')+project.remoteSlug} value={value} onChange={e=>{const next=e.target.value;setDrafts({...drafts,[h.alias]:next});if(next&&(!next.startsWith('/')||/[^\x20-\x7e]/.test(next)))return;const dirs={...project.remoteDirectories};if(next)dirs[h.alias]=next;else delete dirs[h.alias];onChange({...project,remoteDirectories:dirs});}}/>{invalid&&<small role="alert">尚未应用：请使用英文目录名和 Linux 绝对路径。</small>}</label>;})}</details>{error&&<p role="alert">{error}</p>}</section>;
+}

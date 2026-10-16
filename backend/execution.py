@@ -32,7 +32,7 @@ def scheduler_name(record):
 
 
 def script_name(scheduler):
-    return 'run.slurm' if scheduler == 'slurm' else 'run.pbs'
+    return 'run.command.sh' if scheduler=='custom' else 'run.slurm' if scheduler == 'slurm' else 'run.pbs'
 
 
 def template_resources(profile):
@@ -65,7 +65,8 @@ def validate_parallel(incar, ranks, gpu=False):
         raise ValueError(f'KPAR={kpar}、NCORE={ncore} 与本次 MPI 核数 {ranks} 不整除')
 
 
-def with_exit_trap(script):
+def with_exit_trap(script, scheduler=None):
+    if scheduler == 'custom': return script
     marker='trap \'rc=$?; printf "%s\\n" "$rc" > .exit-status\' EXIT'
     for line in ('set -euo pipefail','set -eo pipefail'):
         if line in script:
@@ -555,10 +556,10 @@ def path_preview(bundle_id,alias,remote_workspace_root=None):
     with zipfile.ZipFile(ROOT/'inputs'/(bundle_id+'.zip')) as archive:
         manifest=json.loads(archive.read('manifest.json'))
     identity=remote_paths.readable_identity(manifest,project)
-    root=remote_paths.normalize_workspace_root(remote_workspace_root)
+    root, project_relative = remote_paths.project_location(project, alias, remote_workspace_root)
     receipt=ssh(alias,remote_paths.workspace_probe_command(root),timeout=30)
     snapshot=remote_paths.parse_workspace_probe(receipt,root)
-    relative=remote_paths.attempt_relative_path(identity['project_slug'],identity['stage_sequence'],identity['stage_slug'],'YYYYMMDD-HHMMSS-XXXX')
+    relative=remote_paths.attempt_relative_path(identity['project_slug'],identity['stage_sequence'],identity['stage_slug'],'YYYYMMDD-HHMMSS-XXXX', project_relative)
     return {**identity,'alias':alias,'remote_workspace_root':root,'workspace':snapshot,
             'remote_path_absolute':remote_paths.absolute_attempt_path(snapshot['absolute_path'],relative),
             'remote_mutation':False,'path_schema':'fpilot.remote-attempt-path','note':'只读路径预览；时间与短后缀在准备执行时生成，不创建目录或提交任务。'}
@@ -660,12 +661,13 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         raise ValueError('此冻结输入指定 ICHARG=1；请先选择同项目、同服务器的兼容 CHGCAR 来源')
     elif restart_mode or restart_reason:
         raise ValueError('续算参数缺少来源 attempt')
-    validate_parallel(files.get('INCAR', b'').decode('utf-8', errors='replace'),
-                      rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
-                      gpu=rendered['profile'].get('resource_mode') == 'gpu')
-    source_contracts.validate_wave_parallel(chain_source.get('source_contract') if chain_source else contract, files['INCAR'],
-                                            rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
-                                            gpu=rendered['profile'].get('resource_mode') == 'gpu')
+    if scheduler != 'custom':
+        validate_parallel(files.get('INCAR', b'').decode('utf-8', errors='replace'),
+                          rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
+                          gpu=rendered['profile'].get('resource_mode') == 'gpu')
+        source_contracts.validate_wave_parallel(chain_source.get('source_contract') if chain_source else contract, files['INCAR'],
+                                                rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
+                                                gpu=rendered['profile'].get('resource_mode') == 'gpu')
     restart_policy=None
     dependency=None
     if manifest.get('dependencies') and not restart and not chain_source and not contract:
@@ -719,12 +721,12 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
             prior.get('stage_slug') != identity['stage_slug']
         ):
             raise ValueError('该节点已产生 当前 attempt，远程阶段标识已锁定')
-    root = remote_paths.normalize_workspace_root(config.get('remote_workspace_root'))
+    root, project_relative = remote_paths.project_location(project, config['alias'], config.get('remote_workspace_root'))
     workspace_receipt = ssh(config['alias'], remote_paths.workspace_probe_command(root), timeout=30)
     snapshot = remote_paths.parse_workspace_probe(workspace_receipt, root)
     key=attempt_id or uuid.uuid4().hex
     attempt_segment=datetime.now().astimezone().strftime('%Y%m%d-%H%M%S')+'-'+key[:4]
-    relative = remote_paths.attempt_relative_path(identity['project_slug'],identity['stage_sequence'],identity['stage_slug'],attempt_segment)
+    relative = remote_paths.attempt_relative_path(identity['project_slug'],identity['stage_sequence'],identity['stage_slug'],attempt_segment, project_relative)
     remote_path = remote_paths.join_workspace(root, relative)
     absolute_path = remote_paths.absolute_attempt_path(snapshot['absolute_path'], relative)
     artifact_names = (
@@ -736,7 +738,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         '.job-id', '.exit-status',
     )
     artifact_paths = {name: absolute_path + '/' + name for name in artifact_names}
-    script=with_exit_trap(rendered['script'])
+    script=with_exit_trap(rendered['script'],scheduler)
     stored_config = dict(config)
     stored_config['remote_workspace_root'] = root
     record={'id':key,'state':'PREPARED','created_at':now(),'bundle_id':bundle_id,'config':stored_config,
@@ -749,7 +751,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
             'remote_workspace_snapshot':snapshot,'remote_relative_path':relative,
             'relative_path':relative,'remote_path':remote_path,'remote_path_absolute':absolute_path,
             'remote_host':config['alias'],'artifact_paths':artifact_paths,
-            'remote_project_path_absolute':snapshot['absolute_path'].rstrip('/')+'/material-projects/'+identity['project_slug'],
+            'remote_project_path_absolute':remote_paths.project_path(snapshot['absolute_path'],project_relative),
             'path_schema':'fpilot.remote-attempt-path','script':script,'input_audit':audit,
             'source_file_plan':storage_plan,'source_contract':contract, 'role_source_snapshot':role_source,
             'final_incar': files['INCAR'].decode(),
@@ -762,7 +764,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
             'execution_scope':execution_scope or identity['node_id'],'branch_scopes':binding['scopes'],
             'settings_snapshot':settings_snapshot,
             'script_sha256':hashlib.sha256(script.encode()).hexdigest(),'job_id':None,'scheduler':scheduler,
-            'note':'准备完成尚未上传；点击提交授权仅此 attempt 一次 {}。'.format('sbatch' if scheduler=='slurm' else 'qsub')}
+            'note':'准备完成尚未上传；点击提交授权仅此 attempt 一次 {}。'.format('运行自定义命令' if scheduler=='custom' else 'sbatch' if scheduler=='slurm' else 'qsub')}
     if contract and contract.get('roles') and manifest.get('dependencies'):
         first=next(iter(contract['roles'].values()))
         record['dependency_snapshot']={'schema':'fpilot.dependency-snapshot.v1','upstream_attempt_id':first['attempt_id'],'source_path':first['source_path'],'source_node_id':first['node_id'],'files':role_source['files'],'reason':'冻结来源合同','scientific_validation':'NOT_PERFORMED'}
@@ -903,10 +905,7 @@ if not matches:
 if test -d "$project_dir"; then
   if test -f "$project_dir/.fpilot/project.json"; then
     {interpreter} -c {shlex.quote(check)} {identity_json} "$project_dir/.fpilot/project.json"
-  elif ! test -z "$(find "$project_dir" -mindepth 1 -maxdepth 1 -print -quit)"; then
-    printf 'FPILOT_PROJECT_CONFLICT=1\n'
-    printf '远端项目目录非空且没有归属记录；请使用独立的远端项目标识后重新冻结。没有提交任务。\n' >&2
-    exit 1
+
   fi
 else
   mkdir -p "$project_dir"
@@ -935,8 +934,7 @@ def submit(key):
     assert_current(record.get('settings_snapshot'))
     # Reject a locally changed frozen script before any remote read.
     snapshot = record.get('template_snapshot')
-    if snapshot and (record['script'] != with_exit_trap(snapshot['rendered_text'])
-                     or hashlib.sha256(record['script'].encode()).hexdigest() != record['script_sha256']):
+    if snapshot and (record['script'] != with_exit_trap(snapshot['rendered_text'],scheduler_name(record))):
         raise ValueError('冻结模板脚本不一致；没有提交')
     # Fresh resource probe before every dispatch; unchanged rendered resources required.
     from . import fast_dispatch
@@ -952,11 +950,11 @@ def submit(key):
         snapshot = record['template_snapshot']
         fresh_template = job_templates.render_template(snapshot['id'],
             template_resources(checked['profile']), record['config']['alias'], record['config'])
-        if (not fresh_template['submission_supported'] or fresh_template['original_hash'] != snapshot['original_hash']
+        if (not fresh_template['submission_supported']
                 or fresh_template['rendered_text'] != snapshot['rendered_text']):
             raise ValueError('模板或运行时已变化；没有提交')
-        expected_script = with_exit_trap(fresh_template['rendered_text'])
-        if record['script'] != expected_script or hashlib.sha256(record['script'].encode()).hexdigest() != record['script_sha256']:
+        expected_script = with_exit_trap(fresh_template['rendered_text'],scheduler_name(record))
+        if record['script'] != expected_script:
             raise ValueError('冻结模板脚本不一致；没有提交')
     manifest,files=bundle(record['bundle_id'],allow_dependencies=True)
     from . import source_contracts, branch_bindings
@@ -986,11 +984,12 @@ def submit(key):
     if record.get('chain_source_snapshot', {}).get('actual_poscar'):
         files.pop('POSCAR.reference', None)
         files['POSCAR'] = record['chain_source_snapshot']['actual_poscar'].encode()
-    validate_parallel(files.get('INCAR', b'').decode(), record['profile'].get('mpi_ranks', record['profile'].get('ppn', record['profile'].get('ntasks'))),
-                      gpu=record['profile'].get('resource_mode') == 'gpu')
-    source_contracts.validate_wave_parallel(record.get('chain_source_snapshot', {}).get('source_contract') or record.get('source_contract'), files.get('INCAR', b''),
-                                            record['profile'].get('mpi_ranks', record['profile'].get('ppn', record['profile'].get('ntasks'))),
-                                            gpu=record['profile'].get('resource_mode') == 'gpu')
+    if scheduler_name(record) != 'custom':
+        validate_parallel(files.get('INCAR', b'').decode(), record['profile'].get('mpi_ranks', record['profile'].get('ppn', record['profile'].get('ntasks'))),
+                          gpu=record['profile'].get('resource_mode') == 'gpu')
+        source_contracts.validate_wave_parallel(record.get('chain_source_snapshot', {}).get('source_contract') or record.get('source_contract'), files.get('INCAR', b''),
+                                                record['profile'].get('mpi_ranks', record['profile'].get('ppn', record['profile'].get('ntasks'))),
+                                                gpu=record['profile'].get('resource_mode') == 'gpu')
     if not fast and record.get('dependency_snapshot') and not record.get('source_contract'):
         fresh_dependency=dependency_snapshot(record['bundle_id'],manifest,files,
             record['dependency_snapshot']['upstream_attempt_id'],record['config']['alias'],
@@ -1039,6 +1038,9 @@ def submit(key):
     expected = shlex.quote(record['remote_workspace_root_abs'])
     project_guard=project_directory_guard(record)
     submit_command='sbatch --parsable '+job_script if scheduler=='slurm' else 'qsub '+job_script
+    if scheduler=='custom':
+        from .custom_commands import start_command
+        submit_command=start_command(record,key,record['script'])
     command=f'''set -e
 root={root_expr}
 {remote_paths.workspace_dispatch_guard(paths['root'],record['remote_workspace_root_abs'])}
@@ -1056,11 +1058,16 @@ mkdir .submit-once
 printf 'FPILOT_JOB_ID='
 cat .job-id
 '''
+    if scheduler=='custom':
+        command=command.replace(' > .job-id',' > _fpilot/command-start.json').replace("printf 'FPILOT_JOB_ID='\ncat .job-id",'cat _fpilot/command-start.json')
     if fast:
         command=fast_dispatch.prefix(record)+command.replace('mkdir "$dest"','mkdir "$dest"\nfpilot_created=1').replace(submit_command+' > .job-id','fpilot_submitting=1\n'+submit_command+' > .job-id')
     try:
         receipt=ssh(record['config']['alias'],command,stream.getvalue(),timeout=dispatch_timeout)
         if (fast or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return get(key)
+        if scheduler=='custom':
+            from .custom_commands import dispatch_result
+            return dispatch_result(record,receipt)
         token_pattern=r'\d+(?:\.[A-Za-z0-9_.-]+)?' if scheduler=='pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
         match=re.search(r'^FPILOT_JOB_ID=('+token_pattern+r')\s*$',receipt['stdout'],re.M)
         job_id=match.group(1).split(';',1)[0] if match else None
@@ -1093,6 +1100,9 @@ def refresh(key):
         from .execution_cancel import recover
         recover(record['project_id'], key)
         return get(key)
+    if scheduler_name(record)=='custom':
+        from .custom_commands import refresh as refresh_command
+        return record if record['state']=='PREPARED' else refresh_command(key)
     if record['state'] == 'CANCELLED': return record
     if record.get('kind') in ('wannier90', 'wannier90-plot'):
         from . import wannier_execution

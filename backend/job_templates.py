@@ -126,13 +126,14 @@ def parse(text, scheduler):
 
 def atomic(path, raw):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
-        temp = Path(f.name)
-        try:
+    temp = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
+            temp = Path(f.name)
             f.write(raw); f.flush(); os.fsync(f.fileno())
-            os.replace(temp, path)
-        finally:
-            if temp.exists(): temp.unlink()
+        os.replace(temp, path)
+    finally:
+        if temp is not None and temp.exists(): temp.unlink()
 
 
 def path_for(key):
@@ -142,26 +143,20 @@ def path_for(key):
 
 
 def get_template(key, include_script=True):
-    record = json.loads(path_for(key).read_text())
+    record = json.loads(path_for(key).read_text(encoding='utf-8'))
     raw = (ROOT / 'job-templates' / 'scripts' / record['script_hash']).read_bytes()
-    if digest(raw) != record['script_hash']:
-        raise ValueError('模板原文 hash 校验失败')
     # Re-evaluate legacy metadata; cached availability is never authorization.
     text = raw.decode('utf-8')
-    scheduler = scheduler_of(text)
+    scheduler = record.get('scheduler', 'custom')
     values, _, _ = parse(text, scheduler)
     record.update(resources=values, blockers=[], submission_supported=True,
                   availability='selectable', runtime_validation_required=True)
     from .gpu_requests import hints
     request = hints(text, record['program'], values)
     if request: record['resource_request'] = request
-    from .vasp_variants import capabilities, inspect
-    actual = inspect(execution_text(text)).get('program')
-    named = {actual} if actual else set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(text))))
-    expected = 'vasp_std' if record['program'] == 'gpu_vasp' else record['program']
-    if named and (expected == 'wannier90' or expected in ('vasp_std','vasp_ncl') and expected not in named):
-        record['program_conflict'] = '原稿明确启动 ' + '/'.join(sorted(named)) + '，与保存分类不一致'
-    record['compatible_programs'] = capabilities(execution_text(text), record['program']) if not record.get('program_conflict') else []
+    from .vasp_variants import capabilities
+    record['compatible_programs'] = capabilities(execution_text(text), record['program'])
+    record.pop('program_conflict', None)
     from .verified_templates import SOURCES
     evidence = next((item[4] for item in SOURCES if item[0] == record['alias'] and item[2] == record['script_hash']), None)
     record['verification_status'] = ('candidate' if evidence.startswith('CANDIDATE') else 'historical') if evidence else 'user_imported'
@@ -170,7 +165,7 @@ def get_template(key, include_script=True):
 
 
 def fits_program(record, program):
-    return (not record.get('program_conflict') and
+    return (record.get('scheduler') == 'custom' or
             (record['program'] == program or program == 'vasp_std' and record['program'] == 'gpu_vasp'
              or program in record.get('compatible_programs', [])))
 
@@ -189,9 +184,10 @@ def list_templates():
 
 def import_template(text, alias, program, source, name='', prepared=False, parent_id=None, scheduler=None):
     raw = script_bytes(text)
-    detected = scheduler_of(raw.decode('utf-8'))
-    if scheduler is not None and scheduler != detected:
-        raise ValueError('调度器声明与原稿不一致；未保存')
+    if scheduler is None:
+        try: scheduler = scheduler_of(raw.decode('utf-8'))
+        except ValueError: scheduler = 'custom'
+    detected = servers.normalize_scheduler(scheduler)
     if alias not in servers.load_registry()['hosts']:
         raise ValueError('请选择登记的 SSH 别名')
     if program not in ('vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other'):
@@ -307,7 +303,11 @@ def runtime_match(text, alias, config=None):
 def render_template(template_id, resources=None, alias=None, config=None, allow_prepared=False):
     record = get_template(template_id)
     execution_original = execution_text(record['original_text'])
-    overrides = resources_checked(resources or {})
+    raw_mode = record['scheduler'] == 'custom' or (config or {}).get('script_edit_mode') == 'raw'
+    try: detected = scheduler_of(execution_original)
+    except ValueError: detected = None
+    raw_mode = raw_mode or detected != record['scheduler']
+    overrides = {} if raw_mode else resources_checked(resources or {})
     values, parsed_blockers, indexes = parse(execution_original, record['scheduler'])
     blockers = []
     values.update(overrides)
@@ -316,16 +316,17 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     if config and servers.normalize_scheduler(config.get('scheduler')) != record['scheduler']:
         blockers.append('模板调度器与所选主机不一致')
     missing = [key for key in FIELDS if key not in values]
-    if missing: blockers.append('缺少覆盖后的资源字段：' + '、'.join(missing))
-    rendered = (render_pbs(execution_original, values, indexes) if record['scheduler']=='pbs'
+    raw_mode = raw_mode or bool(missing) or any('Slurm' in b for b in parsed_blockers) or bool(re.search(r'(?m)^\s*#PBS\s+-l.*(?:select=|nodes=[2-9][0-9]*:)',execution_original))
+    if record['scheduler']=='slurm' and re.search(r'(?m)^\s*#SBATCH\s+.*(?:--cpus-per-task(?:=|\s+)(?!1(?:\s|$))|--ntasks-per-|--gpus-per-task|--cpus-per-gpu|--nodes(?:=|\s+)(?!1(?:\s|$)))',execution_original): raw_mode=True
+    rendered = execution_original if raw_mode else (render_pbs(execution_original, values, indexes) if record['scheduler']=='pbs'
                 else render_slurm(execution_original, values)) if not blockers else None
-    gpu_mode = bool(values.get('mpi_ranks'))
+    gpu_mode = not raw_mode and bool(values.get('mpi_ranks'))
     if gpu_mode and rendered: rendered = render_gpu_ranks(rendered, values['mpi_ranks'])
     script_mode=bool(config and config.get('runtime_source')=='script')
     program_adaptation, variant_blockers, variant_diff = None, [], ''
     expected = (servers.program_name(config) if config else None) or record['program']
     original_program = 'vasp_std' if record['program'] == 'gpu_vasp' else record['program']
-    if rendered and (script_mode or record.get('adapter_version') == 2) and expected in ('vasp_std','vasp_ncl') and original_program != expected:
+    if not raw_mode and rendered and (script_mode or record.get('adapter_version') == 2) and expected in ('vasp_std','vasp_ncl') and original_program != expected:
         if fits_program(record, expected):
             from .vasp_variants import adapt
             before_variant = rendered
@@ -340,61 +341,24 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
         rendered = re.sub(r'(?<![A-Za-z0-9_/])vasp_std(?![A-Za-z0-9_])',
                           config['vasp_executable'], rendered)
     runtime_ok = bool(rendered)
-    execution_blockers = list(blockers) + variant_blockers
+    execution_blockers = list(blockers)
     if gpu_mode and expected in ('vasp_std','vasp_ncl') and values.get('required_gpus') is not None and int(values['mpi_ranks'])!=int(values['required_gpus']):
         execution_blockers.append('VASP OpenACC 每张使用的 GPU 对应一个 MPI 进程；请使 MPI 进程数与使用 GPU 数量相等')
-    warnings=['脚本正文由用户管理；预览和实时资源检查仍需完成']
-    if script_mode or record.get('adapter_version')==2:
-        # Preserve arbitrary environment setup; reject only concrete mapping/exit conflicts.
-        execution_blockers.extend(v for v in parsed_blockers if not v.startswith(('PBS -l 资源不支持：','PBS 选项未纳入当前映射：')) and 'GPU 环境' not in v and (not v.startswith('第 ') or 'Slurm 资源' in v))
-        for i,line in enumerate(execution_original.splitlines(),1):
-            code=line.strip()
-            if not code or code.startswith('#'):continue
-            if re.search(r'\bcd\s+',code):
-                try:parts=shlex.split(code,comments=True)
-                except ValueError:parts=[]
-                args=parts[1:] if parts and parts[0]=='cd' else []
-                if args and args[0]=='--':args=args[1:]
-                workdir='PBS_O_WORKDIR' if record['scheduler']=='pbs' else 'SLURM_SUBMIT_DIR'
-                safe=len(args)==1 and re.fullmatch(r'\$(?:'+workdir+r'|\{'+workdir+r'(?::\?[^}]*)?\})',args[0])
-                if not safe and (not parts or 'cd' in parts):
-                    execution_blockers.append('第 {} 行进入固定/未知目录；请保存适配副本，使用调度器提交目录'.format(i))
-            if re.search(r'\btrap\s+',code):execution_blockers.append('第 {} 行已有 trap；请在适配副本中处理退出状态采集冲突'.format(i))
-            for match in re.finditer(r'(?:-np|-n|--ntasks)\s*=?\s*([0-9]+)\b',code):
-                if match[0].startswith(('-n ','-n=' ,'--ntasks')) and not re.search(r'\b(?:mpirun|mpiexec|srun)\b',code):continue
-                expected_ranks = values.get('mpi_ranks', values.get('ppn'))
-                if expected_ranks and int(match[1]) != expected_ranks:
-                    execution_blockers.append(('第 {} 行固定 MPI 进程数 {} 与请求进程数 {} 不一致；请修改正文或保持原进程数' if gpu_mode else '第 {} 行固定 MPI 进程数 {} 与请求核数 {} 不一致；请修改正文或保持原核数').format(i,match[1],expected_ranks))
-        if gpu_mode and rendered:
-            for line in code_lines(rendered):
-                if re.search(r'\b(?:mpirun|mpiexec)\b', line) and not re.search(r'(?:-np|-n|--ntasks)(?:=|\s+)\S+', line):
-                    execution_blockers.append('GPU MPI 启动器未明确进程数；整节点分配会改变默认进程数，请编辑副本明确 -np')
-            for line in code_lines(rendered):
-                if not re.search(r'\b(?:mpirun|mpiexec|srun)\b',line): continue
-                argument=re.search(r'(?:-np|-n|--ntasks)(?:=|\s+)(\S+)',line)
-                if not argument: continue  # bare srun uses the mapped --ntasks header
-                value=argument[1].strip('"\'')
-                nprocs=value in ('$NPROCS','${NPROCS}') and re.search(r'(?m)^[ \t]*(?:export[ \t]+)?NPROCS[ \t]*=[ \t]*'+str(values['mpi_ranks'])+r'[ \t]*$',rendered)
-                slurm=value in ('$SLURM_NTASKS','${SLURM_NTASKS}') and record['scheduler']=='slurm'
-                if not (value.isdigit() or nprocs or slurm):
-                    execution_blockers.append('动态 MPI 进程数无法明确映射，请在适配副本中明确启动进程数')
-        if record['scheduler']=='slurm':
-            if gpu_mode and re.search(r'(?m)^\s*#SBATCH\s+--(?:gpus-per-task|cpus-per-gpu|gpu-bind|gpu-freq|oversubscribe)\b',execution_original):
-                execution_blockers.append('当前 GPU 适配支持单节点整机占用；逐任务绑定、共享或线程布局需要另存明确的适配副本')
-            if re.search(r'(?m)^\s*#SBATCH\s+(?:--cpus-per-task(?:=|\s+)(?!1(?:\s|$))\S+|-c\s*(?!1(?:\s|$))\S+|--(?:ntasks-per-node|ntasks-per-core|ntasks-per-socket)\b)',execution_original) or (not gpu_mode and re.search(r'(?m)^\s*#SBATCH\s+--(?:gres|gpus)\b', execution_original)):
-                execution_blockers.append('此 Slurm 脚本含线程/GPU/特殊任务布局，不能把总核数直接映射为 ntasks；请先保存纯 MPI 单节点适配副本')
-            if re.search(r'(?m)^\s*#SBATCH\s+(?:--nodes(?:=|\s+)|-N\s*)(?!1(?:\s|$))\S+',execution_original):
-                execution_blockers.append('当前资源选择仅支持单节点；请先保存单节点适配副本')
-        elif re.search(r'(?m)^\s*#PBS\s+-l\s+.*(?:select=|nodes=[2-9][0-9]*:)',execution_original) or (not gpu_mode and re.search(r'(?m)^\s*#PBS\s+-l\s+.*gpus=', execution_original)):
-            execution_blockers.append('PBS select/多节点/GPU 资源不属于当前单节点核数映射；请保存匹配的适配副本')
-        if config and (script_mode or record.get('adapter_version')==2):
-            compatible=fits_program(record,expected)
-            if not compatible:execution_blockers.append('脚本分类 {} 与本次程序 {} 不一致，请选择对应脚本'.format(record['program'],expected))
-            named=set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', '\n'.join(code_lines(rendered or execution_original))))
-            if expected in ('vasp_std','vasp_ncl') and named and expected not in named:
-                execution_blockers.append('脚本正文明确启动 {}，本次需要 {}；无法明确适配，请保存对应副本'.format('/'.join(sorted(named)),expected))
-            if expected == 'wannier90' and named:
-                execution_blockers.append('脚本正文明确启动 VASP，与 Wannier90 分类不一致，请导入对应原稿')
+    # Only validate a resource edit the app is actually trying to apply.
+    # Raw mode bypasses this mapping; importing/selecting never inspects commands.
+    if gpu_mode and rendered:
+        for line in code_lines(rendered):
+            if not re.search(r'\b(?:mpirun|mpiexec|srun)\b',line):continue
+            argument=re.search(r'(?:-np|-n|--ntasks)(?:=|\s+)(\S+)',line)
+            if not argument:
+                if re.search(r'\b(?:mpirun|mpiexec)\b',line):execution_blockers.append('GPU 资源编辑未明确进程数；可编辑副本或选择原样脚本')
+                continue
+            value=argument[1].strip('"\'')
+            if value.isdigit():
+                if int(value)!=int(values['mpi_ranks']):execution_blockers.append('固定 MPI 进程数与本次修改不同；可编辑副本或选择原样脚本')
+            elif not ((value in ('$NPROCS','${NPROCS}') and re.search(r'(?m)^[ \t]*(?:export[ \t]+)?NPROCS[ \t]*=[ \t]*'+str(values['mpi_ranks'])+r'[ \t]*$',rendered)) or value in ('$SLURM_NTASKS','${SLURM_NTASKS}') and record['scheduler']=='slurm'):
+                execution_blockers.append('动态 MPI 进程数无法应用本次修改；可选择原样脚本')
+    warnings=['原样脚本：正文及资源声明由用户管理，不按提交页自动改写'] if raw_mode else ['脚本正文由用户管理；资源编辑结果见最终脚本']
     execution_blockers=list(dict.fromkeys(execution_blockers))
     parent_text = get_template(record['parent_id'])['original_text'] if record.get('parent_id') else record['original_text']
     return dict(schema='fpilot.job-template-preview.v1', id=template_id, name=record['name'], alias=selected,

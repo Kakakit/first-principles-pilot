@@ -121,7 +121,8 @@ def fetch(record, kind, force=False):
     with remote_cache.singleflight('plot-data',{'key':key}):
         cached=local(record,kind)
         if cached and not force:return cached
-        output='$HOME/230269265lht/fpilot-analysis/compact-plots/'+key+'/data.npz'
+        from . import servers
+        output=servers.scratch_root(record['config']['alias'],'compact-plots')+'/'+key+'/data.npz'
         companion=script(record,kind,output)
         scf=None
         if kind=='band' and (record.get('dependency_snapshot') or {}).get('upstream_attempt_id'):

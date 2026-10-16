@@ -429,8 +429,8 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
     relative_windows = relative_window_values(win, actual_reference['fermi_eV'], relative_windows)
     actual_values = parameter_values(win)
     script, script_source = _render_script(config, resource['profile'], template_id)
-    script = ex.with_exit_trap(script)
-    root = remote_paths.normalize_workspace_root(config.get('remote_workspace_root'))
+    script = ex.with_exit_trap(script,config['scheduler'])
+    root, project_relative = remote_paths.project_location(project, config['alias'], config.get('remote_workspace_root'))
     snapshot = remote_paths.parse_workspace_probe(ex.ssh(config['alias'], remote_paths.workspace_probe_command(root), timeout=30), root)
     scope=execution_scope or node_id
     stage = next(n['data'] for n in project['nodes'] if n['id']==scope)
@@ -445,7 +445,7 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
             raise ValueError('该 Wannier90 节点已有 attempt，远端阶段标识不可改变')
     key = attempt_id or uuid.uuid4().hex
     segment = datetime.now().astimezone().strftime('%Y%m%d-%H%M%S') + '-' + key[:4]
-    relative = remote_paths.attempt_relative_path(slug, sequence, stage_slug, segment)
+    relative = remote_paths.attempt_relative_path(slug, sequence, stage_slug, segment, project_relative)
     absolute = remote_paths.absolute_attempt_path(snapshot['absolute_path'], relative)
     bundle = {'schema': 'fpilot.wannier90-frozen-bundle.v1', 'project_id': project['id'],
               'node_id': node_id, 'parent_attempt_id': parent_id, 'source_path': source['source_path'],
@@ -479,7 +479,7 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
               'remote_workspace_root': root, 'remote_workspace_root_abs': snapshot['absolute_path'],
               'remote_relative_path': relative, 'relative_path': relative,
               'remote_path': remote_paths.join_workspace(root, relative), 'remote_path_absolute': absolute,
-              'remote_project_path_absolute': snapshot['absolute_path'].rstrip('/') + '/material-projects/' + slug,
+              'remote_project_path_absolute': remote_paths.project_path(snapshot['absolute_path'],project_relative),
               'path_schema': 'fpilot.remote-attempt-path', 'remote_host': config['alias'],
               'script': script, 'script_sha256': _sha(script.encode()), 'script_source': script_source,
               'parent_attempt_id': parent_id, 'source_snapshot': source, 'seed': seed,
@@ -556,7 +556,7 @@ def submit(key):
     if not resource['resource_ready'] or resource['profile'] != record['profile']:
         raise ValueError('Wannier90 实时资源已变化，请重新准备')
     script, source = _render_script(record['config'], record['profile'], record['script_source']['id'])
-    if _sha(ex.with_exit_trap(script).encode()) != record['script_sha256'] or source != record['script_source']:
+    if ex.with_exit_trap(script,ex.scheduler_name(record)) != record['script'] or source != record['script_source']:
         raise ValueError('Wannier90 脚本已变化，请重新准备')
     # Recheck large files in place; they are never downloaded to the Mac.
     # The PREPARED record already binds the parent and project graph.  Recheck
@@ -618,6 +618,9 @@ def submit(key):
     links = ex.source_file_commands({'source_path': bundle['source_path']}, expected_links)
     submit_command = ('sbatch --parsable --export=ALL,W90_SEED=' + bundle['seed'] + ' ' + script_name if scheduler == 'slurm'
                       else 'qsub -v W90_SEED=' + bundle['seed'] + ' ' + script_name)
+    if scheduler=='custom':
+        from .custom_commands import start_command
+        submit_command=start_command(record,key,record['script'])
     remote = f'''set -e
 root={remote_paths.shell_path(record['remote_workspace_root'])}
 {remote_paths.workspace_dispatch_guard(record['remote_workspace_root'],record['remote_workspace_root_abs'])}
@@ -625,8 +628,6 @@ project_dir={project_dir}
 if test -d "$project_dir"; then
   if test -f "$project_dir/.fpilot/project.json"; then
     test "$(cat "$project_dir/.fpilot/project.json")" = {identity}
-  else
-    test -z "$(find "$project_dir" -mindepth 1 -maxdepth 1 -print -quit)"
   fi
 else mkdir -p "$project_dir"; fi
 mkdir -p "$project_dir/.fpilot"
@@ -643,11 +644,16 @@ mkdir .submit-once
 printf 'FPILOT_JOB_ID='
 cat .job-id
 '''
+    if scheduler=='custom':
+        remote=remote.replace(' > .job-id',' > _fpilot/command-start.json').replace("printf 'FPILOT_JOB_ID='\ncat .job-id",'cat _fpilot/command-start.json')
     if fast:
         remote=fast_dispatch.prefix(record,'wannier90')+fast_dispatch.source_guards(bundle['source_path'],bundle['source_files'])+remote.replace('mkdir "$dest"','mkdir "$dest"\nfpilot_created=1').replace(submit_command+' > .job-id','fpilot_submitting=1\n'+submit_command+' > .job-id')
     try:
         receipt = ex.ssh(record['config']['alias'], remote, stream.getvalue(), timeout=180)
         if (fast or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return ex.get(key)
+        if scheduler=='custom':
+            from .custom_commands import dispatch_result
+            return dispatch_result(record,receipt)
         token = r'\d+(?:\.[A-Za-z0-9_.-]+)?' if scheduler == 'pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
         match = re.search(r'^FPILOT_JOB_ID=(' + token + r')\s*$', receipt['stdout'], re.M)
         job_id = match.group(1).split(';', 1)[0] if match else None

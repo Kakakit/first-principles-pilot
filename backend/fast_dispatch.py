@@ -7,7 +7,7 @@ from pathlib import Path
 from . import servers,remote_paths,remote_transport,source_files,execution as ex
 
 
-def enabled(record):return record.get('dispatch_protocol')=='fpilot.batch-dispatch.v1'
+def enabled(record):return record.get('config',{}).get('scheduler')!='custom' and record.get('dispatch_protocol')=='fpilot.batch-dispatch.v1'
 
 
 def prefix(record,purpose='vasp'):

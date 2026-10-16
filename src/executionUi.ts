@@ -22,6 +22,8 @@ export type RegisteredProfile = {
   pmi_type: string;
   runtime_source?: string;
   remote_workspace_root?: string;
+  pyw90_python?:string;
+  pyw90_package?:string;
 };
 
 export type ProbeNode = Record<string, string> & { NODE: string; STATUS: string };

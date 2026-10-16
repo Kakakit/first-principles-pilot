@@ -4,7 +4,7 @@ export type ScriptRecord={id:string;name:string;alias:string;scheduler:string;pr
 export const programLabels:Record<string,string>={vasp_std:'VASP 常规',vasp_ncl:'VASP SOC／非共线',gpu_vasp:'GPU VASP',wannier90:'Wannier90',other:'其他程序'};
 export const schedulerName=(value:string)=>(value||'pbs').toLowerCase().replace('pbs/torque','pbs').replace('torque','pbs');
 export function scriptFits(script:ScriptRecord,alias:string,scheduler:string,program:string){
- return Boolean(script.alias===alias&&schedulerName(script.scheduler)===schedulerName(scheduler)&&(script.program===program||program==='vasp_std'&&script.program==='gpu_vasp'||!script.program_conflict&&script.compatible_programs?.includes(program)));
+ return Boolean(script.alias===alias&&schedulerName(script.scheduler)===schedulerName(scheduler)&&(schedulerName(scheduler)==='custom'||script.program===program||program==='vasp_std'&&script.program==='gpu_vasp'||!script.program_conflict&&script.compatible_programs?.includes(program)));
 }
 export function variantLabel(script:ScriptRecord,program:string){
  const original=script.program==='gpu_vasp'?'vasp_std':script.program;

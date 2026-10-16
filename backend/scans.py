@@ -374,6 +374,7 @@ def resource_preview(batch_id, project_id, config, candidates):
 
 
 def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None, reason='', approved_script='', approved_profile=None, template_id=None, dependency_attempt_id=None, dependency_reason='', candidates=None, approved_previews=None, max_parallel=None):
+    if config.get('scheduler')=='custom':raise ValueError('自定义命令仅手动运行，本轮不自动推进计算链或迭代')
     batch = get(batch_id)
     from . import wannier_scans
     if wannier_scans.is_window(batch):

@@ -53,7 +53,7 @@ def stop_child(process,force=False):
         except ProcessLookupError:pass
 
 
-def ssh_options(alias):
+def ssh_options(alias, resolved=None):
     if os.name=='nt':return []
     # /tmp keeps Unix socket names short, including when TMPDIR is long.
     base=Path('/tmp') if Path('/tmp').is_dir() else Path(tempfile.gettempdir())
@@ -61,7 +61,9 @@ def ssh_options(alias):
     path.mkdir(mode=0o700,exist_ok=True);path.chmod(0o700)
     import hashlib
     from .site_registration import connection_identity
-    identity=alias+repr(sorted(connection_identity(alias).items()))
+    resolved=resolved if resolved is not None else connection_identity(alias)
+    if resolved.get('controlpath') not in (None, 'none'): return []
+    identity=alias+repr(sorted(resolved.items()))
     return ['-o','ControlMaster=auto','-o','ControlPersist=300','-o','ControlPath='+str(path/hashlib.sha256(identity.encode()).hexdigest()[:20])]
 
 

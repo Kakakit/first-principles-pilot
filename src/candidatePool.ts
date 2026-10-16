@@ -1,7 +1,7 @@
 import type {ServerPreview,ServerProbe,ProbeNode} from './executionUi';
 export type Candidate={node:string;cores:number;reason:string};
 export function poolNodes(probe:ServerProbe|null,alias?:string):ProbeNode[]{
- return (probe?.preflight.hosts.flatMap(h=>h.nodes)||[]).filter(n=>!(alias==='jutai-1'&&n.NODE==='node06'));
+ return (probe?.preflight.hosts.flatMap(h=>h.nodes)||[]).filter(n=>n.STATUS!=='EXCLUDED');
 }
 export function fullNodeCandidates(nodes:ProbeNode[],selected:string[]):Candidate[]{
  return selected.map(name=>{

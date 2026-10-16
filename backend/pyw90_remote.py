@@ -14,8 +14,16 @@ from pathlib import Path
 
 from . import execution, remote_paths, wannier_execution
 
-PYTHON = {'jutai-1': '/home/user/anaconda3/envs/eDMFT/bin/python'}
-PACKAGE = '$HOME/230269265lht/tools/pyw90/1.0.7'
+def runtime(alias):
+    from . import servers
+    value=(servers.load_registry(include_removed=True)['hosts'].get(alias) or {}).get('pyw90') or {}
+    if not value.get('python'): raise ValueError('该服务器尚未配置 PyW90；请在服务器设置填写已有 Python 与安装目录')
+    return value
+
+
+def available(alias):
+    try: runtime(alias); return True
+    except ValueError: return False
 NUMBER = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?'
 ANSI = re.compile(r'\x1b\[[0-9;]*m')
 
@@ -41,8 +49,9 @@ def _file_hashes(alias, path, names):
 
 
 def _run(alias, path, arguments, input_names):
-    if alias not in PYTHON:
-        raise ValueError('该服务器尚未登记 PyW90 解释器和独立安装目录')
+    from . import servers
+    tool=runtime(alias)
+    package=remote_paths.shell_path(tool['package']) if tool.get('package') else "''"
     invocation = ' '.join(map(shlex.quote, arguments))
     adapter = Path(__file__).with_name('pyw90_adapter.py').read_text(encoding='utf-8')
     checker = Path(__file__).with_name('pyw90_window_check.py').read_text(encoding='utf-8')
@@ -50,13 +59,13 @@ def _run(alias, path, arguments, input_names):
                       ' "$scratch"/' + shlex.quote(name) for name in input_names)
     command = ('set -e\ncd ' + remote_paths.shell_path(path) + '\n'
                'source_dir=$(pwd -P)\n'
-               'scratch_root="$HOME/230269265lht/.fpilot/pyw90-advice"\n'
+               'scratch_root='+remote_paths.shell_path(servers.scratch_root(alias,'pyw90-advice'))+'\n'
                'mkdir -p "$scratch_root"\n'
                'scratch=$(mktemp -d "$scratch_root/run.XXXXXX")\n'
                "trap 'rm -rf -- \"$scratch\"' EXIT\n"
                + links + '\ncd "$scratch"\n'
-               'PYTHONPATH="' + PACKAGE + '" MPLBACKEND=Agg timeout 180 '
-               + shlex.quote(PYTHON[alias])
+               'PYTHONPATH=' + package + ' MPLBACKEND=Agg timeout 180 '
+               + shlex.quote(tool['python'])
                + ' -c ' + shlex.quote(checker + '\n' + adapter + '\nmain()\n') + ' '
                + invocation + '\n')
     receipt = execution.ssh(alias, command, timeout=210, stdout_limit=524288)
@@ -170,8 +179,8 @@ def pre_dos_sources(project, node_id):
             channels = ['charge'] if spinors else ['up','down'] if tag(incar,'ISPIN') == '2' else ['single']
             alias = row['config']['alias']
             result.append({**row,'analysis_kind':stage,'scf_attempt_id':scf,'analysis_channels':channels,
-                           'pyw90_available':alias in PYTHON,
-                           'pyw90_reason':'' if alias in PYTHON else '该服务器尚未登记 PyW90 解释器和安装目录'})
+                           'pyw90_available':available(alias),
+                           'pyw90_reason':'' if available(alias) else '该服务器尚未登记 PyW90 解释器和安装目录'})
         except (ValueError,OSError,KeyError,StopIteration): continue
     return result
 

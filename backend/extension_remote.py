@@ -62,7 +62,7 @@ def resource_preview(runtime):
     config=runtime['config']
     report=servers.capacity_probe(config,purpose='analysis')
     if report['availability']['exit_code'] or report['diagnostics']['exit_code']: raise ValueError('主机离线或容量/队列诊断失败')
-    if config['alias']=='jutai-1' and runtime['node']=='node06': raise ValueError('node06 已排除')
+    if runtime['node'] in servers.excluded_nodes(config): raise ValueError('节点已由此服务器配置排除')
     try:
         selection=servers.selector.select_resources(report['preflight'],config['alias'],runtime['node'],user_override=runtime['cores'],user_override_evidence=runtime['reason'])
     except ValueError as exc:

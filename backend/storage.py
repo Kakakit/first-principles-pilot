@@ -30,6 +30,13 @@ def validate_workspace(w):
         ids.add(p['id'])
         if 'stagePolicy' in p and p['stagePolicy'] != 'kind-fixed-v1':
             raise ValueError('项目阶段编号规则无效。')
+        if p.get('remotePathPolicy') not in (None,'project-directory-v2'): raise ValueError('项目目录规则无效')
+        if p.get('remoteWorkspaceRoot'):
+            from .remote_paths import normalize_workspace_root
+            normalize_workspace_root(p['remoteWorkspaceRoot'])
+        directories=p.get('remoteDirectories',{})
+        if not isinstance(directories,dict) or any(not isinstance(v,str) or not v.startswith('/') or any(c in v for c in '\x00\r\n') for v in directories.values()):
+            raise ValueError('项目目录需为各服务器的绝对路径')
         remote_slug = p.get('remoteSlug')
         if not isinstance(remote_slug, str) or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?', remote_slug):
             raise ValueError('远程项目标识无效。')
@@ -168,7 +175,7 @@ class WorkspaceStore:
                 raise ConflictError('磁盘版本已变化。请先导出当前编辑，再重新载入磁盘版本。')
             if previous:
                 from .node_editability import assert_changes
-                assert_changes(self.root, json.loads((self.root / 'snapshots' / previous[0]).read_text()), workspace)
+                assert_changes(self.root, json.loads((self.root / 'snapshots' / previous[0]).read_text(encoding='utf-8')), workspace)
             for p in workspace['projects']:
                 for n in p['nodes']:
                     if n['data'].get('structure'):

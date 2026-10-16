@@ -150,7 +150,7 @@ class WannierExecutionTests(unittest.TestCase):
                   'profile': {'name':'w90','queue':'batch','node':'node02','ppn':2,'walltime':'48:00:00'},
                   'node':'node02','cores':2,'reason':'',
                   'script_source': {'id':None,'sha256':'b'*64,'source':'script'},
-                  'script_sha256':hashlib.sha256(w90.ex.with_exit_trap('script').encode()).hexdigest()}
+                  'script':w90.ex.with_exit_trap('script'),'script_sha256':hashlib.sha256(w90.ex.with_exit_trap('script').encode()).hexdigest()}
         bundle = {'parent_attempt_id':'parent','energy_reference':{'outcar_sha256':'c'*64,'fermi_eV':6.0},'source_path':'/home/user/230269265lht/source','source_files':source,'seed':'wannier90'}
         fake = {'exit_code':0, 'stdout': ''.join(f'FPILOT_W90_FILE={name}|{"b"*64}\n' for name in w90.SOURCE_NAMES), 'stderr':''}
         with patch.object(w90.ex,'get',return_value=record), patch.object(w90,'_bundle',return_value=bundle), \

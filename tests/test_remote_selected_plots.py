@@ -40,7 +40,7 @@ class SupplementaryDiagnosticTests(unittest.TestCase):
         band={'id':'band','config':{'alias':'jutai-1'}};model={'id':'model','config':{'alias':'jutai-1'}}
         sources=[{'attempt_id':record,'name':name,'sha256':'a'*64} for record,names in [('band',['EIGENVAL','KPOINTS','POSCAR']),('model',['wannier90.1_band.dat','wannier90.1_band.labelinfo.dat'])] for name in names]
         receipt={'exit_code':0,'stdout':'FPILOT_PRE_BAND_BYTES=100\nFinal Quality 2.0 meV','stderr':''}
-        with patch.object(execution,'attempt_path',return_value={'shell':'/home/u/230269265lht/test'}),patch.object(compare.remote_transport,'run',return_value=receipt) as request,patch.object(compare.pyw90_remote,'_file_hashes') as old_hash:
+        with patch.object(compare.pyw90_remote,'runtime',return_value={'python':'/configured/python','package':'/configured/pyw90'}),patch.object(execution,'attempt_path',return_value={'shell':'/home/u/230269265lht/test'}),patch.object(compare.remote_transport,'run',return_value=receipt) as request,patch.object(compare.pyw90_remote,'_file_hashes') as old_hash:
             result=compare._pyw90_diagnostic(band,model,model,'wannier90.1',0,sources,None)
             self.assertEqual(result['status'],'COMPLETED');self.assertEqual(request.call_count,1);old_hash.assert_not_called()
             self.assertEqual(request.call_args.args[1].count('sha256sum --'),5)

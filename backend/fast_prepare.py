@@ -19,7 +19,8 @@ def batched(function, kind):
             config = p['config']
             from . import recycle
             recycle.assert_available('inputs' if kind=='vasp' else 'projects',p['bundle_id'] if kind=='vasp' else p['project']['id'])
-            root = remote_paths.normalize_workspace_root(config.get('remote_workspace_root'))
+            project = p['project'] if kind=='wannier90' else ex.frozen_project(p['bundle_id'])
+            root, _ = remote_paths.project_location(project,config['alias'],config.get('remote_workspace_root'))
             validators = [lambda: servers.capacity_probe(config, **({'purpose':'wannier90'} if kind=='wannier90' else {})),
                           lambda: ex.ssh(config['alias'],remote_paths.workspace_probe_command(root),timeout=30)]
             if kind == 'wannier90':

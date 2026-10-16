@@ -33,7 +33,7 @@ class Pyw90RemoteTest(unittest.TestCase):
 
     def test_analysis_uses_temporary_directory_and_only_links_selected_inputs(self):
         receipt = {'exit_code': 0, 'stdout': 'analysis complete', 'stderr': ''}
-        with patch.object(pyw90_remote.execution, 'ssh', return_value=receipt) as ssh:
+        with patch.object(pyw90_remote,'runtime',return_value={'python':'/configured/python','package':'/configured/pyw90'}),patch.object(pyw90_remote.execution, 'ssh', return_value=receipt) as ssh:
             self.assertEqual(pyw90_remote._run(
                 'jutai-1', '$HOME/230269265lht/example',
                 ['pre', 'dos', '--path', '.'], ('vasprun.xml', 'EIGENVAL')),

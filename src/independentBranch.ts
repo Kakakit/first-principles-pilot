@@ -28,5 +28,5 @@ export function independentBranch(project:Project,nodeId:string):Project {
   node.data.sourceDraft={mode:parent?'upstream':'new',purpose:'charge',files:'charge'};
  }
  const id=crypto.randomUUID();
- return {id,stagePolicy:'kind-fixed-v1',name:project.name+' · 独立分支',remoteSlug:'project-'+id.slice(0,8),nodes:[root,...nodes],edges,parameters:structuredClone(project.parameters),sharedPotcar:structuredClone(project.sharedPotcar),updatedAt:new Date().toISOString()};
+ return {id,remotePathPolicy:'project-directory-v2',remoteWorkspaceRoot:project.remoteWorkspaceRoot||'$HOME/fpilot',stagePolicy:'kind-fixed-v1',name:project.name+' · 独立分支',remoteSlug:'project-'+id.slice(0,8),nodes:[root,...nodes],edges,parameters:structuredClone(project.parameters),sharedPotcar:structuredClone(project.sharedPotcar),updatedAt:new Date().toISOString()};
 }

@@ -432,7 +432,7 @@ def _remote(record):
     dest=directory(record['id']);cores=None
     record.update(state='DISPATCHING',dispatch_started_at=now());save(record)
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
-    text=remote.script(record['runtime'],record['runtime']['config'].get('remote_workspace_root','$HOME/230269265lht').rstrip('/')+'/analyses/'+record['id'],record['manifest']['entrypoint'],record['location'],cores,record['manifest']['execution']['timeout_seconds'])
+    text=remote.script(record['runtime'],record['runtime']['config'].get('remote_workspace_root','$HOME').rstrip('/')+'/analyses/'+record['id'],record['manifest']['entrypoint'],record['location'],cores,record['manifest']['execution']['timeout_seconds'])
     (dest/'launch.sh').write_text(text);record['script']=text
     assert_available('analyses',record['id'],record)
     record['remote_dir']=remote.stage(record,dest,request);save(record)
@@ -515,7 +515,7 @@ def preview(payload):
     if not resources['ready']:return resources
     key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
     p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':resources})
-    text=remote.script(runtime,(runtime['config'].get('remote_workspace_root') or '$HOME/230269265lht').rstrip('/')+'/analyses/analysis-preview',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
+    text=remote.script(runtime,(runtime['config'].get('remote_workspace_root') or '$HOME').rstrip('/')+'/analyses/analysis-preview',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
     return {'preview_id':key,'ready':True,'resources':resources,'runtime':runtime,'script':text,'reason':'将在独立 analyses 目录执行 doctor、check、run；来源文件只读'}
 
 

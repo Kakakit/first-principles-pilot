@@ -40,9 +40,8 @@ class JobTemplateTests(unittest.TestCase):
         self.assertEqual(record['original_text'], PBS)
         self.assertEqual(record['original_hash'], hashlib.sha256(PBS.encode()).hexdigest())
         preview = job_templates.render_template(record['id'], RESOURCES, alias='jutai-1')
-        self.assertFalse(preview['submission_supported'])
-        blockers=';'.join(preview['execution_blockers'])
-        for text in ('目录','trap','进程数'):self.assertIn(text,blockers)
+        self.assertTrue(preview['submission_supported'])
+        for text in ('cd /scratch/user-choice',"trap 'echo done' EXIT",'mpirun -np 48'):self.assertIn(text,preview['rendered_text'])
         adapted=PBS.replace('cd /scratch/user-choice','cd "$PBS_O_WORKDIR"').replace("trap 'echo done' EXIT\n",'').replace('-np 48','-np 16')
         child=job_templates.import_template(adapted,'jutai-1','vasp_std','user','adapted',parent_id=record['id'])
         rendered=job_templates.render_template(child['id'],RESOURCES,alias='jutai-1',config={'runtime_source':'script','program':'vasp_std','scheduler':'pbs'})
@@ -70,14 +69,14 @@ class JobTemplateTests(unittest.TestCase):
     def test_slurm_thread_layout_is_not_mapped_to_total_mpi_ranks(self):
         record=job_templates.import_template(SLURM.replace('#SBATCH -n 48','#SBATCH -n 12\n#SBATCH --cpus-per-task=4'),'gengzi-187','vasp_std','user')
         preview=job_templates.render_template(record['id'],RESOURCES,alias='gengzi-187',config={'scheduler':'slurm','runtime_source':'script','program':'vasp_std'})
-        self.assertFalse(preview['submission_supported']);self.assertTrue(any('线程' in v for v in preview['execution_blockers']))
+        self.assertTrue(preview['submission_supported']);self.assertEqual(preview['rendered_text'],record['original_text'])
 
     def test_workdir_suffix_and_ambiguous_slurm_directives_are_blocked(self):
         for body,alias,scheduler in ((SAFE_PBS.replace('$PBS_O_WORKDIR','$PBS_O_WORKDIR/../old'),'jutai-1','pbs'),
                                      (SLURM.replace('#SBATCH -n 48','#SBATCH -n 48 --cpus-per-task=4'),'gengzi-187','slurm')):
             record=job_templates.import_template(body,alias,'vasp_std','user')
             rendered=job_templates.render_template(record['id'],RESOURCES,alias=alias,config={'scheduler':scheduler,'runtime_source':'script','program':'vasp_std'})
-            self.assertFalse(rendered['submission_supported'])
+            self.assertTrue(rendered['submission_supported'])
         record=job_templates.import_template(SAFE_PBS+'echo -n 1\n','jutai-1','vasp_std','user')
         self.assertTrue(job_templates.render_template(record['id'],RESOURCES,alias='jutai-1')['submission_supported'])
 
@@ -116,8 +115,8 @@ class JobTemplateTests(unittest.TestCase):
         record = job_templates.import_template(PBS, 'jutai-1', 'vasp_std', 'user')
         self.assertFalse(job_templates.render_template(record['id'], RESOURCES, alias='jutai-5')['submission_supported'])
         self.assertFalse(job_templates.render_template(record['id'], RESOURCES, config={'scheduler':'slurm'})['submission_supported'])
-        with self.assertRaisesRegex(ValueError, '调度器声明'):
-            job_templates.import_template(PBS, 'jutai-1', 'vasp_std', 'user', scheduler='slurm')
+        selected=job_templates.import_template(PBS, 'jutai-1', 'vasp_std', 'user', scheduler='slurm')
+        self.assertEqual(selected['scheduler'],'slurm');self.assertEqual(selected['original_text'],PBS)
 
     def test_recycle_hides_list_without_changing_original(self):
         record = job_templates.import_template(PBS, 'jutai-1', 'vasp_std', 'user')
@@ -128,11 +127,11 @@ class JobTemplateTests(unittest.TestCase):
         self.assertEqual(len(job_templates.list_templates()), 1)
 
     def test_source_size_and_scheduler_identity(self):
-        with self.assertRaises(ValueError):
-            job_templates.import_template('echo hello', 'jutai-1', 'vasp_std', 'user')
+        custom=job_templates.import_template('echo hello', 'jutai-1', 'vasp_std', 'user')
+        self.assertEqual(custom['scheduler'],'custom')
         with self.assertRaises(ValueError):
             job_templates.import_template(PBS, 'unknown-host', 'vasp_std', 'user')
-        self.assertEqual(job_templates.list_templates(), [])
+        self.assertEqual(len(job_templates.list_templates()),1)
 
 
 if __name__ == '__main__': unittest.main()

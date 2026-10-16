@@ -47,7 +47,7 @@ def registered(alias):
     host = servers.load_registry()['hosts'].get(alias)
     if not host:
         raise ValueError('请先在本机登记同一服务器的 SSH 别名')
-    root = remote_paths.validate_root(host.get('remote_workspace_root', '$HOME/230269265lht'))
+    root = remote_paths.validate_root(host.get('remote_workspace_root', '$HOME'))
     return {'alias': alias, 'root': root}
 
 
@@ -100,12 +100,15 @@ def continuation_connection(saved, current, alias):
 Different private-key file names are normal across devices. Actual server/root
 identity must be checked afresh before permitting that difference.
 """
+    # Multiplexing is a local connection preference, not a different server.
+    def target(value):return {k:v for k,v in value.items() if k not in ('controlpath','controlmaster','controlpersist')}
+    saved,current=target(saved),target(current)
     if saved == current:return True
     for path in (ex.ROOT / 'project-sync').glob('*.json'):
         value = json.loads(path.read_bytes())
         if value.get('transfer_mode')=='snapshot' and value.get('imported'):
             known=value.get('calculation_connections',{}).get(alias,[])
-            if saved in known and {k:v for k,v in saved.items() if k!='identityfile'}=={k:v for k,v in current.items() if k!='identityfile'}:return True
+            if any(target(v)==saved for v in known) and {k:v for k,v in saved.items() if k!='identityfile'}=={k:v for k,v in current.items() if k!='identityfile'}:return True
         binding = value.get('servers', {}).get(alias)
         if value.get('imported') and binding:
             fact = remote(registered(alias), 'status', 'connection-verification')['server']
@@ -179,7 +182,7 @@ def dispatch_guard(record):
 
 
 def hosts():
-    return {'device': device(), 'hosts': [{'alias': alias, 'root': host.get('remote_workspace_root', '$HOME/230269265lht')}
+    return {'device': device(), 'hosts': [{'alias': alias, 'root': host.get('remote_workspace_root', '$HOME')}
                                          for alias, host in servers.load_registry()['hosts'].items()]}
 
 

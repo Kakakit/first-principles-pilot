@@ -1473,7 +1473,7 @@ def retry_execution(key: str,payload: ExecutionRetry):
 class PathPreview(BaseModel):
     bundle_id: str
     alias: str
-    remote_workspace_root: str = '$HOME/230269265lht'
+    remote_workspace_root: str = '$HOME'
 
 
 @app.post('/api/execution/path-preview')
@@ -1717,7 +1717,7 @@ from . import job_templates
 class TemplateImport(BaseModel):
     script: str = Field(min_length=1, max_length=65536)
     name: str
-    scheduler: Literal['pbs', 'slurm']
+    scheduler: Literal['pbs', 'slurm', 'custom']
     alias: str
     program: Literal['vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other']
     source: str
@@ -1973,3 +1973,25 @@ def site_test_connection(payload:dict):
     try:return site_registration.test_connection(payload.get('alias'),payload.get('python',''),payload.get('remote_workspace_root'))
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
+
+
+@app.get('/api/execution/{key}/command-output')
+def command_output(key: str, run_id: Optional[str]=None, stdout_offset: int=0, stderr_offset: int=0):
+    from . import custom_commands
+    try: return custom_commands.read(key,run_id,stdout_offset,stderr_offset)
+    except (ValueError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/execution/{key}/commands')
+def execute_command_preset(key: str, payload: dict):
+    from . import custom_commands
+    if payload.get('confirm') is not True: raise HTTPException(422,'请确认本次命令')
+    try: return custom_commands.run_preset(key,payload['template_id'])
+    except (ValueError,OSError,KeyError) as exc: raise HTTPException(422,str(exc)) from exc
+
+
+@app.put('/api/sites/{alias}/paths')
+def site_paths(alias: str, payload: dict):
+    from . import site_registration
+    try: return site_registration.update_paths(alias,payload)
+    except (KeyError,ValueError,OSError) as exc: raise HTTPException(422,str(exc)) from exc

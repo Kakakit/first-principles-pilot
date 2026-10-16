@@ -89,8 +89,8 @@ echo "original vasp_std"
             wrong=job_templates.import_template(raw,'fixture','wannier90','fixture')
             self.assertFalse(job_templates.fits_program(wrong,'vasp_ncl'))
             misleading=job_templates.import_template(raw.replace('/vasp/vasp_std','/vasp/vasp_ncl')+'echo vasp_std\n','fixture','vasp_std','fixture')
-            self.assertIn('vasp_ncl',misleading['program_conflict'])
-            self.assertFalse(job_templates.fits_program(misleading,'vasp_ncl'))
+            self.assertNotIn('program_conflict',misleading)
+            self.assertTrue(job_templates.fits_program(misleading,'vasp_std'))
 
 
 if __name__ == '__main__': unittest.main()

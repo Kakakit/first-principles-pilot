@@ -73,7 +73,7 @@ def _same_path(kpoints_file, proposal):
 def _pyw90_diagnostic(band, w90, output_record, seed, fermi, sources, spinors):
     """Keep pre band/cmp artifacts remote; only return bounded diagnostics."""
     alias = w90['config']['alias']
-    if alias not in pyw90_remote.PYTHON:
+    if not pyw90_remote.available(alias):
         return {'status': 'UNAVAILABLE', 'reason': '该服务器未登记 PyW90 运行时'}
     if str(spinors).strip().lower() in ('.true.', 'true', 't'):
         return {'status': 'NOT_APPLICABLE', 'reason': 'SOC spinor 不套用 PyW90 共线 cmp；本机叠图独立生成'}
@@ -93,14 +93,16 @@ def _pyw90_diagnostic(band, w90, output_record, seed, fermi, sources, spinors):
             file_path = remote_paths.shell_path(path + '/' + name)
             guards.append('test "$(sha256sum -- '+file_path+' | cut -d\' \' -f1)" = '+shlex.quote(digest))
             checks.append({'attempt_id': record['id'], 'name': name, 'sha256': digest})
-    py = shlex.quote(pyw90_remote.PYTHON[alias])
-    package = pyw90_remote.PACKAGE
+    py = shlex.quote(pyw90_remote.runtime(alias)['python'])
+    package = remote_paths.shell_path(pyw90_remote.runtime(alias)['package']) if pyw90_remote.runtime(alias).get('package') else "''"
+    from . import servers
+    scratch_root = remote_paths.shell_path(servers.scratch_root(alias,'pyw90-band-compare'))
     pre = 'pre band --path .' + (' --spin-down' if seed.endswith('.2') else '')
     command = 'set -e\n' + '\n'.join(guards) + '\n' + f'''
 band_dir={remote_paths.shell_path(band_path)}
 plot_dir={remote_paths.shell_path(output_path)}
 model_dir={remote_paths.shell_path(model_path)}
-scratch_root="$HOME/230269265lht/.fpilot/pyw90-band-compare"
+scratch_root={scratch_root}
 mkdir -p "$scratch_root"
 scratch=$(mktemp -d "$scratch_root/run.XXXXXX")
 trap 'rm -rf -- "$scratch"' EXIT
@@ -108,10 +110,10 @@ for name in EIGENVAL KPOINTS POSCAR; do ln -s "$band_dir/$name" "$scratch/$name"
 for name in {shlex.quote(seed + '_band.dat')} {shlex.quote(seed + '_band.labelinfo.dat')}; do ln -s "$plot_dir/$name" "$scratch/$name"; done
 ln -s "$model_dir/{seed}.wout" "$scratch/{seed}.wout"
 cd "$scratch"
-PYTHONPATH="{package}" MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' {pre} > pre.log 2>&1
+PYTHONPATH={package} MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' {pre} > pre.log 2>&1
 test -s bnd.dat
 printf 'FPILOT_PRE_BAND_BYTES=%s\n' "$(wc -c < bnd.dat)"
-PYTHONPATH="{package}" MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' cmp FPilot --path . --seedname {shlex.quote(seed)} --vasp bnd.dat --efermi {fermi:.12g} > cmp.log 2>&1
+PYTHONPATH={package} MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' cmp FPilot --path . --seedname {shlex.quote(seed)} --vasp bnd.dat --efermi {fermi:.12g} > cmp.log 2>&1
 grep -E 'Final Quality|Quality|Error' cmp.log | tail -8
 '''
     receipt = remote_transport.run(alias, command, timeout=420, stdout_limit=5000, lane='analysis')

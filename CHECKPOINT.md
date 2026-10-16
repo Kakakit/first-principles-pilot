@@ -1,5 +1,11 @@
 # 当前开发交接 · 2026-10-11
 
+## 2026-10-16：通用工作区、脚本导入与自定义命令
+
+新建项目可直接修改所有服务器通用的工作区根目录，默认值在设置保存，不必先选服务器。新目录使用英文命名；移除 fpilot/个人目录白名单和新项目 material-projects 层，历史项目/冻结/attempt 路径保持。Windows 原子导入先关闭临时文件；导入及原样使用不再被脚本头、程序名或 MPI 内容阻止。
+
+新增其它/自定义原样命令、持久 stdout/stderr/退出码及断线只读核查；命令结束不代表计算完成，custom 不自动推进链/扫描。OpenSSH 保留用户会话复用，PyW90 路径逐服务器配置。仅源码，不发布安装包。使用与验收见 [本轮记录](docs/submission/CUSTOM_PATH_COMMAND_ACCEPTANCE.md)。
+
 ## 2026-10-15：v1.1.0-beta.2 安装测试版已发布
 
 按用户明确要求沿用上次流程，已发布 [v1.1.0-beta.2](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.2)：Windows x64 EXE 与 Apple Silicon Mac DMG，保留手动触发。以已验收的轻量快照传输源码为基线，包含服务器移除、能带 VBM/CBM、应用图标、GPU 诊断与可选卡数脚本、自由文本和矩阵生成前 pre dos。暂停中的 PyW90 分析区间／能量注释修改保留在开发目录，不进入本版。

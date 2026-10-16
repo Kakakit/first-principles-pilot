@@ -134,7 +134,7 @@ class GpuSubmissionTests(unittest.TestCase):
         record=job_templates.import_template(PBS,'gpu','wannier90','fixture','old wrong classification')
         config={**self.config,'program':'wannier90','template_id':record['id']}
         preview=job_templates.render_template(record['id'],{'name':'test','queue':'batch','node':'node01','ppn':1,'walltime':'01:00:00'},'gpu',config)
-        self.assertFalse(preview['submission_supported']);self.assertIn('Wannier90',';'.join(preview['execution_blockers']))
+        self.assertTrue(preview['submission_supported']);self.assertEqual(preview['program'],'wannier90')
         self.assertEqual(job_templates.get_template(record['id'])['original_text'],PBS)
 
     def fixture(self, kind):

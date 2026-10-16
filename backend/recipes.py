@@ -204,7 +204,8 @@ def materialize(recipe):
         if stage.get("potcar"): data["recipePotcar"] = stage["potcar"]
         nodes.append({"id": stage["id"], "type": "step", "position": position(stage["id"]), "data": data})
         edges.extend({"id": f"recipe:{parent}->{stage['id']}", "source": parent, "target": stage["id"]} for parent in stage["depends_on"])
-    content = {"stagePolicy": "kind-fixed-v1", "name": recipe["name"], "nodes": nodes, "edges": edges,
+    from .workbench_settings import read as read_settings
+    content = {"remotePathPolicy":"project-directory-v2", "remoteWorkspaceRoot":read_settings().get("workspace_root","$HOME/fpilot"), "stagePolicy": "kind-fixed-v1", "name": recipe["name"], "nodes": nodes, "edges": edges,
                "parameters": {"version": 1, "shared": recipe.get("shared", {"values": {}})}}
     if recipe.get("runtime") is not None: content["recipeRuntime"] = recipe["runtime"]
     identity = hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()

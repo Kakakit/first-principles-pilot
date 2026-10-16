@@ -17,7 +17,7 @@ export default function RemotePathPreview({ bundleId, alias, root, disabled = fa
       setResult(data);
     } catch (caught) { setError((caught as Error).message); } finally { setBusy(false); }
   }
-  return <><p className="path-layout-note"><strong>本次工作区根目录：</strong><code>{root}</code><br/>任务将建在此目录内的 <code>material-projects/项目/flows/main/stages/阶段/attempts/本次运行</code>。每次运行独立保存，避免覆盖已有结果；更改根目录仅影响之后新准备的任务。</p><details className="path-preview"><summary>核对冻结输入的远端阶段路径</summary>
+  return <><p className="path-layout-note"><strong>本次工作区根目录：</strong><code>{root}</code><br/>项目可在“设置 → 流程”指定绝对目录；内部自动组织 <code>flows/main/stages/阶段/attempts/本次运行</code>。旧项目保留原布局。每次运行独立保存，避免覆盖已有结果；更改根目录仅影响之后新准备的任务。</p><details className="path-preview"><summary>核对冻结输入的远端阶段路径</summary>
     <p>路径预览与本次提交使用同一服务器别名和工作区根目录。它是只读核对，不创建目录、不上传文件。</p>
     <fieldset disabled={disabled || busy}>
       <p><strong>绑定主机：</strong>{alias || '未选择'}　<strong>工作区根目录：</strong>{root || '未设置'}</p>

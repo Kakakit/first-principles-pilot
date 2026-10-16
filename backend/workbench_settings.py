@@ -8,7 +8,7 @@ from .storage import ROOT
 
 def read():
     path=ROOT/'workbench-settings.json'
-    return json.loads(path.read_text()) if path.exists() else {'version':1,'runtimes':{},'defaults':{},'history_limit':5}
+    return json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'version':1,'runtimes':{},'defaults':{},'history_limit':5}
 
 
 def snapshot(alias, program, config=None, template_id=None):
@@ -35,7 +35,7 @@ def assert_current(saved):
         # still pass the independent frozen-script and live-target guards.
         path = ROOT/'defaults-migrations.json'
         if path.exists():
-            migrations = json.loads(path.read_text()).get('transitions', [])
+            migrations = json.loads(path.read_text(encoding='utf-8')).get('transitions', [])
             if any(saved == item.get('before') and current == item.get('after') for item in migrations):
                 return
         raise ValueError('服务器运行时或默认脚本设置已变化，请重新准备或冻结授权；没有提交')
@@ -44,6 +44,10 @@ def assert_current(saved):
 def save(value):
     from . import servers, job_templates
     previous=read()
+    if 'workspace_root' in value:
+        from .remote_paths import new_directory
+        if not value['workspace_root']: raise ValueError('请填写通用默认工作区')
+        previous['workspace_root']=new_directory(value['workspace_root'],previous.get('workspace_root'))
     if 'runtime' in value:
         config=servers.validate(value['runtime'])
         program=value.get('program','vasp_std')
@@ -56,8 +60,6 @@ def save(value):
             if item.get('scheduler')!=servers.normalize_scheduler(config['scheduler']):raise ValueError('默认脚本调度器须与所选服务器一致')
             if not job_templates.fits_program(item,program):raise ValueError('默认脚本须支持所选程序，且原稿分类正确')
             if not config['queue'] and item.get('resources',{}).get('queue'):config['queue']=item['resources']['queue']
-            named_programs = set(re.findall(r'(?<![A-Za-z0-9_])(vasp_std|vasp_ncl)(?![A-Za-z0-9_])', item['original_text']))
-            if program == 'wannier90' and named_programs: raise ValueError('脚本正文启动 VASP，不能设为 Wannier90 默认脚本')
         previous['runtimes'][key]=config
         previous['defaults'][key]=template
     if 'history_limit' in value:
@@ -66,7 +68,7 @@ def save(value):
         previous['history_limit']=n
     ROOT.mkdir(parents=True,exist_ok=True)
     temp=ROOT/'workbench-settings.tmp'
-    temp.write_text(json.dumps(previous,ensure_ascii=False,indent=2))
+    temp.write_text(json.dumps(previous,ensure_ascii=False,indent=2), encoding='utf-8')
     os.replace(temp,ROOT/'workbench-settings.json')
     return previous
 
@@ -79,7 +81,7 @@ def repair_new_draft_defaults(updates):
     """
     from .execution_control import write_json
     previous=read();path=ROOT/'defaults-migrations.json'
-    prior_migrations=json.loads(path.read_text()) if path.exists() else {'version':1,'transitions':[]}
+    prior_migrations=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'version':1,'transitions':[]}
     before={}
     try:
         for value in updates:

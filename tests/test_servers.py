@@ -69,7 +69,7 @@ class ServerTests(unittest.TestCase):
         self.config['remote_workspace_root']='$HOME/230269265lht/research'
         servers.save_config(self.config)
         self.assertEqual(servers.read_config()['config']['remote_workspace_root'],self.config['remote_workspace_root'])
-        self.config['remote_workspace_root']='$HOME/other'
+        self.config['remote_workspace_root']='relative'
         with self.assertRaises(ValueError):servers.save_config(self.config)
         self.assertEqual(servers.read_config()['config']['remote_workspace_root'],'$HOME/230269265lht/research')
     def test_ready_preview_never_enables_submission(self):

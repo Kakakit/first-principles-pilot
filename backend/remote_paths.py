@@ -1,16 +1,4 @@
-"""Safe, stable paths for remote fpilot attempts.
-
-The web workbench keeps the scheduler-specific script in ``execution.py`` but
-centralises the path policy here.  A path received from a user or an imported
-template is never interpolated into a remote command until it has passed the
-workspace and component checks in this module.
-
-The remote workspace is deliberately represented as a shell expression.  The
-usual value is ``$HOME/230269265lht``; an absolute path is also accepted when
-it contains the registered workspace component.  We keep both the expression
-and the absolute path returned by the read-only remote probe in an attempt
-record so the GUI can show exactly where a task was staged.
-"""
+"""Resolve user-configured POSIX directories and preserve frozen attempt paths."""
 
 import posixpath
 import re
@@ -18,10 +6,7 @@ import shlex
 from typing import Any, Dict, Mapping, Optional
 
 
-WORKSPACE_NAME = "230269265lht"
-WORKSPACE_NAMES = (WORKSPACE_NAME, "fpilot")
-DEFAULT_WORKSPACE_ROOT = "$HOME/" + WORKSPACE_NAME
-_COMPONENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+DEFAULT_WORKSPACE_ROOT = "$HOME"
 _SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
@@ -37,49 +22,36 @@ def _segments(value: str):
 
 
 def _valid_component(value: Any, label: str) -> str:
-    if not isinstance(value, str) or not _COMPONENT.fullmatch(value):
-        raise ValueError("{} 含有不安全的路径字符".format(label))
+    if not isinstance(value, str) or not value or '/' in value or any(c in value for c in '\x00\r\n'):
+        raise ValueError("{} 不是有效的目录名".format(label))
     if value in (".", ".."):
         raise ValueError("{} 不能是相对目录".format(label))
     return value
 
 
 def normalize_workspace_root(value: Optional[str] = None) -> str:
-    """Return a canonical, shell-safe workspace-root expression.
-
-    ``$HOME/230269265lht`` and descendants are the normal form.  Explicit
-    absolute paths are useful for a cluster with a mounted project area, but
-    they must still contain a path component named ``230269265lht``.  Parent
-    traversal is rejected before normalisation so a string such as
-    ``/tmp/230269265lht/../other`` cannot escape the workspace policy.
-    """
-
+    """Accept absolute POSIX paths; retain HOME expressions in old records."""
     root = DEFAULT_WORKSPACE_ROOT if value is None or value == "" else value
     if not isinstance(root, str) or not root or any(ch in root for ch in "\x00\r\n"):
         raise ValueError("remote_workspace_root 必须是安全的单行路径")
 
     if root == "$HOME" or root.startswith("$HOME/"):
         suffix = root[len("$HOME") :]
-        if not suffix.startswith("/") or any(part == ".." for part in suffix.split("/")):
-            raise ValueError("remote_workspace_root 必须位于 $HOME/230269265lht 下")
-        parts = _segments(suffix)
-        if not parts or parts[0] not in WORKSPACE_NAMES:
-            raise ValueError("remote_workspace_root 必须位于 $HOME/fpilot 或原登记工作区下")
-        for part in parts:
-            _valid_component(part, "remote_workspace_root")
-        return "$HOME/" + "/".join(parts)
+        if any(part == '..' for part in suffix.split('/')):
+            raise ValueError('HOME 路径请填写明确目录，或改用绝对路径')
+        return '$HOME' + (('/' + '/'.join(_segments(suffix))) if _segments(suffix) else '')
 
     if not root.startswith("/"):
-        raise ValueError("remote_workspace_root 只能使用 $HOME/230269265lht 或绝对路径")
-    if any(part == ".." for part in root.split("/")):
-        raise ValueError("remote_workspace_root 不允许 .. 路径穿越")
-    normal = posixpath.normpath(root)
-    parts = _segments(normal)
-    if not any(name in parts for name in WORKSPACE_NAMES):
-        raise ValueError("绝对 remote_workspace_root 必须包含 fpilot 或原登记工作区组件")
-    for part in parts:
-        _valid_component(part, "remote_workspace_root")
-    return normal
+        raise ValueError('请填写服务器的 Linux 绝对路径')
+    return posixpath.normpath(root)
+
+
+def new_directory(value, previous=None):
+    """English names for new directories; existing paths remain readable."""
+    normalized = normalize_workspace_root(value)
+    if value != previous and not normalized.isascii():
+        raise ValueError('新目录请使用英文字母、数字及常用符号，不要包含中文；已有目录无需改名')
+    return normalized
 
 
 def normalize_relative_path(value: str) -> str:
@@ -130,12 +102,28 @@ def readable_identity(manifest: Mapping[str, Any], project: Mapping[str, Any]) -
             "stage_segment": "{:02d}-{}".format(sequence, stage_slug)}
 
 
+def project_location(project, alias, root):
+    """Resolve a new attempt without changing any historical path."""
+    override = (project.get('remoteDirectories') or {}).get(alias)
+    if override:
+        if not override.startswith('/'): raise ValueError('项目目录需为 Linux 绝对路径')
+        return normalize_workspace_root(override), ''
+    slug = readable_slug(project.get('remoteSlug'), 'remoteSlug')
+    prefix = slug if project.get('remotePathPolicy') == 'project-directory-v2' else 'material-projects/' + slug
+    return normalize_workspace_root(project.get('remoteWorkspaceRoot') or root), prefix
+
+
+def project_path(root_absolute, project_relative):
+    return root_absolute.rstrip('/') + ('/' + project_relative if project_relative else '') or '/'
+
+
 def attempt_relative_path(project_slug: str, stage_sequence: int, stage_slug: str,
-                             attempt_segment: str) -> str:
+                             attempt_segment: str, project_relative=None) -> str:
     project = readable_slug(project_slug, "remoteSlug")
     stage = "{:02d}-{}".format(stage_sequence, readable_slug(stage_slug, "stageSlug", 48))
     attempt = _valid_component(attempt_segment, "attempt_segment")
-    return "material-projects/{}/flows/main/stages/{}/attempts/{}".format(project, stage, attempt)
+    prefix = 'material-projects/' + project if project_relative is None else project_relative
+    return (prefix + '/' if prefix else '') + 'flows/main/stages/{}/attempts/{}'.format(stage, attempt)
 
 
 def join_workspace(root: str, relative: str) -> str:
@@ -154,8 +142,6 @@ def absolute_attempt_path(root_absolute: str, relative: str) -> str:
     if any(part == ".." for part in root_absolute.split("/")):
         raise ValueError("远端工作区绝对路径不允许 ..")
     normalized_root = posixpath.normpath(root_absolute)
-    if not any(name in _segments(normalized_root) for name in WORKSPACE_NAMES):
-        raise ValueError("远端工作区绝对路径缺少 fpilot 或原登记工作区组件")
     return normalized_root.rstrip("/") + "/" + normalize_relative_path(relative)
 
 
@@ -191,15 +177,11 @@ done
 test -w "$ancestor"
 parent_abs=$(cd "$ancestor" && pwd -P)
 root_abs=$parent_abs$suffix
-case "/$root_abs/" in
-  */{workspace}/*|*/fpilot/*) ;;
-  *) exit 42 ;;
-esac
 printf 'FPILOT_ROOT_ABS=%s\\n' "$root_abs"
 printf 'FPILOT_ROOT_PARENT=%s\\n' "$parent_abs"
 meta=$(stat -c '%d:%i:%Y:%s' "$ancestor" 2>/dev/null || stat -f '%d:%i:%m:%z' "$ancestor" 2>/dev/null || printf 'unavailable')
 printf 'FPILOT_ROOT_SNAPSHOT=%s\\n' "$meta"
-""".format(root=root_expr, workspace=WORKSPACE_NAME)
+""".format(root=root_expr)
 
 
 def parse_workspace_probe(receipt: Mapping[str, Any], root: str) -> Dict[str, Any]:
@@ -219,8 +201,6 @@ def parse_workspace_probe(receipt: Mapping[str, Any], root: str) -> Dict[str, An
     absolute = absolute_match.group(1).strip()
     # This also rejects symlinks resolving outside the registered workspace.
     absolute = posixpath.normpath(absolute)
-    if not any(name in _segments(absolute) for name in WORKSPACE_NAMES):
-        raise ValueError("远端工作区解析结果缺少 fpilot 或原登记工作区组件")
     return {
         "expression": root_expression,
         "absolute_path": absolute,

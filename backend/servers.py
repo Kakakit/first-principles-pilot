@@ -146,7 +146,7 @@ def _registered_profile(alias, host, variant='vasp_std'):
         reason = '主机登记状态为 {}，未确认 CPU 配置'.format(host_status or '未登记')
     queue_value = host.get('queue') if is_pbs else host.get('partition')
     queue = queue_value if isinstance(queue_value, str) else ''
-    if is_pbs or is_slurm:
+    if is_pbs or is_slurm or scheduler=='custom':
         # A registered host may be selected with a user-provided script. Missing
         # runtime paths are supplied explicitly and checked by the live probe.
         selectable = True
@@ -160,7 +160,9 @@ def _registered_profile(alias, host, variant='vasp_std'):
         'status': host_status,
         'runtime_status': runtime_status,
         'runtime_source':host.get('runtime_source','registered'),
-        'remote_workspace_root':host.get('remote_workspace_root','$HOME/230269265lht'),
+        'remote_workspace_root':host.get('remote_workspace_root','$HOME'),
+        'pyw90_python':(host.get('pyw90') or {}).get('python',''),
+        'pyw90_package':(host.get('pyw90') or {}).get('package',''),
         'ncl_runtime_status': ncl_runtime.get('status') if ncl_runtime else 'UNREGISTERED',
         'ncl_executable': ncl_runtime.get('executable') if ncl_runtime else '',
         'runtime_complete': not missing and runtime is not None,
@@ -204,6 +206,8 @@ def select_profile(alias, variant='vasp_std'):
         raise ValueError('{}：{}'.format(alias, selected['reason']))
     config = {
         'alias': alias,
+        'pyw90_python':selected.get('pyw90_python',''),
+        'pyw90_package':selected.get('pyw90_package',''),
         'name': 'FP_VASP',
         'queue': selected['queue'],
         'walltime': DEFAULT['walltime'],
@@ -237,7 +241,7 @@ def default_config():
 
 
 def validate(config):
-    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates','resource_request') if config.get(k)}
+    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates','resource_request','script_edit_mode','pyw90_python','pyw90_package') if config.get(k)}
     config = {k: config.get(k, '') for k in DEFAULT}
     config.update(extra)
     if config.get('remote_workspace_root'):
@@ -253,6 +257,9 @@ def validate(config):
         if site_registration.connection_identity(config['alias']).get('hostname')==config['alias']:
             raise ValueError('SSH 配置中没有该明确别名，请先配置本机 SSH')
     scheduler = normalize_scheduler(config['scheduler'])
+    if scheduler == 'custom':
+        config.update(runtime_source='script',program=config.get('program') or 'vasp_std',vasp_executable=config.get('program') or 'vasp_std')
+        return config
     if config.get('runtime_source') not in (None,'registered','script'):raise ValueError('运行方式无效')
     script_mode=config.get('runtime_source')=='script'
     if script_mode:
@@ -339,6 +346,7 @@ def normalize_scheduler(value):
     if not value: return 'pbs'  # read old PBS-only records/configuration
     if value in {'pbs','pbs/torque','torque'}: return 'pbs'
     if value == 'slurm': return 'slurm'
+    if value in ('custom','other'): return 'custom'
     raise ValueError('只支持登记的 PBS/Torque 或 Slurm 调度器')
 
 
@@ -368,7 +376,7 @@ def runtime_config(config):
 
 def read_config():
     path = ROOT/'server-config.json'
-    config=json.loads(path.read_text()) if path.exists() else default_config()
+    config=json.loads(path.read_text(encoding='utf-8')) if path.exists() else default_config()
     removed_alias=None
     if config.get('alias') not in load_registry()['hosts']:
         removed_alias=config.get('alias');config=default_config()
@@ -427,13 +435,13 @@ def partition_records(text):
 
 def availability_command(config):
     """Reuse the registered checker's exact resource rules inside one session."""
-    text=CHECKER.read_text()
+    text=CHECKER.read_text(encoding='utf-8')
     body=text.split("<<'REMOTE_CHECK'",1)[1].split('\n',1)[1].split('\nREMOTE_CHECK',1)[0]
-    excluded='node06' if config['alias']=='jutai-1' else ''
+    excluded=' '.join(excluded_nodes(config))
     from .remote_transport import _interpreter
     try: interpreter = _interpreter(config['alias'])
     except ValueError: interpreter = 'python3'
-    gpu_source = (RESOURCES/'preflight/gpu_node_facts.py').read_text()
+    gpu_source = (RESOURCES/'preflight/gpu_node_facts.py').read_text(encoding='utf-8')
     gpu_command = ('if command -v nvidia-smi >/dev/null 2>&1; then\n'
                    + shlex.quote(interpreter) + ' -c ' + shlex.quote(gpu_source) + ' || true\nfi\n')
     return ("printf '\\n===== %s =====\\n' "+shlex.quote(config['alias'])+'\n'
@@ -461,17 +469,19 @@ def _store_probe(report):
 
 
 def capacity_probe(config, purpose='vasp', context=None):
+    if normalize_scheduler(config.get('scheduler'))=='custom':
+        return {'id':'custom','observed_at':datetime.now(timezone.utc).isoformat(),'config':config,'preflight':{'hosts':[]},'queues':[],'checks':{},'runtime_evidence':'用户自定义命令，不检测队列资源','availability':{'stdout':'','stderr':'','exit_code':0},'diagnostics':{'stdout':'','stderr':'','exit_code':0}}
     """Always query live capacity and queues; reuse only unchanged runtime checks."""
     path = _runtime_cache(config, purpose)
     if not path.exists():
         return probe(config, purpose=purpose) if purpose != 'vasp' else probe(config)
     config = validate(config)
     try:
-        cached = json.loads(path.read_text())
+        cached = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         invalidate_runtime(config, purpose)
         return probe(config, purpose=purpose)
-    argv = ['env'] + (['EXCLUDED_NODES=node06'] if config['alias'] == 'jutai-1' else [])
+    argv = ['env'] + (['EXCLUDED_NODES='+' '.join(excluded_nodes(config))] if excluded_nodes(config) else [])
     scheduler = normalize_scheduler(config['scheduler'])
     command = 'qstat -Qf' if scheduler == 'pbs' else "sinfo -h -o 'FPILOT_PARTITION=%P|%a|%l'"
     shared_key = (config['alias'], scheduler)
@@ -529,6 +539,8 @@ def probe_many(configs):
 
 
 def probe(config, purpose='vasp', force=False):
+    if normalize_scheduler(config.get('scheduler'))=='custom':
+        return {'id':'custom','observed_at':datetime.now(timezone.utc).isoformat(),'config':config,'preflight':{'hosts':[]},'queues':[],'checks':{},'runtime_evidence':'用户自定义命令，不检测队列资源','availability':{'stdout':'','stderr':'','exit_code':0},'diagnostics':{'stdout':'','stderr':'','exit_code':0}}
     if purpose not in ('vasp', 'wannier90', 'analysis'):
         raise ValueError('诊断用途无效')
     config = validate(config)
@@ -537,8 +549,8 @@ def probe(config, purpose='vasp', force=False):
     if not force and _runtime_cache(config, purpose).exists():
         return capacity_probe(config, purpose)
     checker_argv = ['env']
-    if config['alias'] == 'jutai-1':
-        checker_argv.append('EXCLUDED_NODES=node06')
+    if excluded_nodes(config):
+        checker_argv.append('EXCLUDED_NODES='+' '.join(excluded_nodes(config)))
     checker_argv += ['bash',str(CHECKER),config['alias']]
     scheduler=normalize_scheduler(config['scheduler'])
     check_program=purpose=='vasp' and config.get('runtime_source')!='script'
@@ -578,7 +590,7 @@ def probe(config, purpose='vasp', force=False):
     if availability['exit_code'] == 0 and diagnostics['exit_code'] == 0 and all(checks.get(key) == 'OK' for key in required_checks):
         path = _runtime_cache(config, purpose)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True))
+        path.write_text(json.dumps(report, ensure_ascii=False, sort_keys=True), encoding='utf-8')
         if check_program:
             for variant in ('vasp_std', 'vasp_ncl'):
                 if checks.get(variant) != 'OK':
@@ -586,7 +598,7 @@ def probe(config, purpose='vasp', force=False):
                 variant_config = {**config, 'vasp_executable': str(PurePosixPath(config['vasp_executable']).with_name(variant))}
                 variant_report = {**report, 'config': variant_config, 'config_hash': config_hash(variant_config),
                                   'checks': {**checks, 'vasp_executable': 'OK'}}
-                _runtime_cache(variant_config, purpose).write_text(json.dumps(variant_report, ensure_ascii=False, sort_keys=True))
+                _runtime_cache(variant_config, purpose).write_text(json.dumps(variant_report, ensure_ascii=False, sort_keys=True), encoding='utf-8')
     else:
         invalidate_runtime(config, purpose)
     return _store_probe(report)
@@ -594,6 +606,9 @@ def probe(config, purpose='vasp', force=False):
 
 def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     config=validate(config)
+    if config['scheduler']=='custom':
+        from .custom_commands import preview
+        return preview(config)
     if not re.fullmatch('[a-f0-9]{64}',probe_id):raise ValueError('请先运行诊断')
     raw=(ROOT/'server-probes'/probe_id).read_bytes()
     if hashlib.sha256(raw).hexdigest()!=probe_id:raise ValueError('诊断记录校验失败')
@@ -601,7 +616,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if capacity_config(report['config'])!=capacity_config(config):raise ValueError('服务器或调度器已改变，请检测新服务器')
     from .site_registration import connection_identity
     if report.get('connection') and report['connection']!=connection_identity(config['alias']):raise ValueError('实际 SSH 目标已改变，请重新检测节点')
-    if config['alias']=='jutai-1' and node=='node06':raise ValueError('node06 已按项目规则排除')
+    if node in excluded_nodes(config):raise ValueError(node+' 已由此服务器的配置排除')
     nodes=[n for h in report['preflight']['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==node]
     if len(nodes)!=1:raise ValueError('请选择本次诊断中的节点')
     facts=nodes[0]; blockers=[]; selection=None
@@ -633,7 +648,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if check_program and runtime_config(report['config'])!=runtime_config(config):
         # Only changed runtime paths are checked. Keep the node/queue observation.
         cached=_runtime_cache(config,purpose)
-        if cached.exists():runtime=json.loads(cached.read_text())
+        if cached.exists():runtime=json.loads(cached.read_text(encoding='utf-8'))
         else:
             keys=('mpi_executable','vasp_executable','environment_script') if scheduler=='pbs' else ('vasp_executable',)
             commands=['set -e']
@@ -643,7 +658,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
             receipt=run(['ssh','-o','BatchMode=yes',config['alias'],'\n'.join(commands)])
             runtime={**report,'config':config,'checks':dict(re.findall(r'^CHECK_(\w+)=(\w+)$',receipt['stdout'],re.M)),'diagnostics':receipt,'observed_at':datetime.now(timezone.utc).isoformat()}
             if receipt['exit_code']==0 and all(runtime['checks'].get(k)=='OK' for k in keys):
-                cached.parent.mkdir(parents=True,exist_ok=True);cached.write_text(json.dumps(runtime,ensure_ascii=False))
+                cached.parent.mkdir(parents=True,exist_ok=True);cached.write_text(json.dumps(runtime,ensure_ascii=False), encoding='utf-8')
         report={**report,'checks':runtime['checks'],'diagnostics':runtime['diagnostics']}
     required_checks=(('mpi_executable','vasp_executable','environment_script') if scheduler=='pbs' else ('vasp_executable',)) if check_program else ()
     if report['diagnostics']['exit_code']!=0 or any(report['checks'].get(k)!='OK' for k in required_checks):
@@ -684,3 +699,13 @@ def preview_for_prepare(config, probe_id, node, cores=None, reason='', purpose='
         fresh=capacity_probe(config,purpose=purpose)
         return preview(config,fresh['id'],node,cores,reason,purpose=purpose)
     return result
+
+
+def scratch_root(alias, purpose):
+    from .remote_paths import normalize_workspace_root
+    host=load_registry(include_removed=True)['hosts'].get(alias,{})
+    return normalize_workspace_root(host.get('remote_workspace_root')).rstrip('/')+'/.fpilot/cache/'+purpose
+
+
+def excluded_nodes(config):
+    return load_registry()['hosts'].get(config['alias'],{}).get('excluded_nodes',[])

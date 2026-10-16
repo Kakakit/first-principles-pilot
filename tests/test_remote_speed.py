@@ -119,9 +119,9 @@ class DispatchGuardTests(unittest.TestCase):
             with patch.object(transport,'_interpreter',return_value=sys.executable):
                 command='set -e\n'+execution.project_directory_guard(record)+'printf FPILOT_MUTATION\n'
             result=subprocess.run(['bash','-c',command],capture_output=True)
-            self.assertNotEqual(result.returncode,0)
-            self.assertIn(b'FPILOT_PROJECT_CONFLICT=1',result.stdout)
-            self.assertFalse(metadata.exists())
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertNotIn(b'FPILOT_PROJECT_CONFLICT=1',result.stdout)
+            self.assertTrue(metadata.exists())
 
     def test_project_conflict_is_terminal_before_submission_but_capacity_wait_is_not(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(execution,'ROOT',Path(tmp)),patch.object(execution,'save') as save:
