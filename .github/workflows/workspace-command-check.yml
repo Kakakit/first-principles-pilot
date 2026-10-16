@@ -1,6 +1,12 @@
 name: Workspace paths and command import checks
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/workspace-command-check.yml'
+      - 'backend/job_templates.py'
+      - 'tests/test_workspace_commands.py'
 permissions:
   contents: read
 jobs:

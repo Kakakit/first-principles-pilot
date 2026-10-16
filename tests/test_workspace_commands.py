@@ -1,5 +1,6 @@
 """Portable onboarding and opaque-command contracts; no school jobs are submitted."""
 import base64
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -123,7 +124,8 @@ class WorkspaceCommandTests(unittest.TestCase):
     def test_start_receipt_loss_is_not_reexecuted_by_refresh(self):
         key='a'*32
         record={'id':key,'state':'PREPARED','config':{'alias':'my-lab','scheduler':'custom'},'script':'echo test','project_id':'p','remote_path_absolute':'/scratch/task'}
-        with execution.db() as db: db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,record['state'],json.dumps(record)))
+        with closing(execution.db()) as db:
+            db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,record['state'],json.dumps(record)));db.commit()
         custom_commands.dispatch_result(record,{'exit_code':None,'stdout':'','stderr':'connection lost'})
         with patch.object(execution,'assert_recovery_target'),patch.object(execution,'ssh',return_value={'exit_code':1,'stderr':'offline'}) as ssh,patch('backend.remote_transport._interpreter',return_value=sys.executable):
             custom_commands.read(key)
@@ -159,7 +161,8 @@ class WorkspaceCommandTests(unittest.TestCase):
                 'remote_relative_path':'project/flows/main/stages/03-scf/attempts/run','remote_path_absolute':str(destination),
                 'remote_project_path_absolute':str(self.root/'remote/project'),'path_schema':'fpilot.remote-attempt-path',
                 'script':preset['original_text'],'script_sha256':'unused','input_audit':{'status':'PASS'},'source_file_plan':{},'probe_id':'custom'}
-        with execution.db() as db:db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,'PREPARED',json.dumps(record)))
+        with closing(execution.db()) as db:
+            db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,'PREPARED',json.dumps(record)));db.commit()
         calls=[]
         def local_ssh(alias,command,data=None,**kwargs):
             calls.append(command)
