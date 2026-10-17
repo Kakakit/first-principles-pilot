@@ -241,9 +241,10 @@ def default_config():
 
 
 def validate(config):
-    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates','resource_request','script_edit_mode','pyw90_python','pyw90_package') if config.get(k)}
+    extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates','resource_request','script_edit_mode','pyw90_python','pyw90_package','resource_policy') if config.get(k)}
     config = {k: config.get(k, '') for k in DEFAULT}
     config.update(extra)
+    if config.get('resource_policy','wait_idle') not in ('wait_idle','scheduler_queue'):raise ValueError('资源提交方式无效')
     if config.get('remote_workspace_root'):
         from .remote_paths import validate_root
         validate_root(config['remote_workspace_root'])
@@ -618,13 +619,15 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if report.get('connection') and report['connection']!=connection_identity(config['alias']):raise ValueError('实际 SSH 目标已改变，请重新检测节点')
     if node in excluded_nodes(config):raise ValueError(node+' 已由此服务器的配置排除')
     nodes=[n for h in report['preflight']['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==node]
-    if len(nodes)!=1:raise ValueError('请选择本次诊断中的节点')
-    facts=nodes[0]; blockers=[]; selection=None
+    queued=config.get('resource_policy')=='scheduler_queue'
+    if len(nodes)!=1 and not (queued and re.fullmatch(r'[A-Za-z0-9_.-]+',node) and type(cores) is int and cores>0):raise ValueError('请选择本次诊断中的节点，或填写明确节点和请求核数')
+    facts=nodes[0] if len(nodes)==1 else {'NODE':node,'CPUS_TOTAL':str(cores),'STATUS':'UNKNOWN'}
+    blockers=[]; selection=None
     gpu = resource_request(config)
     try:
-        selection=(selector.gpu_resources(report['preflight'],config['alias'],node,gpu,allow_wait=True)
-                   if gpu else selector.select_resources(report['preflight'],config['alias'],node,
-                    user_override=cores,user_override_evidence=reason))
+        selection=(selector.scheduler_resources(facts,cores,gpu) if queued else
+                   selector.gpu_resources(report['preflight'],config['alias'],node,gpu,allow_wait=True) if gpu else
+                   selector.select_resources(report['preflight'],config['alias'],node,user_override=cores,user_override_evidence=reason or '用户选择请求核数'))
         blockers.extend(selection.get('blockers', []))
         ppn=selection['requested_cores']
     except ValueError as exc:
@@ -664,6 +667,14 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if report['diagnostics']['exit_code']!=0 or any(report['checks'].get(k)!='OK' for k in required_checks):
         blockers.append('运行时路径或调度器诊断未通过')
     if report['availability']['exit_code']!=0: blockers.append('容量诊断异常')
+    warnings=list(blockers) if queued else []
+    if queued:
+        if facts.get('STATUS')!='FULLY_IDLE':warnings.append('节点当前状态 '+str(facts.get('STATUS') or '未知')+'；按明确请求交由调度器决定')
+        if facts.get('GPU_ACTIVE_PROCESSES') not in (None,'','0'):warnings.append('GPU 活动进程 '+str(facts['GPU_ACTIVE_PROCESSES'])+'；直接提交可能等待或遇到已有进程占用')
+        if gpu and facts.get('GPUS_TOTAL') in (None,'','unknown'):warnings.append('调度器 GPU 总量未知，按明确卡数与整节点 CPU 请求提交；不能据此确认 GPU 空闲')
+    if queued:
+        if selection is None:raise ValueError('请求资源无效：'+'；'.join(blockers))
+        blockers=[]
     p=profile(config,node,ppn)
     if gpu and selection:
         p.update(resource_mode='gpu', mpi_ranks=gpu['mpi_ranks'], gpus=selection['requested_gpus'],
@@ -686,7 +697,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
             'program_adaptation':selected.get('program_adaptation') if selected else None,
             'program_diff':selected.get('program_diff','') if selected else '',
             'script_diff':selected.get('resource_diff','') if selected else '',
-            'script_warnings':selected.get('warnings',[]) if selected else [],
+            'script_warnings':warnings+(selected.get('warnings',[]) if selected else []),
             'capacity_wait': bool(blockers) and all(str(v).startswith(selector.CAPACITY_BLOCKERS) for v in blockers),
             'node_status':facts.get('STATUS'),
             'resource_ready':not blockers,'submission_enabled':False,'probe_id':probe_id,

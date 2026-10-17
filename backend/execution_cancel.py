@@ -129,7 +129,7 @@ def cancel(project_id, key, token, confirm=False):
         if operation['binding'] != binding(record) or operation['references'] != refs: raise ValueError('任务身份或关联计划已变化，请重新预览')
         if record['state'] in TERMINAL: return response(record)
         if operation['local'] and record['state'] != 'PREPARED': raise ValueError('任务已开始提交，请重新核查')
-        pause_references(refs, key)
+        # A single cancellation does not revoke unrelated dispatch intent.
         operation.update(state='IN_FLIGHT', requested_at=ex.now())
         record['updated_at'] = ex.now(); ex.save(record)  # persist BEFORE sending
         journal(record, 'CANCEL_REQUESTED')
@@ -191,6 +191,5 @@ def cancel_case(project_id, batch_id, case_id, confirm=False):
             raise ValueError('case 已登记为任务，请核查该任务并取消')
         if case['state'] == 'CANCELLED': return batch
         if not batch.get('authorization'): raise ValueError('批次尚未授权；请修改草稿重新准备')
-        if batch['state'] in ('ACTIVE', 'BLOCKED'): batch['state'] = 'PAUSED'
         case.update(state='CANCELLED', cancelled_at=ex.now())
         return scans.save(batch)

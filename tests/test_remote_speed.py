@@ -208,3 +208,22 @@ class SingleDispatchTests(unittest.TestCase):
                 self.assertIn('FPILOT_QUEUE_BEGIN',ssh.call_args.args[1]);self.assertIn('fpilot_submitting=1',ssh.call_args.args[1])
                 execution.submit(key);self.assertEqual(ssh.call_count,3)
                 self.assertEqual(branch_bindings.inspect('p',['n'])['state'],'BOUND')
+
+
+class RemoteTimeoutDrainTests(unittest.TestCase):
+    def test_kernel_io_child_cannot_hold_session_receipt_forever(self):
+        from backend import remote_worker
+        from unittest.mock import Mock
+        process=Mock(pid=123)
+        partial=b'FPILOT_SUBMIT_PHASE=DIRECTORY\n'
+        process.communicate.side_effect=[subprocess.TimeoutExpired('command',1,output=partial),subprocess.TimeoutExpired('command',2,output=partial)]
+        with patch.object(remote_worker.subprocess,'Popen',return_value=process),patch.object(remote_worker.os,'killpg') as kill:
+            receipt=remote_worker.execute({'command':'mkdir example','timeout':1})
+        import base64
+        self.assertIsNone(receipt['exit_code'])
+        self.assertIn('DIRECTORY',base64.b64decode(receipt['stdout']).decode())
+        self.assertIn('do not replay',base64.b64decode(receipt['stderr']).decode())
+        self.assertEqual([call.kwargs['timeout'] for call in process.communicate.call_args_list],[1,2])
+        kill.assert_called_once()
+        process.wait.assert_not_called()
+        process.stdout.close.assert_called_once()

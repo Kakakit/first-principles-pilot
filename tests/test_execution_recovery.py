@@ -104,6 +104,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(ex.get('a')['state'],'UNKNOWN')
 
     def test_unknown_counts_in_limits_and_prepared_does_not(self):
+        control.save_settings({'max_inflight_total':2,'max_inflight_per_host':1,'max_cores_per_host':None})
         self.record('a','UNKNOWN');target=self.record('b','PREPARED')
         with closing(ex.db()) as c:
             with self.assertRaises(ValueError):control.enforce_limits(c,target)
@@ -120,13 +121,14 @@ class RecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'核数预算'):control.enforce_limits(c,target)
 
     def test_limit_blocks_submit_before_upload_and_preserves_prepared(self):
+        control.save_settings({'max_inflight_total':2,'max_inflight_per_host':1,'max_cores_per_host':None})
         self.record('a','UNKNOWN');target=self.record('b','PREPARED')
         with patch.object(ex.servers,'probe',return_value={'id':'new'}),patch.object(ex.servers,'preview',return_value={'resource_ready':True,'profile':target['profile']}),patch.object(ex,'bundle',return_value=({},{})),patch.object(ex,'ssh') as ssh:
             with self.assertRaisesRegex(ValueError,'在途'):ex.submit('b')
             ssh.assert_not_called();self.assertEqual(ex.get('b')['state'],'PREPARED')
 
     def test_retry_only_failed_and_preserves_parent(self):
-        for state in ('UNKNOWN','COMPLETED','DISPATCHING','RUNNING'):
+        for state in ('UNKNOWN','DISPATCHING','RUNNING'):
             self.record(state,state)
             with patch.object(ex,'prepare') as prepare:
                 with self.assertRaises(ValueError):ex.retry(state,'p','node01')

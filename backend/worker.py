@@ -60,6 +60,9 @@ def tick(refresh=None, notify=False):
     for key in failed:
         if recycle.inactive('attempts',key,ex.get(key)):continue
         if not (ex.ROOT/'failure-snapshots'/(key+'.json')).exists():control.freeze_failure(key)
+    from . import task_recovery
+    try:task_recovery.tick()
+    except Exception as exc:errors.append({'batch':'task-recovery','message':control.redact(str(exc))[:1000]})
     from . import scans
     try:
         scans.tick()

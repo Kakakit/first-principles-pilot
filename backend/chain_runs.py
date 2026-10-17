@@ -393,7 +393,7 @@ def _preview(project, node_ids, source_alias=None, reuse_sources=None, verificat
 
 
 def freeze(project, node_ids, reason, expected_definition_hash, source_alias=None, reuse_sources=None, verification_mode='lightweight'):
-    if not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
+    if not isinstance(reason, str) or len(reason) > 2000:
         raise ValueError('请填写计算链输入理由')
     report, effective, reports = _preview(project, node_ids, source_alias, reuse_sources, verification_mode)
     if not report['ready'] or report['definition_hash'] != expected_definition_hash:
@@ -553,7 +553,7 @@ def pause(run_id, project_id):
     run = get(run_id)
     if run['project_id'] != project_id or run['state'] != 'ACTIVE':
         raise ValueError('当前计算链不能暂停')
-    run['state'] = 'PAUSED'
+    run.update(state='PAUSED',dispatch_pause_at=ex.now())
     return save(run)
 
 
@@ -678,8 +678,8 @@ def _quota_available(alias):
         active = [json.loads(row[0]) for row in db.execute(
             'SELECT body FROM attempts WHERE state IN (' + ','.join('?' for _ in control.ACTIVE) + ')',
             control.ACTIVE)]
-    return len(active) < limits['max_inflight_total'] and sum(
-        item['config']['alias'] == alias for item in active) < limits['max_inflight_per_host']
+    active=[r for r in active if not r.get('quota_released')]
+    return (limits['max_inflight_total'] is None or len(active)<limits['max_inflight_total']) and (limits['max_inflight_per_host'] is None or sum(item['config']['alias']==alias for item in active)<limits['max_inflight_per_host'])
 
 
 def tick():
@@ -731,6 +731,8 @@ def _advance(run_id):
     probes = {}
     capacity_context = {}
     for step in run['steps']:
+        from .task_recovery import holds_item
+        if holds_item(step.get('recovery_operation_id'),step['node_id']):continue
         if get(run_id)['state'] != 'ACTIVE':
             return
         if step['state']=='BLOCKED':
@@ -754,9 +756,6 @@ def _advance(run_id):
                     if verdict['status'] == 'CONVERGED':
                         step['state'] = 'DONE'
                         step['final_attempt_id'] = attempt_id
-                    elif verdict['status'] == 'EXHAUSTED' and len(step['attempts']) == 1:
-                        step['state'] = 'RETRY_PENDING'
-                        step['attempt_id'] = None
                     else:
                         step['state'] = 'BLOCKED'
                         step['blocker'] = verdict['reason']
@@ -886,6 +885,12 @@ def _advance(run_id):
         if get(run_id)['state'] != 'ACTIVE':
             continue
         try:
+            from .candidate_pool import occupied_nodes
+            current=ex.get(step['attempt_id'])
+            if node_config.get('resource_policy')!='scheduler_queue' and current.get('node') in occupied_nodes(node_config['alias'],{step['attempt_id']}):
+                step.update(waiting_kind='CAPACITY',waiting_reason='所选节点已有本机在途任务，等待释放后复核；没有再次提交')
+                run=save(run)
+                continue
             submitted = ex.submit(step['attempt_id'])
             step['state'] = submitted['state']
             if submitted['state'] == 'PREPARED':
@@ -911,6 +916,6 @@ def _advance(run_id):
     if states == {'DONE'}:
         run['state'] = 'COMPLETE'
         save(run)
-    elif states <= {'DONE', 'BLOCKED'}:
+    elif states <= {'DONE', 'BLOCKED'} and not any(__import__(__package__+'.task_recovery',fromlist=['holds_item']).holds_item(step.get('recovery_operation_id'),step['node_id']) for step in run['steps']):
         run['state'] = 'BLOCKED'
         save(run)

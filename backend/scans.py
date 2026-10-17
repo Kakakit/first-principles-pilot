@@ -282,10 +282,19 @@ def status(batch_id, project_id):
         if (record.get('project_id') != project_id or
                 record.get('scan_batch_id', batch_id) != batch_id):
             continue
-        case['state'] = record['state']
+        case['state'] = 'FAILED' if case.get('dispatch_error') else record['state']
         case['job_id'] = record.get('job_id')
         if record['state'] == 'UNKNOWN' and record.get('note'):
             case['note'] = record['note']
+    for case in batch['cases']:
+        if case.get('dispatch_error'):case['note']=case['dispatch_error']
+        if case.get('recovery_operation_id'):
+            from .task_recovery import reference
+            op=reference(case['recovery_operation_id'])
+            info=next((i for i in op['items'] if case['id'] in (i['id'],i.get('attached_id'))),None)
+            if info and info['dispatch_state']=='FAILED':case.update(state='FAILED',note=info.get('error'))
+            elif info and info['dispatch_state']=='PENDING':case.update(state='RECOVERY_PENDING',note=info.get('waiting_reason') or '已授权，等待本次恢复派发')
+    batch['counts']={state:sum(c.get('state')==state for c in batch['cases']) for state in ('PENDING','RECOVERY_PENDING','PREPARED','SUBMITTED','QUEUED','RUNNING','HELD','EXITING','COMPLETED','FAILED','UNKNOWN','CANCELLED')}
     return batch
 
 
@@ -338,7 +347,7 @@ def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_def
         return wannier_scans.freeze(project,scan_node_id,base_node_id,frozen_id,window_search,reason,expected_definition_hash,source_draft)
     if mode != 'vasp':raise ValueError('迭代模式无效')
     project=source_project(project,scan_node_id,base_node_id)
-    if not isinstance(reason,str) or not reason.strip() or len(reason)>2000: raise ValueError('请填写批次输入理由')
+    if not isinstance(reason,str) or len(reason)>2000: raise ValueError('备注最多 2000 字')
     report = preview(project,scan_node_id,base_node_id,dimensions,_include_baseline=True)
     baseline = report.pop('_geometry_baseline')
     if expected_definition_hash is not None and report['definition_hash']!=expected_definition_hash:
@@ -417,7 +426,7 @@ def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None
 def pause(batch_id, project_id):
     batch=get(batch_id)
     if batch['project_id']!=project_id or batch['state'] not in ('ACTIVE','BLOCKED'): raise ValueError('批次不能暂停')
-    batch['state']='PAUSED'
+    batch.update(state='PAUSED',dispatch_pause_at=ex.now())
     return save(batch)
 
 
@@ -451,13 +460,10 @@ def case_scopes():
 
 
 def retry_case(batch_id, project_id, case_id):
-    batch=get(batch_id)
-    case=next((c for c in batch['cases'] if c['id']==case_id),None)
-    if batch['project_id']!=project_id or not case or case['state']!='FAILED' or case['retry_count']>=1 or batch['state'] not in ('ACTIVE','PAUSED','COMPLETE'): raise ValueError('不满足单次显式重试条件')
-    case['attempt_history'].append(case['attempt_id'])
-    case.update(state='PENDING',attempt_id=None,retry_count=1)
-    if batch['state']=='COMPLETE': batch['state']='ACTIVE'
-    return save(batch)
+    from . import task_recovery
+    op=task_recovery.preview(project_id,'scans',batch_id,[case_id])
+    task_recovery.confirm(op['id'],project_id)
+    return status(batch_id,project_id)
 
 
 def tick():
@@ -495,21 +501,19 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
     if recycle.inactive('scans',batch['id'],batch) or batch.get('local_cleanup_blocker'):return False
     from . import wannier_scans
     window_mode=wannier_scans.is_window(batch)
-    try:
-        for case in batch['cases']:
+    for case in batch['cases']:
+        try:
             if window_mode:recycle.assert_available('wannier-inputs',case['bundle_id'])
-            if case['attempt_id']:
+            if case.get('attempt_id'):
                 record=ex.get(case['attempt_id'])
                 recycle.assert_available('attempts',record['id'],record)
-                case['state']=record['state']
-    except (ValueError,OSError) as exc:
-        batch.update(state='BLOCKED',blocker=str(exc));save(batch);return False
-    if any(c['state']=='UNKNOWN' for c in batch['cases']):
-        batch['state']='BLOCKED';batch['blocker']='UNKNOWN case 须核对原 job ID；未重投';save(batch);return False
+                case['state']='FAILED' if case.get('dispatch_error') else record['state']
+        except (ValueError,OSError) as exc:
+            case.update(state='FAILED',dispatch_error=str(exc))
     if batch['state'] in ('BLOCKED','PAUSED'): save(batch);return False
     from .project_sync import locally_executable
     if not locally_executable(batch['project_id']):return False
-    waiting=next((c for c in batch['cases'] if c['state'] in ('PENDING','PREPARED')),None)
+    waiting=next((c for c in batch['cases'] if c['state'] in ('PENDING','PREPARED') and not c.get('dispatch_error') and not c.get('recovery_operation_id')),None)
     if not waiting:
         if all(c['state'] in ('COMPLETED','FAILED','CANCELLED') for c in batch['cases']): batch['state']='COMPLETE'
         save(batch);return False
@@ -522,8 +526,10 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
     from .extension_runs import active_usage
     active += active_usage()
     same = [r for r in active if r['config']['alias']==auth['config']['alias']]
-    batch_active = sum(c['state'] in control.ACTIVE for c in batch['cases'])
-    if (len(active)>=limits['max_inflight_total'] or len(same)>=limits['max_inflight_per_host'] or
+    batch_active = sum(c.get('attempt_id') in {r['id'] for r in active if not r.get('quota_released')} for c in batch['cases'])
+    active=[r for r in active if not r.get('quota_released')]
+    same=[r for r in same if not r.get('quota_released')]
+    if ((limits['max_inflight_total'] is not None and len(active)>=limits['max_inflight_total']) or (limits['max_inflight_per_host'] is not None and len(same)>=limits['max_inflight_per_host']) or
             batch_active>=auth.get('max_parallel',len(batch['cases']))):
         batch['waiting_reason']='达到同时运行上限，已有任务结束后继续派发'
         save(batch);return False
@@ -581,10 +587,8 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
         batch.pop('waiting_reason',None)
         dispatched.add(waiting['id'])
         waiting['state']=ex.submit(waiting['attempt_id'])['state']
-        if waiting['state']=='UNKNOWN':
-            batch['state']='BLOCKED';batch['blocker']='UNKNOWN case 须核对原 job ID；未重投'
         save(batch)
-        return waiting['state'] in control.ACTIVE and waiting['state']!='UNKNOWN'
+        return True  # one failed/uncertain case never stops independent cases
     except Exception as exc:
         if waiting['state']=='PENDING' and str(exc).startswith('资源检查未通过：'):
             blockers=str(exc).split('：',1)[1].split('; ')
@@ -604,4 +608,9 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
                     batch['waiting_reason']='原准备节点暂时占用，等待空闲后提交同一个 attempt';save(batch);return False
             except (ValueError,KeyError,OSError):pass
         batch.pop('waiting_reason',None)
-        batch['state']='BLOCKED';batch['blocker']=control.redact(str(exc))[:1000];save(batch)
+        if waiting['state']=='UNKNOWN':
+            waiting['note']=control.redact(str(exc))[:1000];save(batch);return True
+        waiting['dispatch_error']=control.redact(str(exc))[:1000]
+        if not waiting.get('attempt_id'):waiting['state']='FAILED'
+        save(batch)
+        return True

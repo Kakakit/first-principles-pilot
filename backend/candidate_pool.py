@@ -1,5 +1,7 @@
 """Shared full-node candidate contracts for chain and scan dispatch."""
 import hashlib
+import json
+from contextlib import closing
 
 from . import servers
 
@@ -57,9 +59,22 @@ def approve(candidates, rendered, reviewed):
     return checked
 
 
-def select(config, probe, candidates, occupied=(), render=None):
+def occupied_nodes(alias,exclude=()):
+    """Scheduler snapshots may lag a just-accepted job; keep its local reservation."""
+    from . import execution as ex, execution_control as control, recycle
+    with closing(ex.db()) as db:
+        rows=db.execute('SELECT body FROM attempts WHERE state IN ('+','.join('?' for _ in control.ACTIVE)+')',control.ACTIVE).fetchall()
+    return {r.get('node') for r in (json.loads(row[0]) for row in rows)
+            if r['id'] not in exclude and r.get('config',{}).get('alias')==alias
+            and not r.get('quota_released') and not recycle.inactive('attempts',r['id'],r)}-{None,''}
+
+
+def select(config, probe, candidates, occupied=None, render=None):
+    if occupied is None:occupied=occupied_nodes(config.get('alias'))
     waiting, invalid = [], []
-    for c in candidates:
+    # Queue mode may use busy nodes, but still spreads new requests over the
+    # approved pool before queuing another job behind a local in-flight one.
+    for c in sorted(candidates,key=lambda c:c['node'] in occupied):
         try:
             value = (render or servers.preview)(config, probe['id'], c['node'], c['cores'], c['reason'])
         except ValueError as exc:
@@ -72,7 +87,7 @@ def select(config, probe, candidates, occupied=(), render=None):
             continue
         # These contracts use one whole node per job. Local receipts also hold
         # the node while the scheduler's next capacity snapshot catches up.
-        if c['node'] in occupied or capacity_wait(value):
+        if config.get('resource_policy')!='scheduler_queue' and (c['node'] in occupied or capacity_wait(value)):
             gpu_detail = '；'.join(str(b) for b in value.get('blockers', []) if str(b).startswith(('GPU ', 'GPU node')))
             waiting.append(c['node'] + ('（'+gpu_detail+'）' if gpu_detail else '（调度器空闲但负载未恢复，等待复检）'
                                        if value.get('node_status') == 'SUSPECT_LOAD' else ''))

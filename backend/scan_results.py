@@ -140,7 +140,7 @@ def promote(batch_id, project_id, case_id, reason):
     if not isinstance(reason,str) or not reason.strip() or len(reason)>2000: raise ValueError('请填写选择理由')
     batch=scans.get(batch_id)
     case=next((c for c in batch['cases'] if c['id']==case_id),None)
-    if batch['project_id']!=project_id or batch['state']!='COMPLETE' or not case or not case['attempt_id']: raise ValueError('批次尚未结束或 case 不属于当前批次')
+    if batch['project_id']!=project_id or not case or not case['attempt_id']: raise ValueError('批次尚未结束或 case 不属于当前批次')
     record=ex.get(case['attempt_id'])
     evidence=record.get('evidence') or {}
     if record['state']!='COMPLETED' or not evidence.get('vasp_timing') or evidence.get('ediff_reached') is not True or evidence.get('wrapper_exit') not in (0,None):

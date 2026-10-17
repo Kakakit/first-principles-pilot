@@ -392,9 +392,15 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
         project=frozen['project']
         parent_id,win,seed,input_reason=(frozen[k] for k in ('parent_attempt_id','win','seed','input_reason'))
         energy_reference,relative_windows,band_path=(frozen[k] for k in ('energy_reference','relative_windows','band_path'))
-    require_fresh_interface_win(win)
+    if not (frozen or {}).get('checkpoint'):require_fresh_interface_win(win)
+    else:
+        from .source_files import snapshot as file_snapshot
+        checkpoint=frozen['checkpoint']
+        recycle.assert_available('attempts',checkpoint['source_attempt_id'])
+        checked=file_snapshot(config['alias'],checkpoint['source_path'],[checkpoint['name']],ex.ssh,'lightweight')
+        if checked[checkpoint['name']]!=checkpoint['metadata']:raise ValueError('检查点文件已变化，请重新预览')
     recycle.assert_available('projects',project['id'],{'parent_attempt_id':parent_id,'template_id':template_id})
-    if not isinstance(input_reason, str) or not input_reason.strip() or len(input_reason) > 2000:
+    if not isinstance(input_reason, str) or len(input_reason) > 2000:
         raise ValueError('请填写本次 Wannier90 输入调整理由')
     parent, target = _parent(project, node_id, parent_id, config['alias'])
     from . import branch_bindings
@@ -488,6 +494,9 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
                                    for name in source_names(seed)[1:]},
               'input_audit': {'status': 'PASS', 'source_files': source['files'], 'win_sha256': bundle['win_sha256']},
               'job_id': None, 'note': 'Wannier90 矩阵将以同服务器硬链接复用；.win 为本次独立文件，尚未提交。'}
+    if bundle.get('checkpoint'):
+        checkpoint=bundle['checkpoint']
+        record['source_file_plan'][checkpoint['name']]={**checkpoint['metadata'],'source_path':checkpoint['source_path'],'target':checkpoint['name'],'mode':'reflink-or-copy'}
     with closing(ex.db()) as c:
         c.execute('BEGIN IMMEDIATE')
         row=c.execute('SELECT body FROM attempts WHERE id=?',(key,)).fetchone()
@@ -521,19 +530,23 @@ def submit(key):
     recycle.assert_available('attempts',key,record)
     if record.get('kind') != 'wannier90' or record['state'] != 'PREPARED':
         return record
+    if record.get('recovery_operation_id'):
+        from .task_recovery import authorized
+        if not authorized(record):raise ValueError('恢复授权已暂停，请明确继续本次范围')
     if record.get('scan_batch_id'):
         from . import scans, wannier_scans
         batch=scans.get(record['scan_batch_id'])
         recycle.assert_available('scans',batch['id'],batch)
         case=next((c for c in batch['cases'] if c['id']==record.get('scan_case_id')),None)
-        if not wannier_scans.is_window(batch) or batch['state']!='ACTIVE':
+        from .task_recovery import authorized
+        if not wannier_scans.is_window(batch) or batch['state']!='ACTIVE' and not authorized(record):
             raise ValueError('能窗批次未授权、已暂停或被回收；没有派发')
         if not case or (case.get('attempt_id'),case['bundle_id'],batch['scan_node_id'],batch['case_table_hash']) != (record['id'],record['bundle_id'],record['execution_scope'],record['scan_case_table_hash']):
             raise ValueError('准确 case 派发身份与批次不一致')
         recycle.assert_available('wannier-inputs',batch['source_frozen_id'])
         with closing(ex.db()) as db:
             active=[json.loads(r[0]) for r in db.execute('SELECT body FROM attempts WHERE state IN ('+','.join('?' for _ in control.ACTIVE)+')',control.ACTIVE)]
-        if sum(r.get('scan_batch_id')==batch['id'] for r in active)>=batch['authorization']['max_parallel']:
+        if sum(r.get('scan_batch_id')==batch['id'] and not r.get('quota_released') for r in active)>=(batch.get('authorization') or {}).get('max_parallel',1):
             raise ValueError('在途任务数已达上限：本轮并行额度已用完')
     from .workbench_settings import assert_current
     assert_current(record.get('settings_snapshot'))
@@ -611,6 +624,13 @@ def submit(key):
     identity = shlex.quote(json.dumps({'schema':'fpilot.remote-project.v1','project_id':record['project_id'],'project_slug':record['project_slug']}, ensure_ascii=False, separators=(',', ':')))
     link_names = [name for name in selected_names if name != bundle.get('source_win_name', bundle['seed'] + '.win')]
     expected_links = {name: {'target': name, 'mode': 'hardlink', **bundle['source_files'][name]} for name in link_names}
+    if bundle.get('checkpoint'):
+        checkpoint=bundle['checkpoint']
+        recycle.assert_available('attempts',checkpoint['source_attempt_id'])
+        from .source_files import snapshot as checkpoint_snapshot
+        actual=checkpoint_snapshot(record['config']['alias'],checkpoint['source_path'],[checkpoint['name']],ex.ssh,'lightweight')
+        if actual[checkpoint['name']]!=checkpoint['metadata']:raise ValueError('检查点文件已变化，没有提交')
+        expected_links[checkpoint['name']]={**checkpoint['metadata'],'source_path':checkpoint['source_path'],'target':checkpoint['name'],'mode':'reflink-or-copy'}
     if 'source_file_plan' not in record:
         raise ValueError('此 Wannier90 任务按旧版复制策略准备；请重新准备以确认硬链接策略')
     if expected_links != record['source_file_plan']:
@@ -751,7 +771,7 @@ def configuration_draft(project,node_id,parent_id,alias,input_reason,win,seed=SE
     require_fresh_interface_win(win)
     from . import recycle
     recycle.assert_available('projects',project['id'],{'parent_attempt_id':parent_id})
-    if not isinstance(input_reason,str) or not input_reason.strip():raise ValueError('请填写输入调整理由')
+    if not isinstance(input_reason,str) or len(input_reason)>2000:raise ValueError('备注最多 2000 字')
     _parent(project,node_id,parent_id,alias)
     from . import branch_bindings
     branch_bindings.check(project,node_id,alias)

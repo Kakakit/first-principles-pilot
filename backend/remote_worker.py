@@ -22,9 +22,18 @@ def execute(job):
         output, error = process.communicate(base64.b64decode(job.get('data', '')),
                                             timeout=job.get('timeout', 90))
         code = process.returncode
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        output, error = process.communicate()
+    except subprocess.TimeoutExpired as expired:
+        try:os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:pass
+        try:output,error=process.communicate(timeout=2)
+        except subprocess.TimeoutExpired as draining:
+            # A child stuck in kernel I/O (D state) can retain these pipes even
+            # after SIGKILL. Return the partial receipt instead of hanging the
+            # session forever; never replay the command.
+            output=draining.output or expired.output or b''
+            error=draining.stderr or expired.stderr or b''
+            for stream in (process.stdin,process.stdout,process.stderr):
+                if stream is not None:stream.close()
         code = None
         error += b'\nRemote command timeout; do not replay a dispatch.'
     limit = job.get('stdout_limit', 524288)

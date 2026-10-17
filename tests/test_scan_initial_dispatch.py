@@ -140,7 +140,7 @@ class InitialScanDispatchTests(unittest.TestCase):
         with stack:
             result = scans.authorize_and_dispatch(batch['id'], **payload)
             self.assertEqual(result['cases'][0]['state'], 'UNKNOWN')
-            self.assertEqual(result['state'], 'BLOCKED')
+            self.assertEqual(result['state'], 'ACTIVE')
             scans.authorize_and_dispatch(batch['id'], **payload)
             scans.tick()
             send.assert_called_once()

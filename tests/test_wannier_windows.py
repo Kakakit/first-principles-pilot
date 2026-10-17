@@ -326,6 +326,8 @@ class WindowDispatchTests(WindowTests):
         self.assertEqual({r['node'] for r in records},{'node01','node02'})
         r=records[0];r.update(state='COMPLETED',evidence={'wannier_all_done':True});ex.save(r)
         self.state='UNKNOWN';self.assertEqual(self.tick(),1);self.assertEqual(self.tick(),0)
+        self.assertEqual(scans.get(b['id'])['state'],'ACTIVE')
+        scans.pause(b['id'],'project')
         with self.assertRaisesRegex(ValueError,'UNKNOWN'):scans.resume(b['id'],'project')
         unknown=next(c for c in scans.get(b['id'])['cases'] if c['state']=='UNKNOWN')
         r=ex.get(unknown['attempt_id']);r.update(state='QUEUED',job_id='456.mock');ex.save(r)

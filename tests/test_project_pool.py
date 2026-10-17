@@ -80,12 +80,16 @@ class PoolTests(unittest.TestCase):
         self.busy_nodes=set()
         with patch.object(scans.servers,'capacity_probe',return_value={'id':'live'}),patch.object(scans.servers,'preview',return_value={'script':'changed','profile':{},'resource_ready':True}),patch.object(ex,'submit') as submit:
             scans.tick();submit.assert_not_called()
-        self.assertEqual(scans.get(batch['id'])['state'],'BLOCKED')
+        self.assertEqual(scans.get(batch['id'])['state'],'COMPLETE')
+        self.assertTrue(all(c.get('dispatch_error') for c in scans.get(batch['id'])['cases']))
 
-    def test_unknown_stops_pool_and_resume_does_not_resubmit(self):
+    def test_unknown_does_not_stop_other_cases_or_repeat_original_submission(self):
         batch=self.approved();self.submission_state='UNKNOWN'
-        self.assertEqual(self.run_tick(),(1,1));self.assertEqual(self.run_tick(),(0,0))
-        with self.assertRaisesRegex(ValueError,'UNKNOWN'):scans.resume(batch['id'],'p')
+        self.assertEqual(self.run_tick(),(2,2));self.assertEqual(self.run_tick(),(0,0))
+        current=scans.get(batch['id']);self.assertEqual(current['state'],'ACTIVE')
+        keys=[c['attempt_id'] for c in current['cases'] if c.get('attempt_id')]
+        self.assertEqual(len(keys),2)
+        self.assertTrue(all(ex.get(key)['state']=='UNKNOWN' for key in keys))
 
     def test_residual_load_waits_then_continues_pending_cases_once(self):
         batch=self.approved(1)
@@ -115,9 +119,9 @@ class PoolTests(unittest.TestCase):
         with patch.object(scans.servers,'capacity_probe',return_value={'id':'live'}),patch.object(scans.servers,'preview',return_value=value),patch.object(ex,'prepare') as prepare,patch.object(ex,'submit') as submit:
             scans.tick();prepare.assert_not_called();submit.assert_not_called()
         current=scans.get(batch['id'])
-        self.assertEqual(current['state'],'BLOCKED')
-        self.assertIn('运行时路径或调度器诊断未通过',current['blocker'])
-        self.assertNotIn('偏离授权预览',current['blocker'])
+        self.assertEqual(current['state'],'COMPLETE')
+        self.assertTrue(all('运行时路径或调度器诊断未通过' in c['dispatch_error'] for c in current['cases']))
+        self.assertNotIn('偏离授权预览',current['cases'][0]['dispatch_error'])
         self.assertNotIn('waiting_reason',current)
 
     def test_capacity_changes_at_final_gate_wait_on_original_prepared_attempt(self):

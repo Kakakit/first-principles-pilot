@@ -27,15 +27,15 @@ class InitialDispatchTests(unittest.TestCase):
 
     def payload(self, run):
         config = {'alias': 'jutai-1', 'vasp_executable': '/bin/vasp_std'}
-        resource = {'vasp_executable': 'vasp_std', 'candidates': [{'node': 'node01', 'cores': 48, 'reason': ''}]}
+        resource = {'vasp_executable': 'vasp_std', 'candidates': [{'node': n, 'cores': 48, 'reason': ''} for n in ('node01','node02')]}
         return dict(project_id='p', plan_hash=run['plan_hash'], mismatch_hash=run['mismatch_hash'],
                     config=config, resources={key: resource for key in run['node_ids']},
-                    approved_previews={key: {'node01': self.render()} for key in run['node_ids']})
+                    approved_previews={key: {n:self.render(node=n) for n in ('node01','node02')} for key in run['node_ids']})
 
-    def render(self, busy=False):
+    def render(self, busy=False,node='node01'):
         return {'resource_ready': not busy, 'node_status': 'BUSY' if busy else 'FULLY_IDLE',
                 'capacity_wait': busy, 'blockers': ['selected node CPUS_FREE must be greater than zero'] if busy else [],
-                'script': '#!/bin/bash\ntrue\n', 'profile': {'node': 'node01', 'ppn': 48}}
+                'script': '#!/bin/bash\ntrue\n', 'profile': {'node': node, 'ppn': 48}}
 
     def prepare(self, *args, **kwargs):
         record = dict(id=kwargs['attempt_id'], state='PREPARED', bundle_id=args[0], project_id='p',
@@ -57,7 +57,7 @@ class InitialDispatchTests(unittest.TestCase):
     def dispatch_mocks(self, prepare=None, submit=None, busy=False, quota=True):
         stack = ExitStack()
         stack.enter_context(patch.object(chains.servers, 'probe', return_value={'id': 'probe'}))
-        stack.enter_context(patch.object(chains.servers, 'preview', return_value=self.render(busy)))
+        stack.enter_context(patch.object(chains.servers, 'preview', side_effect=lambda *a,**kw:self.render(busy,node=a[2])))
         stack.enter_context(patch.object(chains, '_quota_available', return_value=quota))
         prep = stack.enter_context(patch.object(ex, 'prepare', side_effect=prepare or self.prepare))
         send = stack.enter_context(patch.object(ex, 'submit', side_effect=submit or self.submit))
@@ -71,6 +71,7 @@ class InitialDispatchTests(unittest.TestCase):
             result = chains.authorize_and_dispatch(run['id'], **payload)
             self.assertEqual(prep.call_count, 2)
             self.assertEqual(send.call_count, 2)
+            self.assertEqual([call.args[3] for call in prep.call_args_list],['node01','node02'])
             states = {step['node_id']: step for step in result['steps']}
             self.assertEqual(states['r']['job_id'], '123.node01')
             self.assertEqual(states['c']['waiting_kind'], 'DEPENDENCY')
@@ -201,3 +202,16 @@ class InitialDispatchTests(unittest.TestCase):
         with patch.object(chains, 'status', return_value={'state': 'ACTIVE'}) as read:
             app.chain_get(run['id'], 'p')
             read.assert_called_once_with(run['id'], 'p')
+
+    def test_single_candidate_waits_locally_while_scheduler_snapshot_is_stale(self):
+        run=self.frozen();payload=self.payload(run)
+        for resource in payload['resources'].values():resource['candidates']=resource['candidates'][:1]
+        payload['approved_previews']={key:{'node01':values['node01']} for key,values in payload['approved_previews'].items()}
+        stack,prep,send=self.dispatch_mocks()
+        with stack:
+            result=chains.authorize_and_dispatch(run['id'],**payload)
+            self.assertEqual(send.call_count,1)
+            second=next(s for s in result['steps'] if s['node_id']=='r2')
+            self.assertEqual(second['state'],'PENDING')
+            self.assertIn('候选节点暂时占用',second['waiting_reason'])
+            chains.tick();self.assertEqual(send.call_count,1)

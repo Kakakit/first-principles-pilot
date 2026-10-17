@@ -11,6 +11,7 @@ import re
 import sqlite3
 import zipfile
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from .storage import WorkspaceStore, validate_workspace
 
@@ -25,7 +26,7 @@ TABLES = {
 }
 DIRS = ('analyses', 'analyses-v2', 'plots', 'plot-datasets', 'wannier-comparisons', 'analysis-datasets')
 SIDE = ('failure-notes', 'failure-snapshots', 'result-summaries', 'window-summaries')
-ALLOWED = set(DIRS + SIDE + ('inputs', 'wannier-bundles', 'job-templates', 'recycle', 'artifact-deletions'))
+ALLOWED = set(DIRS + SIDE + ('inputs', 'wannier-bundles', 'job-templates', 'recycle', 'artifact-deletions', 'task-recovery'))
 MAX_FILE = 256 * 1024 * 1024
 MAX_TOTAL = 2 * 1024 * 1024 * 1024
 
@@ -185,8 +186,12 @@ def capture(root, project_id):
     for path in sorted((root / 'artifact-deletions').glob('*.json')):
         if associated(json.loads(path.read_bytes()), project_id, attempts):
             add(path)
+    recovery_operations=[]
+    for path in sorted((root/'task-recovery').glob('*.json')):
+        operation=json.loads(path.read_bytes())
+        if operation.get('project_id')==project_id:add(path);recovery_operations.append(operation)
     # User templates referenced in a frozen record or draft are portable scripts.
-    text = packed([project, selected]).decode()
+    text = packed([project, selected,recovery_operations]).decode()
     for path in sorted((root / 'job-templates' / 'metadata').glob('*.json')):
         value = json.loads(path.read_bytes())
         if value.get('id') and value['id'] in text:
@@ -289,6 +294,12 @@ def restore(root, manifest, objects, expected_revision, pause_automatic=False):
             incoming = objects[entry['sha256']]
             if canonical_file(relative, target.read_bytes(), root) != canonical_file(relative, incoming, manifest['origin_root']):
                 raise ValueError('附件与本机其他记录冲突，未覆盖：' + relative)
+    for saved in (root/'task-recovery').glob('*.json'):
+        operation=json.loads(saved.read_bytes())
+        if operation.get('project_id')==pid and operation.get('state')=='CONFIRMED':
+            operation.update(state='PAUSED',paused_at=datetime.now(timezone.utc).isoformat(),snapshot_pause_reason='项目快照还原')
+            from .execution_control import write_json
+            write_json(saved,operation)
     with closing(sqlite3.connect(root / 'execution.sqlite3', timeout=10)) as db:
         # Problems and workspace revision change in the same SQLite transaction.
         db.execute('ATTACH DATABASE ? AS notebook', (str(root / 'problem-records.sqlite3'),))
@@ -348,6 +359,8 @@ def restore(root, manifest, objects, expected_revision, pause_automatic=False):
                             value.update(state='PAUSED',snapshot_origin_state=state,snapshot_pause_reason='跨设备快照传输')
                         elif state in ('QUEUED', 'WAIT_RESOURCE') or (value.get('location') == 'local' and state in ('RUNNING', 'DISPATCHING')):
                             value.update(state='UNKNOWN', sync_origin_state=state, error='原设备分析尚未完成；接续只保留证据，不自动重新执行')
+                    if relative.startswith('task-recovery/') and value.get('state')=='CONFIRMED':
+                        value.update(state='PAUSED',paused_at=datetime.now(timezone.utc).isoformat(),snapshot_pause_reason='跨设备还原后需要明确继续恢复范围')
                     if Path(relative).name in ('analysis.json', 'record.json'):
                         missing = {v['path']: v['reason'] for v in manifest['missing']}
                         for field, folder in (('outputs', 'outputs'), ('files', 'files')):
@@ -382,7 +395,6 @@ def restore(root, manifest, objects, expected_revision, pause_automatic=False):
                     store.put_file('originals', source_bytes(node['data']['structure']))
                     node['data']['structure']['source'].pop('base64')
         workspace_digest = store.put_file('snapshots', json.dumps(portable_workspace, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode())
-        from datetime import datetime, timezone
         cursor = db.execute('INSERT INTO workspace_index.revisions(digest,created_at,reason) VALUES(?,?,?)',
                             (workspace_digest, datetime.now(timezone.utc).isoformat(), 'project-sync-continuation'))
         revision = cursor.lastrowid

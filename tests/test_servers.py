@@ -166,9 +166,9 @@ class ServerTests(unittest.TestCase):
             self.assertTrue(result['resource_ready'],result['blockers'])
             self.assertIn('source /unknown/setvars.sh',result['script'])
 
-    def test_lower_cores_requires_reason_and_queue_limit(self):
+    def test_lower_cores_optional_note_and_queue_limit(self):
         report=self.probe()
-        self.assertFalse(servers.preview(self.config,report['id'],'node01',16)['resource_ready'])
+        self.assertTrue(servers.preview(self.config,report['id'],'node01',16)['resource_ready'])
         good=servers.preview(self.config,report['id'],'node01',16,'用户限制测试规模')
         self.assertTrue(good['resource_ready']);self.assertIn('ppn=16',good['script'])
         self.config['walltime']='49:00:00';report=self.probe()

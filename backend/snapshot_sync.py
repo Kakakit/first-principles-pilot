@@ -67,6 +67,12 @@ def pause(pid):
                 record.update(state='PAUSED',revision=record.get('revision',0)+1,snapshot_pause_reason='跨设备快照传输',snapshot_paused_at=sync.now())
                 db.execute('UPDATE '+table+' SET state=?,body=? WHERE id=?',('PAUSED',json.dumps(record,ensure_ascii=False),rid));result[key]+=1
         db.commit()
+    from . import task_recovery
+    for path in (sync.ex.ROOT/'task-recovery').glob('*.json'):
+        operation=json.loads(path.read_bytes())
+        if operation.get('project_id')==pid and operation.get('state')=='CONFIRMED':
+            operation.update(state='PAUSED',paused_at=sync.now(),snapshot_pause_reason='跨设备快照传输')
+            task_recovery.save(operation)
     for path in (sync.ex.ROOT/'analyses-v2').glob('*/analysis.json'):
         record=json.loads(path.read_bytes())
         if record.get('project_id')==pid and record.get('state') in ('QUEUED','WAIT_RESOURCE'):

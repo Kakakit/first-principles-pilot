@@ -1,7 +1,7 @@
 """Local workspace API with single-attempt PBS/Slurm execution."""
 import platform
 from typing import Literal, Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 
@@ -1995,3 +1995,74 @@ def site_paths(alias: str, payload: dict):
     from . import site_registration
     try: return site_registration.update_paths(alias,payload)
     except (KeyError,ValueError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
+
+
+class RecoveryRequest(BaseModel):
+    project_id: str
+    kind: Literal['attempts','scans','chains']
+    target_id: str
+    item_ids: Optional[list[str]] = None
+    scope: Literal['single','remaining'] = 'single'
+    config_overrides: Optional[dict] = None
+    node: Optional[str] = None
+    cores: Optional[int] = None
+    template_id: Optional[str] = None
+    input_text: str = ''
+    parameter_patch: str = ''
+    restart_mode: Literal['keep','new','structure','charge','both','checkpoint'] = 'keep'
+    source_attempt_id: Optional[str] = None
+    acknowledge_unverified: bool = False
+
+
+@app.post('/api/recovery/context')
+def recovery_context(payload: RecoveryRequest):
+    from . import task_recovery
+    try:return task_recovery.context(payload.project_id,payload.kind,payload.target_id,payload.item_ids,payload.scope)
+    except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/recovery/preview')
+def recovery_preview(payload: RecoveryRequest):
+    from . import task_recovery
+    try:return task_recovery.preview(**payload.model_dump())
+    except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+class RecoveryConfirmation(BaseModel):
+    project_id: str
+    confirm_unknown: bool = False
+
+
+@app.post('/api/recovery/{key}/confirm')
+def recovery_confirm(key: str,payload: RecoveryConfirmation,background_tasks: BackgroundTasks):
+    from . import task_recovery
+    try:
+        value=task_recovery.confirm(key,**payload.model_dump(),dispatch=False)
+        if value['state']=='CONFIRMED':background_tasks.add_task(task_recovery.process,key)
+        return value
+    except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/recovery/{key}')
+def recovery_status(key: str,project_id: str):
+    from . import task_recovery
+    try:
+        return task_recovery.status(key,project_id)
+    except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/execution/{key}/release-quota')
+def execution_release_quota(key: str,payload: RecoveryConfirmation):
+    from . import task_recovery
+    try:return task_recovery.release_quota(payload.project_id,key)
+    except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/recovery/{key}/resume')
+def recovery_resume(key: str,payload: RecoveryConfirmation,background_tasks: BackgroundTasks):
+    from . import task_recovery
+    try:
+        value=task_recovery.resume(key,payload.project_id,dispatch=False)
+        background_tasks.add_task(task_recovery.process,key)
+        return value
+    except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc

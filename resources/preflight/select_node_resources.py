@@ -313,3 +313,24 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def scheduler_resources(facts, cores=None, request=None):
+    """Explicit reservation independent of live availability; scheduler admits it."""
+    raw_total=facts.get('CPUS_TOTAL')
+    total=int(raw_total) if str(raw_total).isdigit() else None
+    wanted=total if cores is None else cores
+    if type(wanted) is not int or wanted<1 or total is not None and wanted>total:
+        raise ResourceSelectionError('请填写正的请求核数，且不得超过已知节点总核数')
+    result={'requested_cores':wanted,'resource_policy':'scheduler_queue','blockers':[]}
+    if request:
+        ranks=request['mpi_ranks'];required=request['gpus']
+        raw_gpu=facts.get('GPUS_TOTAL')
+        registered=str(raw_gpu).isdigit() and int(raw_gpu)>0
+        physical=facts.get('GPUS_PHYSICAL_TOTAL')
+        gpu_total=int(raw_gpu) if registered else int(physical) if str(physical).isdigit() else required
+        if type(ranks) is not int or not 0<ranks<=wanted or required>gpu_total:
+            raise ResourceSelectionError('GPU/MPI 请求超出已知节点总资源')
+        result.update(requested_cores=total or wanted,mpi_ranks=ranks,requested_gpus=gpu_total,
+                      required_gpus=required,gpu_resource_registered=registered)
+    return result

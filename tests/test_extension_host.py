@@ -162,6 +162,7 @@ class ExtensionHostTests(unittest.TestCase):
         self.assertTrue(receipt['ready']);self.assertIn('analyses/analysis-preview',receipt['script'])
         self.assertIn('doctor.json',receipt['script']);self.assertNotIn('#PBS',receipt['script']);probe.assert_not_called()
     def test_old_scheduler_unknown_only_recovers_original_receipt(self):
+        control.save_settings({'max_inflight_total':2,'max_inflight_per_host':1,'max_cores_per_host':None})
         payload=self.remote_payload();key=runs.start(payload)['analysis_id']
         record=runs.get(key);record.update(location='scheduler',state='UNKNOWN',submission_started=True,remote_dir='/workspace/analyses/'+key);runs.save(record)
         with patch.object(remote,'inspect',return_value={'job_id':'731.server','exit':None}),patch.object(remote,'queued',return_value=True),patch.object(remote,'submit') as submit:

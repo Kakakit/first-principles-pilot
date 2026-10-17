@@ -57,7 +57,7 @@ def draft(project, node_id):
     parent_stage = calculation_kind(nodes[parent], project) if parent else None
     value = {'mode': 'upstream' if parent_stage and parent_stage != 'structure' else 'new',
              'purpose': 'charge', 'files': 'charge', **(nodes[node_id]['data'].get('sourceDraft') or {})}
-    if value['mode'] not in MODES or value['purpose'] not in ('charge', 'continue') or value['files'] not in ('charge', 'both'):
+    if value['mode'] not in MODES or value['purpose'] not in ('charge', 'continue') or value['files'] not in ('structure', 'charge', 'both'):
         raise ValueError('计算来源配置无效')
     if 'read_charge' in value and type(value['read_charge']) is not bool:
         raise ValueError('电子初值选择无效')
@@ -82,8 +82,8 @@ def plan(project, node_id, values=None):
         raise ValueError('继续未完成优化仅适用于 relax')
     structure = ('CONTCAR' if parent_stage == 'relax' else 'POSCAR') if upstream else (
         'CONTCAR' if value['purpose'] == 'continue' else 'POSCAR' if mode == 'self' else None)
-    charge = stage in FIXED or mode in ('self', 'manual') or (
-        mode == 'upstream' and (value['read_charge'] or value['files'] == 'both'))
+    charge = stage in FIXED or mode in ('self', 'manual') and value['files']!='structure' or (
+        mode == 'upstream' and value['files']!='structure' and (value['read_charge'] or value['files'] == 'both'))
     wave = mode != 'new' and value['files'] == 'both'
     required = ([structure] if structure else []) + (['CHGCAR'] if charge else []) + (['WAVECAR'] if wave else [])
     initial = {'ISTART': wave_start(stage, values or {}, value['purpose'] == 'continue') if wave else 0,
@@ -148,6 +148,14 @@ def convergence(record, stage, incar=None):
             'electronic': elec, 'ionic': ionic, 'electronic_step': step, 'ionic_step': ion_step}
 
 
+def scientific_warnings(record, mode, source_plan=None):
+    reasons=eligible(record,mode,'charge',source_plan)
+    return [r for r in reasons if r in SCIENTIFIC_REASONS]
+
+
+SCIENTIFIC_REASONS={'程序尚未正常完成','缺少最终电子收敛证据','缺少离子收敛证据','请先确认本轮已终止，UNKNOWN 不能用作续算来源'}
+
+
 def eligible(record, mode, purpose, source_plan=None):
     reasons = []
     from . import execution as ex, recycle
@@ -171,6 +179,8 @@ def eligible(record, mode, purpose, source_plan=None):
             reasons.append('缺少离子收敛证据')
     elif record.get('state') not in ('COMPLETED', 'FAILED'):
         reasons.append('请先确认本轮已终止，UNKNOWN 不能用作续算来源')
+    if source_plan and source_plan.get('draft',{}).get('acknowledge_unverified'):
+        reasons=[r for r in reasons if r not in SCIENTIFIC_REASONS]
     return reasons
 
 
@@ -245,7 +255,7 @@ def resolve(project, node_id, execution_scope=None):
         reasons += review['blockers']
         candidates.append({'id': rec['id'], 'alias': rec.get('config', {}).get('alias'), 'node_id': rec.get('node_id'),
                            'state': rec['state'], 'job_id': rec.get('job_id'), 'created_at': rec.get('created_at', ''),
-                           'eligible': not reasons, 'blockers': reasons, 'differences': review['differences'],
+                           'eligible': not reasons, 'blockers': reasons, 'scientific_warnings':scientific_warnings(rec,'upstream' if upstream else value['mode'],{**policy,'draft':{}}), 'can_acknowledge':bool(reasons) and all(r in SCIENTIFIC_REASONS for r in reasons), 'differences': review['differences'],
                            'warnings': review['warnings'], 'structure_file': policy['structure_file'],
                            'required_files': policy['required_files'], 'verification_status': verification,
                            'verified_at': checked.get('refreshed_at') if checked else None,
@@ -292,6 +302,7 @@ def bind(policy, record, report, verification_mode):
     if policy['parent_id'] and (attempt_owner(record) != policy['parent_id'] or old_manifest.get('stage') != policy['parent_stage']):
         raise ValueError('来源 attempt 与直接上游不符')
     review = compatibility(policy, record, report)
+    review['warnings']+=scientific_warnings(record,mode,{**policy,'draft':{}})
     if review['blockers']:
         raise ValueError('来源不兼容：'+'；'.join(review['blockers']))
     if review['differences'] and not policy.get('acknowledge_differences', policy.get('draft', {}).get('acknowledge_differences')):

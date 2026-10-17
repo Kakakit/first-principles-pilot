@@ -129,7 +129,8 @@ class ChainRunTests(unittest.TestCase):
             record = {'id': kwargs['attempt_id'], 'state': 'PREPARED',
                       'bundle_id': args[0], 'project_id': 'p', 'config': args[1],
                       'node': args[3], 'cores': args[4], 'reason': args[5]}
-            ex.save(record)
+            with ex.db() as db:
+                db.execute('INSERT INTO attempts VALUES(?,?,?)',(record['id'],record['state'],json.dumps(record)))
             return record
         with patch.object(chains, '_quota_available', return_value=True), \
              patch.object(chains.servers, 'probe', return_value={'id': 'probe'}), \
@@ -182,7 +183,7 @@ class ChainRunTests(unittest.TestCase):
                         self.assertEqual(updated['state'],'BLOCKED')
                         chains._tick_one(run['id']);submit.assert_called_once()
 
-    def test_convergence_and_one_retry_stop(self):
+    def test_nonconvergence_waits_for_explicit_recovery(self):
         run = self.frozen()
         step = run['steps'][0]
         run['authorization'] = {'config': {'alias': 'jutai-1', 'vasp_executable': '/bin/vasp_std'},
@@ -216,16 +217,12 @@ class ChainRunTests(unittest.TestCase):
                                                                   'reason': '达到 NELM'}):
                 chains.tick()
                 current = chains.get(run['id'])['steps'][0]
-                self.assertEqual(len(current['attempts']), 2)
-                self.assertEqual(prep.call_count, 2)
-                self.assertEqual(prep.call_args.kwargs['chain_source_kind'], 'relax-restart')
-                second = current['attempt_id']
-                record = ex.get(second)
-                record['state'] = 'COMPLETED'
-                ex.save(record)
+                self.assertEqual(len(current['attempts']), 1)
+                self.assertEqual(current['state'],'BLOCKED')
+                self.assertEqual(prep.call_count, 1)
                 chains.tick()
             self.assertEqual(chains.get(run['id'])['state'], 'BLOCKED')
-            self.assertEqual(prep.call_count, 2)
+            self.assertEqual(prep.call_count, 1)
 
     def test_successful_retry_is_the_only_downstream_source(self):
         run = self.frozen()

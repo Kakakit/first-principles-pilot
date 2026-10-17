@@ -592,8 +592,8 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         parent=get(retry_of)
         if parent.get('path_schema') != 'fpilot.remote-attempt-path':
             raise ValueError('attempt 目录结构不受支持，不能重试')
-        if parent['state']!='FAILED' or parent['bundle_id']!=bundle_id or parent['config']!=config:
-            raise ValueError('只可从已确认 FAILED 的原记录创建新 attempt；输入及配置必须沿用')
+        if parent['state'] not in ('FAILED','COMPLETED','CANCELLED','PREPARED'):
+            raise ValueError('在途任务请先核查；UNKNOWN 使用明确确认的恢复入口')
     from . import workbench_settings
     if template_id is None:
         template_id=servers.selected_template(config)
@@ -671,8 +671,6 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     restart_policy=None
     dependency=None
     if manifest.get('dependencies') and not restart and not chain_source and not contract:
-        if retry_of:
-            raise ValueError('依赖任务失败后必须重新选择并复核上游，不沿用独立任务重试入口')
         restart_policy=_restart_policy(manifest,files)
         dependency=dependency_snapshot(bundle_id,manifest,files,dependency_attempt_id,config['alias'],dependency_reason)
         if manifest['stage'] == 'bands':
@@ -930,6 +928,9 @@ def submit(key):
         from . import wannier_execution
         return wannier_execution.submit(key)
     if record['state']!='PREPARED':return record
+    if record.get('recovery_operation_id'):
+        from .task_recovery import authorized
+        if not authorized(record):raise ValueError('恢复授权已暂停，请明确继续本次范围')
     from .workbench_settings import assert_current
     assert_current(record.get('settings_snapshot'))
     # Reject a locally changed frozen script before any remote read.
@@ -1042,18 +1043,23 @@ def submit(key):
         from .custom_commands import start_command
         submit_command=start_command(record,key,record['script'])
     command=f'''set -e
+printf 'FPILOT_SUBMIT_PHASE=WORKSPACE\\n'
 root={root_expr}
 {remote_paths.workspace_dispatch_guard(paths['root'],record['remote_workspace_root_abs'])}
+printf 'FPILOT_SUBMIT_PHASE=PROJECT\\n'
 {project_guard} 
 dest={destination}
 parent={parent}
+printf 'FPILOT_SUBMIT_PHASE=DIRECTORY\\n'
 mkdir -p "$parent"
 mkdir "$dest"
+printf 'FPILOT_SUBMIT_PHASE=INPUTS\\n'
 tar -xf - -C "$dest"
 cd "$dest"
 sha256sum -c input-manifest.sha256
 {dependency_commands}test -s POSCAR
 mkdir .submit-once
+printf 'FPILOT_SUBMIT_PHASE=SCHEDULER\\n'
 {submit_command} > .job-id
 printf 'FPILOT_JOB_ID='
 cat .job-id
@@ -1223,13 +1229,8 @@ fi
 
 
 def retry(key,probe_id,node,cores=None,reason=''):
-    parent=get(key)
-    if parent.get('path_schema') != 'fpilot.remote-attempt-path':
-        raise ValueError('attempt 目录结构不受支持，不能重试')
-    if parent['state']!='FAILED':
-        raise ValueError('只能重试已确认 FAILED；UNKNOWN、DISPATCHING 或在途任务不得重投')
-    return prepare(parent['bundle_id'],dict(parent['config']),probe_id,node,cores,reason,
-                   template_id=parent.get('template_snapshot',{}).get('id'),retry_of=key)
+    from .task_recovery import prepare_legacy_retry
+    return prepare_legacy_retry(key,probe_id,node,cores,reason)
 
 from .fast_prepare import batched as _batched_prepare
 prepare = _batched_prepare(prepare, 'vasp')

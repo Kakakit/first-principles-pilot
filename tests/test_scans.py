@@ -102,14 +102,17 @@ class ScanTests(unittest.TestCase):
         batch['authorization']={'config':{'alias':'jutai-1'},'node':'node01','cores':None,'reason':'测试','template_id':None,'dependency_attempt_id':None,'dependency_reason':'','preview_profile':{'node':'node01'},'approved_script_sha256':hashlib.sha256(b'script').hexdigest()}
         batch['state']='ACTIVE';scans.save(batch)
         def prepare(*args,**kwargs):
-            record={'id':'attempt-1','state':'PREPARED','config':{'alias':'jutai-1'}}
-            with ex.db() as connection: connection.execute('INSERT INTO attempts VALUES(?,?,?)',(record['id'],record['state'],json.dumps(record)))
+            record={'id':kwargs['attempt_id'],'state':'PREPARED','config':{'alias':'jutai-1'}}
+            with ex.db() as connection:connection.execute('INSERT INTO attempts VALUES(?,?,?)',(record['id'],record['state'],json.dumps(record)))
             return record
-        with patch.object(scans.servers,'probe',return_value={'id':'probe'}),patch.object(scans.servers,'preview',return_value={'resource_ready':True,'profile':{'node':'node01'},'script':'script'}),patch.object(ex,'prepare',side_effect=prepare) as prep,patch.object(ex,'submit',return_value={'state':'UNKNOWN'}) as submit:
-            scans.tick();self.assertEqual(submit.call_count,1)
-            record=ex.get('attempt-1');record['state']='UNKNOWN';ex.save(record)
-            scans.tick();self.assertEqual(prep.call_count,1)
-        self.assertEqual(scans.get(batch['id'])['state'],'BLOCKED')
+        def send(key):
+            record=ex.get(key);record['state']='UNKNOWN';return ex.save(record)
+        with patch.object(scans.servers,'probe',return_value={'id':'probe'}),patch.object(scans.servers,'preview',return_value={'resource_ready':True,'profile':{'node':'node01'},'script':'script'}),patch.object(ex,'prepare',side_effect=prepare) as prep,patch.object(ex,'submit',side_effect=send) as submit:
+            scans.tick();self.assertEqual(submit.call_count,2)
+            scans.tick();self.assertEqual(prep.call_count,2)
+        current=scans.get(batch['id'])
+        self.assertEqual(current['state'],'ACTIVE')
+        self.assertTrue(all(c['state']=='UNKNOWN' for c in current['cases']))
 
     def test_authorization_binds_case_table_and_reviewed_script(self):
         batch=scans.freeze(self.project,'scan','c',[{'kind':'incar','tag':'ENCUT','start':'400','end':'400','step':'1'}],'比较')

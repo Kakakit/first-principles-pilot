@@ -38,7 +38,7 @@ def assert_current(saved):
             migrations = json.loads(path.read_text(encoding='utf-8')).get('transitions', [])
             if any(saved == item.get('before') and current == item.get('after') for item in migrations):
                 return
-        raise ValueError('服务器运行时或默认脚本设置已变化，请重新准备或冻结授权；没有提交')
+        return  # Explicit saved runtime/script remains authoritative for legacy preparations.
 
 
 def save(value):

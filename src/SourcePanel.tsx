@@ -3,8 +3,8 @@ import {useEffect,useRef,useState} from 'react';
 import type {Project} from './model';
 import {requestJson,errorMessage} from './apiClient';
 import {openSettings} from './submissionDefaults';
-export type SourceDraft={mode:'new'|'self'|'upstream'|'manual';purpose:'charge'|'continue';read_charge?:boolean;files:'charge'|'both';attempt_id?:string;scan_batch_id?:string;scan_case_id?:string;acknowledge_differences?:boolean};
-type Candidate={parameter_summary?:string;case_index?:number;batch_created_at?:string;batch_reason?:string;scan_batch_id?:string;scan_case_id?:string;id:string;alias:string;state:string;job_id:string;created_at:string;eligible:boolean;blockers:string[];differences:string[];warnings:string[];verification_status:string;verified_at?:string;structure_file?:string;observed_files:{path:string;size_bytes:number}[]};
+export type SourceDraft={mode:'new'|'self'|'upstream'|'manual';purpose:'charge'|'continue';read_charge?:boolean;files:'structure'|'charge'|'both';attempt_id?:string;scan_batch_id?:string;scan_case_id?:string;acknowledge_unverified?:boolean;acknowledge_differences?:boolean};
+type Candidate={parameter_summary?:string;case_index?:number;batch_created_at?:string;batch_reason?:string;scan_batch_id?:string;scan_case_id?:string;id:string;alias:string;state:string;job_id:string;created_at:string;eligible:boolean;can_acknowledge?:boolean;scientific_warnings?:string[];blockers:string[];differences:string[];warnings:string[];verification_status:string;verified_at?:string;structure_file?:string;observed_files:{path:string;size_bytes:number}[]};
 type Resolved={parameter_source?:{parameter_summary:string;values:Record<string,string>};draft:SourceDraft;selected_attempt_id?:string;candidates:Candidate[];blockers:string[];required_files:string[];initialization:{ISTART:number;ICHARG:number};source_plan:{structure_file?:string;electronic_usage:string}};
 export default function SourcePanel({project,nodeId,onChange,advanced=false,scopeId,allowSelf=true}:{scopeId?:string;allowSelf?:boolean;project:Project;nodeId:string;onChange:(value:SourceDraft)=>void;advanced?:boolean}){
  const node=project.nodes.find(n=>n.id===nodeId)!;
@@ -19,7 +19,7 @@ export default function SourcePanel({project,nodeId,onChange,advanced=false,scop
  const signature=JSON.stringify({nodes:project.nodes.map(n=>({id:n.id,data:n.data})),edges:project.edges});
  useEffect(()=>{const token=++epoch.current;setResolved(null);setError('');void requestJson('/api/calculation-sources/resolve',{project,node_id:nodeId,execution_scope:scopeId}).then(result=>{if(token===epoch.current)setResolved(result);}).catch(e=>{if(token===epoch.current)setError(errorMessage(e));});return()=>{epoch.current++;};},[signature,nodeId,scopeId]);
  useEffect(()=>{if(!node.data.sourceDraft)onChange(value);},[nodeId]);
- const change=(next:Partial<SourceDraft>)=>onChange({...value,...next,acknowledge_differences:false});
+ const change=(next:Partial<SourceDraft>)=>onChange({...value,...next,acknowledge_differences:false,acknowledge_unverified:false});
  const chosen=resolved?.candidates.find(c=>c.id===(value.attempt_id||resolved.selected_attempt_id));
  const hasSource=value.mode!=='new'||remoteParent;
  const refresh=async()=>{if(!chosen)return;const token=epoch.current;setRefreshing(true);setError('');try{const result=await requestJson('/api/calculation-sources/refresh',{project,node_id:nodeId,execution_scope:scopeId,attempt_id:chosen.id});if(token===epoch.current)setResolved(result);}catch(e){if(token===epoch.current)setError(errorMessage(e));}finally{setRefreshing(false);}};
@@ -37,13 +37,14 @@ export default function SourcePanel({project,nodeId,onChange,advanced=false,scop
   {hasSource&&<>
    {remoteParent&&!scanParent&&resolved&&!resolved.candidates.length&&<p>若上游只有迭代结果，请在画布将本节点改接对应迭代节点，再选择具体 case；普通节点只提供自己的普通任务。</p>}<label>历史来源<select value={value.attempt_id||''} onChange={e=>{const candidate=resolved?.candidates.find(c=>c.id===e.target.value);change({attempt_id:e.target.value||undefined,scan_batch_id:candidate?.scan_batch_id,scan_case_id:candidate?.scan_case_id});}}>
     <option value="">{scanParent?'请选择具体 case':'自动选择最新合格结果'}{chosen?' · '+chosen.job_id:''}</option>
-    {resolved?.candidates.map(c=><option key={c.id} value={c.id} disabled={!c.eligible&&c.verification_status!=='MISSING'}>{c.parameter_summary?`${c.batch_reason||parent?.data.label||'迭代'} · ${c.batch_created_at?new Date(c.batch_created_at).toLocaleString():''} · Case ${(c.case_index??0)+1} · ${c.parameter_summary} · `:''}{c.alias} · {c.job_id||'无作业号'} · {new Date(c.created_at).toLocaleString()} · {c.eligible?c.state:c.blockers.join('；')}</option>)}
+    {resolved?.candidates.map(c=><option key={c.id} value={c.id} disabled={!c.eligible&&!c.can_acknowledge&&c.verification_status!=='MISSING'}>{c.parameter_summary?`${c.batch_reason||parent?.data.label||'迭代'} · ${c.batch_created_at?new Date(c.batch_created_at).toLocaleString():''} · Case ${(c.case_index??0)+1} · ${c.parameter_summary} · `:''}{c.alias} · {c.job_id||'无作业号'} · {new Date(c.created_at).toLocaleString()} · {c.eligible?c.state:c.blockers.join('；')}</option>)}
    </select></label>
-   {!fixed&&value.mode!=='new'&&(value.mode!=='upstream'||(value.read_charge??calculationKind(parent,project)==='scf')||value.files==='both')&&<label>电子文件<select value={value.files} onChange={e=>change({files:e.target.value as SourceDraft['files']})}><option value="charge">仅 CHGCAR</option><option value="both">WAVECAR + CHGCAR</option></select></label>}
+   {!fixed&&value.mode!=='new'&&(value.mode!=='upstream'||(value.read_charge??calculationKind(parent,project)==='scf')||value.files==='both')&&<label>电子文件<select value={value.files} onChange={e=>change({files:e.target.value as SourceDraft['files']})}><option value="structure">仅结构，重新求电子态</option><option value="charge">仅 CHGCAR</option><option value="both">WAVECAR + CHGCAR</option></select></label>}
    <p>{value.mode==='new'?'保留相连上游的实际结构，电子态重新初始化。':value.mode==='upstream'?'relax 提供电子、离子均收敛的 CONTCAR；SCF 提供该次实际 POSCAR。':value.purpose==='continue'?'结构使用来源 CONTCAR，电子文件按所选模式读取。':value.mode==='self'?'使用所选历史任务的实际 POSCAR，与电子文件绑定同一次运行。':'使用项目配置结构和所选电子文件。'}冻结后固定具体来源。</p>
    {chosen&&<p role="status">文件核验：{chosen.verification_status==='VERIFIED'?'已核验':chosen.verification_status==='MISSING'?'确认缺文件':'待核验 · 旧清单不能证明终态文件缺失'}{chosen.verified_at?' · '+new Date(chosen.verified_at).toLocaleString():''}</p>}
    <button type="button" className="button" disabled={!chosen||refreshing} onClick={()=>void refresh()}>{refreshing?'正在读取远端文件清单…':'刷新所选来源文件'}</button>
    {chosen?.observed_files?.map(f=><p key={f.path}>{f.path} · {f.size_bytes.toLocaleString()} 字节</p>)}
+   {(chosen?.can_acknowledge||chosen?.scientific_warnings?.length)&&<label><input type="checkbox" checked={Boolean(value.acknowledge_unverified)} onChange={e=>onChange({...value,acknowledge_unverified:e.target.checked})}/>我已核对未收敛或结束证据不足的来源，仍要使用（不会标记其已收敛）</label>}
    {chosen?.warnings?.map((w,i)=><p key={'warning'+i}>{w}</p>)}
    {chosen?.differences.map((d,i)=><p className="handoff-warning" key={i}>{d}</p>)}
    {chosen?.differences.length? <label className="confirmation"><input type="checkbox" checked={Boolean(value.acknowledge_differences)} onChange={e=>onChange({...value,acknowledge_differences:e.target.checked})}/>我已审阅差异，允许冻结时核对并使用此来源</label>:null}

@@ -24,6 +24,9 @@ def prefix(record,purpose='vasp'):
         +"trap 'rc=$?; if test \"$rc\" -ne 0 && test \"$fpilot_submitting\" = 0; then printf \"FPILOT_NOT_DISPATCHED=%s\\n\" \"$fpilot_created\"; fi' EXIT\n"
         +'capacity=$(\n'+body+'\n)\n'
         +shlex.quote(remote_transport._interpreter(config['alias']))+' -c '+shlex.quote(code)+' "$capacity"\n')
+    if config.get('resource_policy')=='scheduler_queue':
+        command=("set -e\nfpilot_submitting=0\nfpilot_created=0\n"
+                 +"trap 'rc=$?; if test \"$rc\" -ne 0 && test \"$fpilot_submitting\" = 0; then printf \"FPILOT_NOT_DISPATCHED=%s\\n\" \"$fpilot_created\"; fi' EXIT\n")
     if purpose=='vasp' and config.get('runtime_source')!='script':
         for name in ('mpi_executable','vasp_executable','environment_script'):
             value=config.get(name)
@@ -104,10 +107,17 @@ def clear_previous_dispatch(record):
 
 def tracking_note(record):
     if record['state']=='UNKNOWN':
+        import re
         record.pop('not_dispatched',None)
         record.pop('waiting_kind',None)
         missing='未找到原 attempt 目录；' if 'FPILOT_ATTEMPT_MISSING=1' in (record.get('status_receipt') or {}).get('stdout','') else ''
         record['note']='提交回执待核查（UNKNOWN）；'+missing+'只核对原作业，确认前不会自动重投'
+        receipt=record.get('dispatch_receipt') or {}
+        phases=re.findall(r'^FPILOT_SUBMIT_PHASE=([A-Z]+)$',receipt.get('stdout',''),re.M)
+        labels={'WORKSPACE':'远端工作区目录创建或解析未返回','PROJECT':'远端项目目录核对未返回',
+                'DIRECTORY':'独立 attempt 目录创建未返回','INPUTS':'输入传输或校验未返回','SCHEDULER':'未取得调度器确认回执'}
+        if phases and receipt.get('exit_code') is None:
+            record['note']+='；'+labels.get(phases[-1],phases[-1])
     else:
         record.pop('note',None)
 

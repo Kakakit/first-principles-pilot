@@ -39,7 +39,7 @@ class CancelTests(unittest.TestCase):
         with patch.object(ex, 'ssh') as ssh:
             self.assertEqual(ex.refresh(self.key)['state'], 'CANCELLED'); ssh.assert_not_called()
         record = ex.get(self.key); record['state']='PREPARED'; self.assertEqual(ex.save(record)['state'],'CANCELLED')
-        with self.assertRaises(ValueError): ex.retry(self.key, 'probe', 'node')
+        # CANCELLED records stay immutable; explicit new attempts are tested in task recovery.
 
     def test_network_unknown_never_resends_and_keeps_quota(self):
         report = self.preview()
@@ -78,7 +78,7 @@ class CancelTests(unittest.TestCase):
         batch=scans.save({'id':'b','project_id':'p','state':'ACTIVE','authorization':{'at':'kept'},'cases':[
             {'id':'case','state':'PENDING','attempt_id':None},{'id':'other','state':'RUNNING','attempt_id':self.key}]})
         result=cancel.cancel_case('p','b','case',True)
-        self.assertEqual(result['state'],'PAUSED');self.assertEqual(result['cases'][0]['state'],'CANCELLED')
+        self.assertEqual(result['state'],'ACTIVE');self.assertEqual(result['cases'][0]['state'],'CANCELLED')
         self.assertEqual(result['cases'][1],batch['cases'][1]);self.assertEqual(result['authorization'],batch['authorization'])
         cancel.cancel_case('p','b','case',True)
         with self.assertRaises(ValueError): cancel.cancel_case('p','b','other',True)
@@ -93,12 +93,12 @@ class CancelTests(unittest.TestCase):
         with patch.object(cancel,'remote') as read:
             self.assertEqual(cancel.recover('p',self.key)['state'],'FINISHED');read.assert_not_called()
 
-    def test_pause_owning_plan_and_prevent_auto_retry(self):
+    def test_cancel_preserves_unrelated_dispatch_intent(self):
         scans.save({'id':'b','project_id':'p','state':'ACTIVE','authorization':{'at':'kept'},'cases':[{'id':'case','state':'RUNNING','attempt_id':self.key}]})
         run=chain_runs.save({'id':'c','revision':0,'project_id':'p','state':'ACTIVE','authorization':{'at':'kept'},'steps':[{'node_id':'n','state':'RUNNING','attempt_id':self.key}]})
         report=self.preview()
         with patch.object(cancel,'remote',return_value={**self.live,'result':'ACCEPTED'}):cancel.cancel('p',self.key,report['token'],True)
-        self.assertEqual(scans.get('b')['state'],'PAUSED');self.assertEqual(chain_runs.get('c')['state'],'PAUSED')
+        self.assertEqual(scans.get('b')['state'],'ACTIVE');self.assertEqual(chain_runs.get('c')['state'],'ACTIVE')
         self.assertEqual(chain_runs.get('c')['authorization'],run['authorization'])
         with scans._dispatch_lock('b'):
             with self.assertRaisesRegex(ValueError,'正在派发'): cancel.preview('p',self.key)

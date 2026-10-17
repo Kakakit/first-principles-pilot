@@ -472,8 +472,7 @@ def generate(project, node_id, context=None):
 def freeze(project, node_id, reason, *, context=None, report=None, verification_mode='lightweight', defer_sources=False, execution_scope=None):
     from . import recycle
     recycle.assert_available('projects',project['id'])
-    if not isinstance(reason, str) or not reason.strip() or len(reason) > 2000:
-        raise ValueError("请填写本次输入选择 / 修改理由（最多 2000 字）")
+    if not isinstance(reason,str) or len(reason)>2000:raise ValueError('备注最多 2000 字')
     if verification_mode not in ('lightweight', 'full'):
         raise ValueError('文件核验策略无效')
     report = report if report is not None else generate(project, node_id, context)

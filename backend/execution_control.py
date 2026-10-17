@@ -8,7 +8,7 @@ from contextlib import closing
 from . import execution as ex
 
 ACTIVE = ('COMMAND_RUNNING','DISPATCHING','SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN')
-DEFAULT = {'max_inflight_total':2, 'max_inflight_per_host':1, 'max_cores_per_host':None}
+DEFAULT = {'max_inflight_total':None, 'max_inflight_per_host':None, 'max_cores_per_host':None}
 
 
 def settings():
@@ -20,9 +20,9 @@ def validate_settings(value):
     if not isinstance(value,dict) or set(value) != set(DEFAULT):
         raise ValueError('需要总在途上限、每主机在途上限和每主机核数上限')
     for key, item in value.items():
-        if key == 'max_cores_per_host' and item is None: continue
+        if item is None: continue
         if type(item) is not int or item < 1 or item > (100000 if key == 'max_cores_per_host' else 1000):
-            raise ValueError(key+' 必须为正整数；核数可为 null 表示不额外限制')
+            raise ValueError(key+' 必须为正整数；各项可为 null 表示不额外限制')
     return dict(value)
 
 
@@ -57,8 +57,9 @@ def enforce_limits(c, record):
     active=[json.loads(row[0]) for row in rows]
     from .extension_runs import active_usage
     active += [r for r in active_usage() if r['id']!=record.get('id')]
+    active=[r for r in active if not r.get('quota_released')]
     same=[r for r in active if r['config']['alias']==record['config']['alias']]
-    if len(active)>=limits['max_inflight_total'] or len(same)>=limits['max_inflight_per_host']:
+    if (limits['max_inflight_total'] is not None and len(active)>=limits['max_inflight_total']) or (limits['max_inflight_per_host'] is not None and len(same)>=limits['max_inflight_per_host']):
         raise ValueError('在途任务数已达上限；UNKNOWN 也占用额度，未提交')
     cap=limits['max_cores_per_host']
     if cap is not None:

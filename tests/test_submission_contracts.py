@@ -34,25 +34,17 @@ class SubmissionContracts(unittest.TestCase):
         with patch('backend.site_registration.connection_identity',return_value={**connection,'port':'22'}):
             with self.assertRaisesRegex(ValueError,'SSH 连接目标'):settings.assert_current(saved)
 
-    def test_default_changes_invalidate_prepared_dispatch_by_host_and_program(self):
-        from backend import workbench_settings as settings, wannier_execution as w90, wannier_plot_restart as plot
+    def test_legacy_saved_configuration_survives_default_edits(self):
+        from backend import workbench_settings as settings
         path=self.fixture.root/'workbench-settings.json'
         state={'version':1,'runtimes':{},'defaults':{},'history_limit':5}
         with patch.object(settings,'ROOT',self.fixture.root):
             frozen=settings.snapshot('one','vasp_std')
-            state['defaults']['two:vasp_std']='other';state['defaults']['one:vasp_ncl']='soc'
-            path.write_text(json.dumps(state));settings.assert_current(frozen)
             state['defaults']['one:vasp_std']='changed';path.write_text(json.dumps(state))
-            prepared={'state':'PREPARED','kind':'vasp','settings_snapshot':frozen}
-            with patch.object(ex,'get',return_value=prepared),patch.object(ex,'ssh') as remote:
-                with self.assertRaisesRegex(ValueError,'设置已变化'):ex.submit('prepared')
-                remote.assert_not_called()
+            settings.assert_current(frozen)
             frozen=settings.snapshot('one','wannier90')
             state['runtimes']['one:wannier90']={'wannier_executable':'new-path'};path.write_text(json.dumps(state))
-            for submit,kind in [(w90.submit,'wannier90'),(plot.submit,'wannier90-plot')]:
-                with patch.object(ex,'get',return_value={'state':'PREPARED','kind':kind,'settings_snapshot':frozen}),patch.object(ex,'ssh') as remote:
-                    with self.assertRaisesRegex(ValueError,'设置已变化'):submit('prepared')
-                    remote.assert_not_called()
+            settings.assert_current(frozen)
             settings.assert_current(None)
 
     def setUp(self):
