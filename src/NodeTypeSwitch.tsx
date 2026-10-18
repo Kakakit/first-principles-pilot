@@ -14,7 +14,7 @@ export default function NodeTypeSwitch({project,node,disabled,saveState,onApply,
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   useEffect(()=>{setTarget(null);setEligibility(null);setError('');},[project.id,node.id,node.data.kind]);
   useEffect(()=>{
-    if(!saveState.startsWith('已保存')){setEligibility(null);return;}
+    if(!saveState.startsWith('已保存'))return;
     let active=true;
     const refresh=()=>requestJson(`/api/projects/${encodeURIComponent(project.id)}/node-editability`).then(result=>{if(active){setEligibility(result.nodes[node.id]||null);setError('');}}).catch(e=>{if(active){setEligibility(null);setError((e as Error).message);}});
     void refresh();window.addEventListener('fpilot:history-changed',refresh);
@@ -42,9 +42,8 @@ export default function NodeTypeSwitch({project,node,disabled,saveState,onApply,
       onApply(preview.node);setTarget(null);
     }catch(e){setError((e as Error).message);}finally{setBusy(false);}
   };
-  return <section className="node-type-switch"><label className="field">计算类型<select aria-label="计算类型" value={node.data.kind} disabled={disabled||busy||!eligibility?.can_switch} onChange={e=>setTarget(e.target.value as VaspKind)}>{VASP_KINDS.map(kind=><option key={kind} value={kind}>{catalog[kind].label}</option>)}</select></label>
-    {!eligibility&&!error&&<small>等待保存并核查冻结、任务和来源引用。</small>}
-    {eligibility&&!eligibility.can_switch&&<><p>{eligibility.reasons.join('；')}。请复制后切换。</p><button className="button" disabled={disabled} onClick={onCopy}>复制节点后设置类型</button></>}
+  return <section className="node-type-switch"><label className="field">计算类型<select aria-label="计算类型" value={node.data.kind} disabled={disabled||busy||!saveState.startsWith('已保存')||!eligibility?.can_switch} onChange={e=>setTarget(e.target.value as VaspKind)}>{VASP_KINDS.map(kind=><option key={kind} value={kind}>{catalog[kind].label}</option>)}</select></label>
+    <button className="text-button" disabled={disabled} title={eligibility?.reasons.join('；')} onClick={onCopy}>复制为新节点</button>
     {error&&<p role="alert">{error}</p>}
     {preview&&<div className="modal-backdrop" onClick={()=>{if(!busy)setTarget(null);}}><section className="modal node-type-dialog" role="dialog" aria-modal="true" aria-label="切换计算类型预览" onClick={e=>e.stopPropagation()}><h2>切换为{preview.label}</h2><p>{node.data.label} · {catalog[node.data.kind].label} → {preview.label}</p><p>阶段目录：<code>{String(node.data.stageSequence).padStart(2,'0')}-{node.data.stageSlug}</code> → <code>{String(preview.node.data.stageSequence).padStart(2,'0')}-{preview.node.data.stageSlug}</code></p>
       {preview.changes.length?<table><thead><tr><th>参数</th><th>当前</th><th>切换后</th></tr></thead><tbody>{preview.changes.map(c=><tr key={c.tag}><td>{c.tag}</td><td>{c.before??'未设置'}</td><td>{c.after??'待填写'}</td></tr>)}</tbody></table>:<p>保留当前物理参数。</p>}

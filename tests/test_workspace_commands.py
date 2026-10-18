@@ -117,7 +117,7 @@ class WorkspaceCommandTests(unittest.TestCase):
     def test_connection_test_preserves_user_multiplexing_configuration(self):
         resolved={'resolved':{'hostname':'example','user':'user','port':'22'}}
         response=subprocess.CompletedProcess([],0,'FPILOT_SSH_OK\nFPILOT_PYTHON={"path":"/usr/bin/python3","version":[3,11,1],"supported":true}\n','')
-        with patch.object(site_registration,'check_ssh',return_value=resolved),patch('backend.platform_runtime.ssh_options',return_value=['-o','ControlPath=/user/socket']),patch.object(site_registration.subprocess,'run',return_value=response) as run:
+        with patch.object(site_registration,'check_ssh',return_value=resolved),patch('backend.platform_runtime.ssh_options',return_value=['-o','ControlPath=/user/socket']),patch('backend.remote_transport.legacy',return_value={'exit_code':0,'stdout':response.stdout,'stderr':''}) as run:
             self.assertTrue(site_registration.test_connection('my-lab')['connected'])
         args=run.call_args.args[0];self.assertIn('ControlPath=/user/socket',args)
         self.assertNotIn('ControlMaster=no',args);self.assertNotIn('ControlPath=none',args)

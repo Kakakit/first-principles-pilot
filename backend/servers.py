@@ -408,6 +408,9 @@ def run(argv, input_text=None, timeout=45):
     if argv and argv[0]=='ssh' and os.environ.get('FPILOT_SSH_MODE','session')=='session':
         from .execution import ssh
         return ssh(argv[-2],argv[-1],input_text.encode() if input_text else None,timeout)
+    if argv and argv[0]=='ssh':
+        from .remote_transport import legacy
+        return legacy(argv,input_text.encode() if input_text else None,timeout,262144)
     try:
         result = subprocess.run(argv,input=input_text,text=True,capture_output=True,timeout=timeout)
         return {'exit_code':result.returncode,'stdout':result.stdout[:262144],'stderr':result.stderr[:8192]}

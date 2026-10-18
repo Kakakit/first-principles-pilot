@@ -216,10 +216,11 @@ def test_connection(alias, python='', remote_workspace_root=None):
     if remote_workspace_root:
         from .remote_paths import workspace_probe_command
         command+='(\n'+workspace_probe_command(remote_workspace_root)+"\n) && printf 'FPILOT_ROOT_READY=1\\n' || printf 'FPILOT_ROOT_READY=0\\n'\n"
-    try:
-        result=subprocess.run(['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=8',*ssh_options(alias,resolved['resolved']),alias,command],capture_output=True,text=True,timeout=25)
-    except subprocess.TimeoutExpired as exc:raise ValueError('连接超时；请检查 VPN/校园网、服务器地址与端口') from exc
-    except OSError as exc:raise ValueError('无法启动系统 OpenSSH Client') from exc
+    from . import remote_transport
+    receipt=remote_transport.legacy(['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=8',*ssh_options(alias,resolved['resolved']),alias,command],timeout=25,retry='manual')
+    from types import SimpleNamespace
+    result=SimpleNamespace(returncode=receipt['exit_code'] if receipt['exit_code'] is not None else 255,
+                           stdout=receipt['stdout'],stderr=receipt['stderr'])
     if result.returncode or not re.search(r'^FPILOT_SSH_OK$',result.stdout,re.M):
         error=result.stderr[-1200:]
         if 'Host key verification failed' in error:note='首次主机指纹尚未确认，请先在终端执行 ssh '+alias+' exit'

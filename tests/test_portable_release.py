@@ -121,19 +121,20 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(saved['config']['remote_workspace_root'],'$HOME/fpilot')
                 parsed=Mock(returncode=0,stdout='hostname invalid.example\nuser test\nport 103\n',stderr='')
                 connected=Mock(returncode=0,stdout='FPILOT_SSH_OK\nFPILOT_TOOL_qsub=/bin/qsub\nFPILOT_TOOL_qstat=/bin/qstat\nFPILOT_PYTHON={"path":"/usr/bin/python3","version":[3,9,6],"supported":true}\nFPILOT_ROOT_ABS=/home/test/fpilot\nFPILOT_ROOT_PARENT=/home/test\nFPILOT_ROOT_SNAPSHOT=1:2\nFPILOT_ROOT_READY=1\n',stderr='')
-                with patch.object(site_registration.subprocess,'run',side_effect=[parsed,connected]) as remote:
+                with patch.object(site_registration.subprocess,'run',return_value=parsed),patch.object(transport,'legacy',return_value={'exit_code':0,'stdout':connected.stdout,'stderr':''}) as remote:
                     report=site_registration.test_connection('my-lab',remote_workspace_root='$HOME/fpilot')
                 self.assertTrue(report['connected']);self.assertTrue(report['workspace']['ready'])
                 self.assertFalse(report['remote_mutation']);self.assertEqual(report['python']['path'],'/usr/bin/python3')
-                argv=remote.call_args_list[1].args[0]
+                argv=remote.call_args.args[0]
+                self.assertEqual(remote.call_args.kwargs['retry'],'manual')
                 self.assertNotIn('ControlMaster=no',argv);self.assertNotIn('ControlPath=none',argv);self.assertIn('BatchMode=yes',argv)
                 self.assertNotIn('mkdir',argv[-1]);self.assertNotIn('source ',argv[-1])
                 self.assertEqual(report['schedulers'],['pbs'])
                 denied=Mock(returncode=255,stdout='',stderr='Permission denied (publickey)')
-                with patch.object(site_registration.subprocess,'run',side_effect=[parsed,denied]):
+                with patch.object(site_registration.subprocess,'run',return_value=parsed),patch.object(transport,'legacy',return_value={'exit_code':None,'stdout':'','stderr':denied.stderr}):
                     with self.assertRaisesRegex(ValueError,'软件进程'):site_registration.test_connection('my-lab')
                 no_python=Mock(returncode=0,stdout='FPILOT_SSH_OK\n',stderr='')
-                with patch.object(site_registration.subprocess,'run',side_effect=[parsed,no_python]):
+                with patch.object(site_registration.subprocess,'run',return_value=parsed),patch.object(transport,'legacy',return_value={'exit_code':0,'stdout':no_python.stdout,'stderr':''}):
                     report=site_registration.test_connection('my-lab')
                     self.assertIsNone(report['python']);self.assertIn('3.8+',report['note'])
 

@@ -29,32 +29,52 @@ def state():
 
 
 def tick(refresh=None, notify=False):
+    custom_refresh=refresh
     refresh=refresh or ex.refresh
     with closing(ex.db()) as c:
         rows=c.execute('SELECT body FROM attempts WHERE state IN ('+','.join('?' for _ in control.ACTIVE)+')',control.ACTIVE).fetchall()
     checked=0;errors=[]
+    from . import remote_health,remote_transport
+    due=set(remote_health.due())
+    # Hosts advance independently; a slow/unreachable host cannot hold other hosts.
+    groups={}
     for row in rows:
-        r=json.loads(row[0])
-        if r.get('config',{}).get('scheduler')=='custom':continue
-        if recycle.inactive('attempts',r['id'],r):continue
-        if r['state']=='DISPATCHING':
-            try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(r['dispatch_started_at'])).total_seconds()
-            except (KeyError,ValueError):age=181
-            # A source copy may take 900s. Include session/receipt allowance;
-            # status reads must not classify an upload still in progress.
-            timeout=r.get('dispatch_timeout_seconds',900 if any(item.get('mode')=='reflink-or-copy' for item in r.get('source_file_plan',{}).values()) else 180)
-            if age<timeout+65:continue
-        try:
-            updated=refresh(r['id'])
-            checked+=1
-            if updated['state']=='FAILED':control.freeze_failure(r['id'])
-            if notify and updated['state'] in ('FAILED','COMPLETED'):notify_terminal(r['id'])
-        except Exception as exc:
+        value=json.loads(row[0]);groups.setdefault(value.get('config',{}).get('alias',''),[]).append(row)
+    for alias in due:groups.setdefault(alias,[])
+    def refresh_host(pair):
+        alias,host_rows=pair
+        checked=0;errors=[]
+        if alias in due:remote_transport.recover(alias)
+        from . import remote_monitor
+        live_records=[json.loads(row[0]) for row in host_rows]
+        scheduler=remote_monitor.batch([r for r in live_records if not recycle.inactive('attempts',r['id'],r)]) if custom_refresh is None else {}
+        for row in host_rows:
+            r=json.loads(row[0])
+            if r.get('config',{}).get('scheduler')=='custom':continue
             if recycle.inactive('attempts',r['id'],r):continue
-            message=control.redact(str(exc))[:1000]
-            errors.append({'attempt_id':r['id'],'message':message})
-            with closing(ex.db()) as c:
-                control.journal(c,r['id'],'REFRESH_ERROR',{'message':message});c.commit()
+            if r['state']=='DISPATCHING':
+                try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(r['dispatch_started_at'])).total_seconds()
+                except (KeyError,ValueError):age=181
+                # A source copy may take 900s. Include session/receipt allowance;
+                # status reads must not classify an upload still in progress.
+                timeout=r.get('dispatch_timeout_seconds',900 if any(item.get('mode')=='reflink-or-copy' for item in r.get('source_file_plan',{}).values()) else 180)
+                if age<timeout+65:continue
+            try:
+                updated=refresh(r['id']) if custom_refresh is not None or r['id'] not in scheduler else ex.refresh(r['id'],poll_receipt=scheduler[r['id']])
+                checked+=1
+                if updated['state']=='FAILED':control.freeze_failure(r['id'])
+                if notify and updated['state'] in ('FAILED','COMPLETED'):notify_terminal(r['id'])
+            except Exception as exc:
+                if recycle.inactive('attempts',r['id'],r):continue
+                message=control.redact(str(exc))[:1000]
+                errors.append({'attempt_id':r['id'],'message':message})
+                with closing(ex.db()) as c:
+                    control.journal(c,r['id'],'REFRESH_ERROR',{'message':message});c.commit()
+        return checked,errors
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,min(4,len(groups)))) as pool:
+        for count,failures in pool.map(refresh_host,groups.items()):
+            checked+=count;errors.extend(failures)
     with closing(ex.db()) as c:
         failed=[row[0] for row in c.execute("SELECT id FROM attempts WHERE state='FAILED'")]
     for key in failed:
@@ -105,7 +125,10 @@ def run(interval=300, once=False):
                 result=tick(notify=os.environ.get('FPILOT_NOTIFICATIONS','1')!='0')
                 control.write_json(ex.ROOT/'worker-state.json',dict(heartbeat,heartbeat_epoch=time.time(),last_cycle=result))
                 if once:break
-                deadline=time.monotonic()+interval
+                from . import remote_health
+                retry_times=[r['next_retry_at'] for r in remote_health.status() if r['state']=='COOLDOWN' and r.get('next_retry_at')]
+                delay=min(interval,max(1,min(retry_times)-time.time())) if retry_times else interval
+                deadline=time.monotonic()+delay
                 while not stop.is_set() and time.monotonic()<deadline:
                     if parent and not process_alive(int(parent)):stop.set();break
                     path=os.environ.get('FPILOT_STOP_FILE')

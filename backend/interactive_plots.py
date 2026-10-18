@@ -264,31 +264,29 @@ def _download(source: dict, target: Path, job: dict) -> dict:
     command = ['ssh', *execution.ssh_multiplex_options(source['host']), '-o', 'BatchMode=yes',
                '-o', 'StrictHostKeyChecking=yes', source['host'],
                'cat ' + remote_paths.shell_path(source['remote_dir']) + '/' + source['name']]
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     digest = hashlib.sha256()
     count = 0
     try:
+        from . import remote_transport
         with temporary.open('wb') as output:
-            while True:
+            def receive(chunk):
+                nonlocal count
                 if job.get('discarded'):raise ValueError('本地绘图来源已由用户清理')
-                chunk = proc.stdout.read(1024 * 1024)
-                if not chunk:
-                    break
-                output.write(chunk); digest.update(chunk); count += len(chunk)
-                with LOCK:
-                    job['downloaded_bytes'] += len(chunk)
-        stderr = proc.stderr.read()[-1000:]
-        if proc.wait() != 0 or count != source['size_bytes'] or digest.hexdigest() != expected:
-            raise ValueError('下载或哈希核对失败：' + source['name'] + ' ' + stderr.decode(errors='replace'))
+                if count+len(chunk)>source['size_bytes']:raise ValueError('远端文件超过已核对大小')
+                output.write(chunk);digest.update(chunk);count+=len(chunk)
+                with LOCK:job['downloaded_bytes']+=len(chunk)
+            receipt=remote_transport.legacy(command,timeout=900,stdout_limit=0,lane='analysis',on_output=receive)
+        if receipt['exit_code'] != 0 or count != source['size_bytes'] or digest.hexdigest() != expected:
+            raise ValueError('下载或哈希核对失败：'+source['name']+' '+receipt['stderr'][-1000:])
         if _remote_digest(source) != expected:
             raise ValueError('下载期间远端文件发生变化：' + source['name'])
         if job.get('discarded'):raise ValueError('本地绘图来源已由用户清理')
         temporary.replace(target)
         return {**source, 'sha256': expected, 'local_path': str(target)}
     except BaseException:
-        proc.kill(); proc.wait()
         temporary.unlink(missing_ok=True)
         raise
+
 
 
 def _cleanup_remote_pbands(host: str, scratch: str) -> None:
@@ -786,21 +784,38 @@ def _series_data(meta, directory, selected, emin, emax):
 
 
 def save(key: str, project_id: str, selected: list[dict], emin: float, emax: float,
-         png_data_url: str, svg: str, title: str = '', point_size_scale: float = 1) -> dict:
+         png_data_url: str, svg: str, title: str = '', point_size_scale: float = 1, png_file=None) -> dict:
     meta=_metadata(CACHE_ROOT/key)
     if not meta or meta['project_id'] != project_id: raise ValueError('结果来源项目不匹配')
     if not math.isfinite(point_size_scale) or not 0.1 <= point_size_scale <= 1.5:
         raise ValueError('彩点大小超出可用范围')
-    if not png_data_url.startswith('data:image/png;base64,') or len(png_data_url)>20_000_000 or not svg.startswith('<svg') or len(svg)>22_000_000:
+    if png_file is None and (not png_data_url.startswith('data:image/png;base64,') or len(png_data_url)>20_000_000 or not svg.startswith('<svg') or len(svg)>22_000_000):
         raise ValueError('图片格式或大小无效')
     if re.search(r'<(?:script|foreignObject)\b|\bon\w+\s*=', svg, re.I):
         raise ValueError('SVG 不允许脚本或事件属性')
+    if png_file is not None:
+        with png_file.open('rb') as stream:image=stream.read(24)
+    else:image=base64.b64decode(png_data_url.split(',',1)[1],validate=True)
+    if not image.startswith(b'\x89PNG\r\n\x1a\n') or png_file is not None and (len(image)<24 or image[12:16]!=b'IHDR'):raise ValueError('PNG 数据无效')
+    if png_file is not None:
+        import struct
+        width,height=struct.unpack('>II',image[16:24])
+        if not width or not height:raise ValueError('PNG 尺寸无效')
     payload=series(key,selected,emin,emax)
-    image=base64.b64decode(png_data_url.split(',',1)[1],validate=True)
-    if not image.startswith(b'\x89PNG\r\n\x1a\n'): raise ValueError('PNG 数据无效')
     identifier=uuid.uuid4().hex; directory=SAVED_ROOT/identifier; directory.mkdir(parents=True,exist_ok=False)
-    (directory/'figure.png').write_bytes(image)
-    (directory/'figure.svg').write_text(svg)
+    if png_file is not None:
+        import shutil
+        shutil.copyfile(png_file,directory/'figure.png')
+        with png_file.open('rb') as source,(directory/'figure.svg').open('w') as target:
+            target.write('<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}"><image width="100%" height="100%" href="data:image/png;base64,'.format(width,height))
+            while True:
+                block=source.read(65535)
+                if not block:break
+                target.write(base64.b64encode(block).decode())
+            target.write('"/></svg>')
+    else:
+        (directory/'figure.png').write_bytes(image)
+        (directory/'figure.svg').write_text(svg)
     with (directory/'selected-curves.csv').open('w',newline='') as stream:
         writer=csv.writer(stream); writer.writerow(['kind','spin','element','orbital','k_index','band','x','energy_relative_eV','weight_or_dos'])
         band=payload.get('band')

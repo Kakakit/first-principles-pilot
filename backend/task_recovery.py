@@ -101,7 +101,7 @@ def context(project_id,kind,target_id,item_ids=None,scope='single'):
     operations=[json.loads(p.read_text()) for p in (ex.ROOT/'task-recovery').glob('*.json')]
     operations=[op for op in operations if op['project_id']==project_id and op['kind']==kind and op['target_id']==target_id and op['state']!='PREVIEW']
     operations.sort(key=lambda op:op['created_at'],reverse=True)
-    return {'operations':operations[:5],'project_id':project_id,'kind':kind,'target_id':target_id,'scope':scope,'items':result,'skipped':skipped,
+    return {'operations':[{k:op[k] for k in ('id','state','created_at','items') if k in op} | {'items':[{'id':i['id']} for i in op['items']]} for op in operations[:5]],'project_id':project_id,'kind':kind,'target_id':target_id,'scope':scope,'items':result,'skipped':skipped,
             'max_parallel':(value.get('authorization') or {}).get('max_parallel',1)}
 
 

@@ -1,7 +1,7 @@
 """Local workspace API with single-attempt PBS/Slurm execution."""
 import platform
 from typing import Literal, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 
@@ -384,8 +384,12 @@ def scan_freeze(payload: ScanRequest):
 
 
 @app.get('/api/scans')
-def scan_history(project_id: str):
-    return {'batches':scans.history(project_id)}
+def scan_history(project_id: str,view: str='full'):
+    rows=scans.history(project_id)
+    if view=='summary':
+        from . import task_summary
+        rows=[task_summary.scan(r) for r in rows]
+    return {'batches':rows}
 
 
 @app.get('/api/scans/{batch_id}')
@@ -1327,8 +1331,13 @@ class AnalysisRun(BaseModel):
 
 
 @app.get('/api/projects/{project_id}/nodes/{node_id}/attempts')
-def node_attempts(project_id: str, node_id: str):
-    return {'attempts': artifacts.attempts(project_id, node_id), 'path_schema': 'fpilot.remote-attempt-path'}
+def node_attempts(project_id: str, node_id: str, view: str='full', limit: int=50, cursor: Optional[str]=None):
+    rows=artifacts.attempts(project_id,node_id)
+    if view=='summary':
+        from . import task_summary
+        result=task_summary.paginate([task_summary.attempt(row) for row in rows],limit,cursor)
+        return {**result,'attempts':result['items'],'path_schema':'fpilot.remote-attempt-path'}
+    return {'attempts':rows,'path_schema':'fpilot.remote-attempt-path'}
 
 
 @app.get('/api/projects/{project_id}/node-editability')
@@ -1485,8 +1494,34 @@ def preview_execution_path(payload: PathPreview):
 
 
 @app.get('/api/execution')
-def execution_history(project_id: Optional[str]=None):
+def execution_history(project_id: Optional[str]=None, view: str='full', limit: int=50, cursor: Optional[str]=None, node_id: Optional[str]=None):
+    if view=='summary':
+        from . import task_summary
+        try:return task_summary.page(project_id,limit,cursor,node_id)
+        except ValueError as exc:raise HTTPException(422,str(exc)) from exc
     return execution.history(project_id)
+
+
+@app.get('/api/projects/{project_id}/task-summary')
+def project_task_summary(project_id: str):
+    from . import task_summary
+    return task_summary.project(project_id)
+
+
+@app.get('/api/server/connection-status')
+def connection_status(alias: Optional[str]=None):
+    from . import remote_health
+    return {'hosts':remote_health.status(alias)}
+
+
+@app.post('/api/server/recover-connection')
+def recover_connection(payload: dict):
+    from . import remote_transport,remote_health
+    alias=payload.get('alias','')
+    if alias not in servers.load_registry(include_removed=True)['hosts']:
+        raise HTTPException(422,'服务器未登记')
+    receipt=remote_transport.recover(alias,manual=True)
+    return {'receipt':receipt,'hosts':remote_health.status(alias)}
 
 
 class PermanentAttemptDelete(BaseModel):
@@ -2044,10 +2079,14 @@ def recovery_confirm(key: str,payload: RecoveryConfirmation,background_tasks: Ba
 
 
 @app.get('/api/recovery/{key}')
-def recovery_status(key: str,project_id: str):
+def recovery_status(key: str,project_id: str,view: str='full'):
     from . import task_recovery
     try:
-        return task_recovery.status(key,project_id)
+        value=task_recovery.status(key,project_id)
+        if view=='status':
+            from . import task_summary
+            return task_summary.recovery(value)
+        return value
     except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
@@ -2066,3 +2105,35 @@ def recovery_resume(key: str,payload: RecoveryConfirmation,background_tasks: Bac
         background_tasks.add_task(task_recovery.process,key)
         return value
     except (ValueError,KeyError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/execution/{key}')
+def execution_detail(key: str, project_id: str):
+    try:
+        row=execution.get(key)
+        if row.get('project_id')!=project_id:raise ValueError('任务不属于当前项目')
+        from . import recycle
+        from .calculation_nodes import case_info
+        recycle.assert_available('attempts',key,row)
+        return {**row,**case_info(row)}
+    except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/interactive-plots/save-binary')
+async def interactive_plot_save_binary(request: Request, metadata: str):
+    import json,tempfile
+    from pathlib import Path
+    from starlette.concurrency import run_in_threadpool
+    if request.headers.get('content-type')!='image/png':raise HTTPException(422,'需要 PNG 二进制图片')
+    try:payload=InteractivePlotSave.model_validate({**json.loads(metadata),'png_data_url':'','svg':''})
+    except (ValueError,TypeError) as exc:raise HTTPException(422,'图片元数据无效') from exc
+    with tempfile.TemporaryDirectory(prefix='fpilot-image-') as folder:
+        path=Path(folder)/'figure.png';size=0
+        with path.open('wb') as stream:
+            async for block in request.stream():
+                size+=len(block)
+                if size>15_000_000:raise HTTPException(422,'PNG 超过 15 MB')
+                stream.write(block)
+        try:return await run_in_threadpool(interactive_plots.save,payload.cache_id,payload.project_id,payload.selected,
+            payload.emin,payload.emax,'','',payload.title,payload.point_size_scale,png_file=path)
+        except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc

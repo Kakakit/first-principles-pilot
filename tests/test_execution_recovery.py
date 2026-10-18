@@ -53,6 +53,20 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('旧容量错误',result['note'])
         submit.assert_not_called()
 
+    def test_light_poll_preserves_state_on_connection_failure_and_terminal_snapshot(self):
+        record=self.record();record['config']['scheduler']='pbs';record['evidence']={'scheduler_state':'R'};ex.save(record)
+        with patch.object(ex,'ssh') as ssh:
+            result=ex.refresh('a',poll_receipt={'exit_code':None,'stderr':'cooldown'})
+            self.assertEqual(result['state'],'RUNNING')
+            self.assertEqual(result['evidence']['scheduler_state'],'R')
+            self.assertEqual(result['tracking_error'],'cooldown')
+            result=ex.refresh('a',poll_receipt={'exit_code':0,'stdout':'job_state = Q','stderr':''})
+            self.assertEqual(result['state'],'QUEUED')
+            self.assertEqual(result['tracking_error'],'')
+            result.update(state='COMPLETED',evidence={'scheduler_state':'C'});ex.save(result)
+            self.assertEqual(ex.refresh('a',poll_receipt={'exit_code':0,'stdout':'job_state = R','stderr':''})['state'],'COMPLETED')
+            ssh.assert_not_called()
+
     def test_lost_ack_recovers_original_job_in_one_read(self):
         record=self.record('a','UNKNOWN');record['job_id']=None;ex.save(record)
         receipt={'exit_code':0,'stdout':'FPILOT_JOB_ID=555.node01\njob_state = R\n','stderr':''}
@@ -201,7 +215,7 @@ class RecoveryTests(unittest.TestCase):
         ssh=shim/'ssh'
         ssh.write_text('#!'+sys.executable+'\nimport os,pathlib,sys\nr=pathlib.Path(os.environ["FPILOT_WORKSPACE"])\nwith (r/"ssh-calls").open("a") as f:f.write(" ".join(sys.argv)+"\\n")\nif "-G" in sys.argv:print("hostname test.invalid\\nuser test\\nport 22");sys.exit(0)\nif (r/"mode").read_text()=="offline":sys.exit(255)\nprint("FPILOT_EXIT=0\\nFPILOT_TIMING=1\\njob_state = C")\n')
         ssh.chmod(0o700)
-        env=dict(os.environ,FPILOT_WORKSPACE=str(self.root),FPILOT_NOTIFICATIONS='0',FPILOT_SSH_MODE='legacy',PATH=str(shim)+os.pathsep+os.environ.get('PATH',''))
+        env=dict(os.environ,FPILOT_WORKSPACE=str(self.root),FPILOT_NOTIFICATIONS='0',FPILOT_REMOTE_DISABLED='0',FPILOT_SSH_MODE='legacy',PATH=str(shim)+os.pathsep+os.environ.get('PATH',''))
         cwd=Path(__file__).resolve().parents[1]
         def wait_for(predicate):
             deadline=time.monotonic()+8
@@ -211,12 +225,16 @@ class RecoveryTests(unittest.TestCase):
             self.fail('worker did not reach expected state')
         first=subprocess.Popen([sys.executable,'-m','backend.worker','--interval','30'],cwd=cwd,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         try:
-            wait_for(lambda:ex.get('a')['state']=='UNKNOWN')
+            wait_for(lambda:bool(ex.get('a').get('tracking_error')))
             second=subprocess.run([sys.executable,'-m','backend.worker','--once'],cwd=cwd,env=env,capture_output=True,timeout=8)
             self.assertEqual(second.returncode,0)
             self.assertEqual((self.root/'ssh-calls').read_text().count('BatchMode=yes'),1)
             first.kill();first.wait(timeout=5)
             mode.write_text('online')
+            health_path=self.root/'connection-health.json'
+            values=json.loads(health_path.read_text())
+            for value in values.values():value['next_retry_at']=0
+            health_path.write_text(json.dumps(values))
             resumed=subprocess.run([sys.executable,'-m','backend.worker','--once'],cwd=cwd,env=env,capture_output=True,timeout=8)
             self.assertEqual(resumed.returncode,0,resumed.stderr.decode())
             self.assertEqual(ex.get('a')['state'],'COMPLETED')

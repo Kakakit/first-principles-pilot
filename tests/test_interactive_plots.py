@@ -116,11 +116,24 @@ class InteractivePlotTests(unittest.TestCase):
             meta.update(project_id='project',sources=[],band_attempt_id='attempt',dos_attempt_id=None)
             (root/'metadata.json').write_text(json.dumps(meta))
             png='data:image/png;base64,'+base64.b64encode(b'\x89PNG\r\n\x1a\nfixture').decode()
-            with patch.object(plots,'CACHE_ROOT',root.parent), patch.object(plots,'SAVED_ROOT',root.parent/'saved'):
+            with patch.object(plots,'CACHE_ROOT',root.parent), patch.object(plots,'SAVED_ROOT',root/'saved'):
                 saved=plots.save(root.name,'project',[{'element':'Fe','orbital':'p'}],-4,4,png,'<svg xmlns="http://www.w3.org/2000/svg"></svg>','fixture',.7)
                 self.assertEqual(plots.saved('project')[0]['id'],saved['id'])
                 self.assertEqual(saved['point_size_scale'],.7)
                 self.assertIn('fatband',plots.saved_file(saved['id'],'selected-curves.csv','project').decode())
+                # Binary export preserves the PNG and the exact scientific CSV.
+                binary=root/'export.png'
+                binary.write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII='))
+                result=plots.save(root.name,'project',[{'element':'Fe','orbital':'p'}],-4,4,'','','binary',.7,png_file=binary)
+                self.assertEqual(plots.saved_file(result['id'],'figure.png','project'),binary.read_bytes())
+                self.assertEqual(plots.saved_file(result['id'],'selected-curves.csv','project'),plots.saved_file(saved['id'],'selected-curves.csv','project'))
+                svg=plots.saved_file(result['id'],'figure.svg','project').decode()
+                self.assertIn('width="1" height="1"',svg)
+                self.assertIn(base64.b64encode(binary.read_bytes()).decode(),svg)
+                binary.write_bytes(b'not png')
+                with self.assertRaisesRegex(ValueError,'PNG 数据无效'):
+                    plots.save(root.name,'project',[],-4,4,'','','invalid',png_file=binary)
+                self.assertEqual(len(plots.saved('project')),2)
 
     def test_cached_lookup_is_project_scoped_and_read_only(self):
         with tempfile.TemporaryDirectory() as temp:

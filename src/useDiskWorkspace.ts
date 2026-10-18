@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import type {Dispatch,SetStateAction} from 'react';
 import {cleanWorkspace,parseWorkspace} from './model';
 import type {Workspace} from './model';
@@ -20,6 +20,7 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
   const [ready,setReady]=useState(false),[status,setStatus]=useState('正在读取本机工作区…');
   const [error,setError]=useState(''),[path,setPath]=useState(''),[retry,setRetry]=useState(0);
   const latest=useRef(workspace),revision=useRef(0),saved=useRef(''),running=useRef<Promise<void>|null>(null),paused=useRef(false);
+  const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),drain=useRef(false),flushLatest=useRef<()=>Promise<void>>(()=>Promise.resolve());
   latest.current=workspace;
   useEffect(()=>{
     const controller=new AbortController();let active=true;setReady(false);setError('');setStatus('正在读取本机工作区…');
@@ -43,7 +44,8 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
   },[retry,legacyError,setWorkspace]);
   const flush=useCallback((manual=false):Promise<void>=>{
     if(!ready)return Promise.resolve();
-    if(manual){paused.current=false;setError('');}
+    clearTimeout(timer.current);
+    if(manual){paused.current=false;drain.current=true;setError('');}
     if(paused.current)return Promise.resolve();
     if(running.current)return running.current;
     const save=async()=>{
@@ -53,18 +55,24 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
           if(body===saved.current)break;
           if(new TextEncoder().encode(body).length>MAX_BACKUP_BYTES)throw new Error('工作区超过 32 MiB，请先导出并拆分项目。');
           setStatus('正在保存到本机…');
-          const result=await responseJSON(await fetch('/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace:JSON.parse(body),expected_revision:revision.current,reason:'autosave'})}));
+          const result=await responseJSON(await fetch('/api/workspace',{method:'PUT',headers:{'Content-Type':'application/json'},body:'{"workspace":'+body+',"expected_revision":'+revision.current+',"reason":"autosave"}'}));
           revision.current=result.revision;saved.current=body;
+          if(!drain.current&&JSON.stringify(cleanWorkspace(latest.current))!==body){
+            setStatus('有修改待保存');timer.current=setTimeout(()=>void flushLatest.current(),1000);return;
+          }
         }
         setStatus('已保存到本机工作区');
       }catch(e){paused.current=true;setStatus('尚未保存，请导出备份');setError((e as Error).message);}
-      finally{running.current=null;}
+      finally{running.current=null;drain.current=false;}
     };
     // Defer entry so running is assigned even if there is nothing to save.
     running.current=Promise.resolve().then(save);return running.current;
   },[ready]);
-  const serialized=JSON.stringify(cleanWorkspace(workspace));
-  useEffect(()=>{if(!ready||serialized===saved.current)return;setStatus('有修改待保存');const t=setTimeout(()=>void flush(),600);return()=>clearTimeout(t);},[serialized,ready,flush]);
+  flushLatest.current=flush;
+  const serialized=useMemo(()=>JSON.stringify(cleanWorkspace(workspace)),[workspace]);
+  useEffect(()=>{if(!ready||serialized===saved.current)return;setStatus('有修改待保存');timer.current=setTimeout(()=>void flush(),1000);return()=>clearTimeout(timer.current);},[serialized,ready,flush]);
+  const finishEditing=useCallback(()=>{drain.current=true;void flush();},[flush]);
+  useEffect(()=>{const hidden=()=>{if(document.hidden)finishEditing();};document.addEventListener('visibilitychange',hidden);return()=>document.removeEventListener('visibilitychange',hidden);},[finishEditing]);
   useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(ready&&JSON.stringify(cleanWorkspace(latest.current))!==saved.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[ready]);
   const exclusive=async<T,>(action:()=>Promise<T>):Promise<T>=>{
     await flush(true);
@@ -73,5 +81,5 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
     try{return await action();}
     finally{setRetry(n=>n+1);}
   };
-  return {ready,status,error,path,flush,exclusive,reload:()=>setRetry(n=>n+1)};
+  return {ready,status,error,path,flush,finishEditing,exclusive,reload:()=>setRetry(n=>n+1)};
 }

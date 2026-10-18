@@ -805,12 +805,8 @@ def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None):
         return run(alias,command,data,timeout,stdout_limit,mutating=mutating)
     args=['ssh',*ssh_multiplex_options(alias),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',
           '-o','StrictHostKeyChecking=yes',alias,command]
-    try:
-        r=subprocess.run(args,input=data,capture_output=True,timeout=timeout)
-        return {'exit_code':r.returncode,'stdout':r.stdout[-stdout_limit:].decode(errors='replace'),
-                'stdout_truncated':len(r.stdout)>stdout_limit,'stderr':r.stderr.decode(errors='replace')[-32768:]}
-    except subprocess.TimeoutExpired:
-        return {'exit_code':None,'stdout':'','stderr':'SSH 超时，提交结果不确定，禁止自动重投'}
+    from .remote_transport import legacy
+    return legacy(args,data,timeout,stdout_limit)
 
 
 def ssh_multiplex_options(alias):
@@ -1099,7 +1095,7 @@ def assert_recovery_target(record):
             raise ValueError('实际 SSH 连接目标已改变；请恢复原服务器连接后核查原作业，不会重投')
 
 
-def refresh(key):
+def refresh(key, poll_receipt=None):
     if recycle.inactive('attempts',key,get(key)):return get(key)
     record=get(key)
     if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'):
@@ -1110,6 +1106,20 @@ def refresh(key):
         from .custom_commands import refresh as refresh_command
         return record if record['state']=='PREPARED' else refresh_command(key)
     if record['state'] == 'CANCELLED': return record
+    if poll_receipt is not None and record['state'] in ('SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN'):
+        from .remote_monitor import active_state
+        if poll_receipt.get('exit_code') is None:
+            previous=record.get('updated_at')
+            record.update(tracking_error=poll_receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),updated_at=now())
+            return save(record,expected_updated_at=previous)
+        observed=active_state(record,poll_receipt)
+        if observed and observed!='EXITING':
+            previous=record.get('updated_at')
+            evidence=dict(record.get('evidence') or {});evidence['scheduler']=record['config']['scheduler']
+            evidence['scheduler_state']={'QUEUED':'Q','RUNNING':'R','HELD':'H'}.get(observed,observed) if record['config']['scheduler']=='pbs' else {'QUEUED':'PENDING','RUNNING':'RUNNING','HELD':'SUSPENDED'}.get(observed,observed)
+            record.update(state=observed,updated_at=now(),status_receipt=poll_receipt,evidence=evidence,
+                          tracking_error='',tracking_checked_at=now(),state_checked_at=now())
+            return save(record,expected_updated_at=previous)
     if record.get('kind') in ('wannier90', 'wannier90-plot'):
         from . import wannier_execution
         return wannier_execution.refresh(key)
@@ -1157,6 +1167,9 @@ fi
     else:
         command+=recovered_job_command(scheduler)
     receipt=ssh(record['config']['alias'],command,timeout=30)
+    if receipt.get('exit_code') is None:
+        record.update(tracking_error=receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),status_receipt=receipt,updated_at=now())
+        return save(record,expected_updated_at=expected_updated_at)
     match=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',receipt['stdout'],re.M)
     if match and not record.get('job_id'):record['job_id']=match.group(1)
     out=receipt['stdout'];exit_match=re.search(r'^FPILOT_EXIT=(\d+)\s*$',out,re.M)
@@ -1205,7 +1218,7 @@ fi
     scheduler_state=(state_match.group(1) if state_match else 'C' if trace_complete and trace_exit == 0 else
                      slurm_live.group(1) if slurm_live else
                      slurm_account.group(1) if slurm_account else None)
-    record.update(state=state,status_receipt=receipt,updated_at=now(),
+    record.update(state=state,status_receipt=receipt,updated_at=now(),state_checked_at=now(),tracking_error='',
                   evidence={'wrapper_exit':int(exit_match.group(1)) if exit_match else None,'vasp_timing':timing,
                             'timing_count':timing_count,'mpi_singleton_count':singleton_count,
                             'output_sanity':output_sanity,'ediff_reached':ediff,

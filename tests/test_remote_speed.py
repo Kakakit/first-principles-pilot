@@ -6,7 +6,13 @@ from backend import remote_transport as transport,remote_cache,remote_energy,int
 
 
 class SessionTests(unittest.TestCase):
-    def tearDown(self):transport.close_all()
+    def setUp(self):
+        from backend import remote_health
+        self.offline=patch.dict(os.environ,{'FPILOT_REMOTE_DISABLED':'0'});self.offline.start()
+        self.temp=tempfile.TemporaryDirectory()
+        self.health=patch.object(remote_health,'ROOT',Path(self.temp.name));self.health.start()
+    def tearDown(self):
+        transport.close_all();self.health.stop();self.temp.cleanup();self.offline.stop()
     def local_worker(self):
         original=subprocess.Popen
         source=Path(transport.__file__).with_name('remote_worker.py')
@@ -25,9 +31,11 @@ class SessionTests(unittest.TestCase):
             memo=transport.run('test','printf one')
             self.assertEqual(memo['timing']['ssh_requests'],0)
             self.assertTrue(memo['timing']['cache_hit'])
-    def test_dispatch_failure_is_not_replayed_readonly_failure_reconnects_once(self):
-        for mutating,expected in ((True,1),(False,2)):
+    def test_neither_dispatch_nor_readonly_failure_is_replayed_immediately(self):
+        for mutating,expected in ((True,1),(False,1)):
             transport.close_all()
+            from backend import remote_health
+            (remote_health.root()/'connection-health.json').unlink(missing_ok=True)
             with patch.object(transport.Session,'_request',side_effect=ConnectionError('offline')) as request:
                 result=transport.run('test','qsub task' if mutating else 'stat file',mutating=mutating)
                 self.assertIsNone(result['exit_code']);self.assertEqual(request.call_count,expected)
@@ -42,6 +50,8 @@ class SessionTests(unittest.TestCase):
             self.assertEqual(result['transport_state'],'NOT_SENT')
             self.assertEqual(start.call_count,1)
         transport.close_all()
+        from backend import remote_health
+        (remote_health.root()/'connection-health.json').unlink(missing_ok=True)
         def write_failure(session):
             from unittest.mock import Mock
             session.process=Mock()
@@ -215,15 +225,20 @@ class RemoteTimeoutDrainTests(unittest.TestCase):
         from backend import remote_worker
         from unittest.mock import Mock
         process=Mock(pid=123)
+        process.stdout.fileno.return_value=10;process.stderr.fileno.return_value=11
+        process.wait.side_effect=subprocess.TimeoutExpired('command',1)
         partial=b'FPILOT_SUBMIT_PHASE=DIRECTORY\n'
-        process.communicate.side_effect=[subprocess.TimeoutExpired('command',1,output=partial),subprocess.TimeoutExpired('command',2,output=partial)]
-        with patch.object(remote_worker.subprocess,'Popen',return_value=process),patch.object(remote_worker.os,'killpg') as kill:
+        seen=set()
+        def read(fd,size):
+            if fd==10 and fd not in seen:seen.add(fd);return partial
+            return b''
+        with patch.object(remote_worker.subprocess,'Popen',return_value=process),patch.object(remote_worker.os,'read',side_effect=read),patch.object(remote_worker.os,'killpg') as kill:
             receipt=remote_worker.execute({'command':'mkdir example','timeout':1})
         import base64
         self.assertIsNone(receipt['exit_code'])
         self.assertIn('DIRECTORY',base64.b64decode(receipt['stdout']).decode())
         self.assertIn('do not replay',base64.b64decode(receipt['stderr']).decode())
-        self.assertEqual([call.kwargs['timeout'] for call in process.communicate.call_args_list],[1,2])
+        self.assertEqual([call.kwargs['timeout'] for call in process.wait.call_args_list],[1,2])
         kill.assert_called_once()
-        process.wait.assert_not_called()
+        process.communicate.assert_not_called()
         process.stdout.close.assert_called_once()

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-export default defineConfig({ plugins: [react({exclude: [/node_modules/, /\.fpilot-cache\//]})],
+export default defineConfig({ build:{rollupOptions:{input:{main:'index.html',crystal:'crystal-frame.html'}}}, plugins: [react({exclude: [/node_modules/, /\.fpilot-cache\//]})],
   // Each checkout has its own cache, including acceptance copies sharing node_modules.
   cacheDir: '.fpilot-cache/vite',
   resolve: { dedupe: ['react', 'react-dom'] },

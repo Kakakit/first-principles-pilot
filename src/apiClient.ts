@@ -17,15 +17,17 @@ export async function readJson(response: Response): Promise<any> {
   return data;
 }
 
-export async function requestJson(path: string, body?: unknown, method?: string): Promise<any> {
+export async function requestJson(path: string, body?: unknown, method?: string, options?: {signal?:AbortSignal}): Promise<any> {
   let response: Response;
   try {
     response = await fetch(path, {
+      signal:options?.signal,
       method: method || (body === undefined ? 'GET' : 'POST'),
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  } catch {
+  } catch(error) {
+    if(error instanceof DOMException&&error.name==='AbortError')throw error;
     throw new Error('无法连接本机 API。请检查服务是否运行；恢复后可在当前页面重试，已填写内容仍保留。');
   }
   try { return await readJson(response); }
