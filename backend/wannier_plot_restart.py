@@ -206,16 +206,10 @@ def submit(key):
         copy_checks = 'test "$(sha256sum "$dest"/'+shlex.quote(seed+'.chk')+" | awk '{print $1}')\" = "+shlex.quote(frozen['source_hashes'][seed+'.chk'])
     submit_command = ('sbatch --parsable --export=ALL,W90_SEED=' + seed + ' ' + script_name if record['scheduler'] == 'slurm'
                       else 'qsub -v W90_SEED=' + seed + ' ' + script_name)
-    identity = shlex.quote(json.dumps({'schema': 'fpilot.remote-project.v1',
-                                        'project_id': record['project_id'],
-                                        'project_slug': record['project_slug']},
-                                       ensure_ascii=False, separators=(',', ':')))
     command = f'''set -e
 root={remote_paths.shell_path(record['remote_workspace_root'])}
 test "$(cd "$root" && pwd -P)" = {shlex.quote(record['remote_workspace_root_abs'])}
-project_dir={remote_paths.shell_path(record['remote_project_path_absolute'])}
-test -f "$project_dir/.fpilot/project.json"
-test "$(cat "$project_dir/.fpilot/project.json")" = {identity}
+{ex.project_directory_guard(record)}
 source_dir={remote_paths.shell_path(source_path)}
 cd "$source_dir"
 {checks}

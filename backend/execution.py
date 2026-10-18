@@ -877,35 +877,14 @@ def start_watcher(key):
 
 
 def project_directory_guard(record):
-    """Protect an existing project's namespace and return an actionable blocker."""
-    from .remote_transport import _interpreter
-    project_dir = remote_paths.shell_path(record['remote_project_path_absolute'])
-    identity = {'schema': 'fpilot.remote-project.v1', 'project_id': record.get('project_id'),
-                'project_slug': record.get('project_slug')}
-    identity_json = shlex.quote(json.dumps(identity, ensure_ascii=False, separators=(',', ':')))
-    check = """import json,sys
-expected=json.loads(sys.argv[1])
-try:
-    with open(sys.argv[2]) as handle: actual=json.load(handle)
-    matches=isinstance(actual,dict) and all(actual.get(key)==value for key,value in expected.items())
-except (OSError,ValueError): matches=False
-if not matches:
-    print('FPILOT_PROJECT_CONFLICT=1')
-    print('远端项目目录已属于其他项目或归属记录无效；请更换远端项目标识后重新冻结。没有提交任务，也没有修改原目录。',file=sys.stderr)
-    sys.exit(1)
-"""
-    interpreter = shlex.quote(_interpreter(record['config']['alias']))
-    return f'''project_dir={project_dir}
-if test -d "$project_dir"; then
-  if test -f "$project_dir/.fpilot/project.json"; then
-    {interpreter} -c {shlex.quote(check)} {identity_json} "$project_dir/.fpilot/project.json"
+    """Reuse the selected parent; the attempt's exclusive mkdir prevents overwrite.
 
-  fi
-else
-  mkdir -p "$project_dir"
-fi
-mkdir -p "$project_dir/.fpilot"
-if ! test -e "$project_dir/.fpilot/project.json"; then printf '%s' {identity_json} > "$project_dir/.fpilot/project.json"; fi
+    Legacy .fpilot/project.json files describe an old local workspace identity,
+    not ownership of the user's directory. Leave those files untouched.
+    """
+    project_dir = remote_paths.shell_path(record['remote_project_path_absolute'])
+    return f'''project_dir={project_dir}
+mkdir -p "$project_dir"
 '''
 
 

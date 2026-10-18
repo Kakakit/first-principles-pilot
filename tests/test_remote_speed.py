@@ -106,32 +106,44 @@ class TransferTests(unittest.TestCase):
 
 
 class DispatchGuardTests(unittest.TestCase):
-    def test_project_directory_guard_accepts_owner_json_format_and_rejects_other_owner(self):
+    def test_project_parent_reuse_preserves_legacy_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             project=Path(tmp)/'project';metadata=project/'.fpilot/project.json'
             metadata.parent.mkdir(parents=True)
             record={'config':{'alias':'test'},'remote_project_path_absolute':str(project),
                     'project_id':'imported','project_slug':'project'}
-            for owner,allowed in (('imported',True),('original',False)):
-                with self.subTest(owner=owner):
-                    raw=json.dumps({'schema':'fpilot.remote-project.v1','project_id':owner,'project_slug':'project'},indent=2)+'\n'
+            for raw in (json.dumps({'schema':'fpilot.remote-project.v1','project_id':'original','project_slug':'project'},indent=2)+'\n',
+                        r'{\"schema\":\"fpilot.remote-project.v1\",\"project_id\":\"old\"}',
+                        'invalid JSON'):
+                with self.subTest(raw=raw):
                     metadata.write_text(raw)
                     with patch.object(transport,'_interpreter',return_value=sys.executable):
                         command='set -e\n'+execution.project_directory_guard(record)+'printf FPILOT_MUTATION\n'
                     result=subprocess.run(['bash','-c',command],capture_output=True)
-                    self.assertEqual(result.returncode==0,allowed,result.stderr)
-                    self.assertEqual(b'FPILOT_MUTATION' in result.stdout,allowed)
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertIn(b'FPILOT_MUTATION',result.stdout)
                     self.assertEqual(metadata.read_text(),raw)
-                    if not allowed:
-                        self.assertIn(b'FPILOT_PROJECT_CONFLICT=1',result.stdout)
-                        self.assertIn('其他项目',result.stderr.decode())
             metadata.unlink()
             with patch.object(transport,'_interpreter',return_value=sys.executable):
                 command='set -e\n'+execution.project_directory_guard(record)+'printf FPILOT_MUTATION\n'
             result=subprocess.run(['bash','-c',command],capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertNotIn(b'FPILOT_PROJECT_CONFLICT=1',result.stdout)
-            self.assertTrue(metadata.exists())
+            self.assertFalse(metadata.exists())
+
+    def test_project_parent_is_created_but_file_in_its_place_stops_dispatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project=Path(tmp)/'parent with space'/'project'
+            record={'remote_project_path_absolute':str(project)}
+            command='set -e\n'+execution.project_directory_guard(record)+'printf FPILOT_MUTATION\n'
+            result=subprocess.run(['bash','-c',command],capture_output=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertTrue(project.is_dir())
+            project.rmdir();project.write_text('original')
+            result=subprocess.run(['bash','-c',command],capture_output=True)
+            self.assertNotEqual(result.returncode,0)
+            self.assertNotIn(b'FPILOT_MUTATION',result.stdout)
+            self.assertEqual(project.read_text(),'original')
 
     def test_project_conflict_is_terminal_before_submission_but_capacity_wait_is_not(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(execution,'ROOT',Path(tmp)),patch.object(execution,'save') as save:

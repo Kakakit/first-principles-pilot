@@ -620,8 +620,6 @@ def submit(key):
             archive.addfile(item, io.BytesIO(data))
     destination = remote_paths.shell_path(record['remote_path_absolute'])
     parent_dir = shlex.quote(str(PurePosixPath(record['remote_path_absolute']).parent))
-    project_dir = remote_paths.shell_path(record['remote_project_path_absolute'])
-    identity = shlex.quote(json.dumps({'schema':'fpilot.remote-project.v1','project_id':record['project_id'],'project_slug':record['project_slug']}, ensure_ascii=False, separators=(',', ':')))
     link_names = [name for name in selected_names if name != bundle.get('source_win_name', bundle['seed'] + '.win')]
     expected_links = {name: {'target': name, 'mode': 'hardlink', **bundle['source_files'][name]} for name in link_names}
     if bundle.get('checkpoint'):
@@ -644,14 +642,7 @@ def submit(key):
     remote = f'''set -e
 root={remote_paths.shell_path(record['remote_workspace_root'])}
 {remote_paths.workspace_dispatch_guard(record['remote_workspace_root'],record['remote_workspace_root_abs'])}
-project_dir={project_dir}
-if test -d "$project_dir"; then
-  if test -f "$project_dir/.fpilot/project.json"; then
-    test "$(cat "$project_dir/.fpilot/project.json")" = {identity}
-  fi
-else mkdir -p "$project_dir"; fi
-mkdir -p "$project_dir/.fpilot"
-if ! test -e "$project_dir/.fpilot/project.json"; then printf '%s' {identity} > "$project_dir/.fpilot/project.json"; fi
+{ex.project_directory_guard(record)}
 dest={destination}
 mkdir -p {parent_dir}
 mkdir "$dest"

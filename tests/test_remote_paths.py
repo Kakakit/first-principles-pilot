@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ from backend import execution as ex, remote_paths as paths
 class RemotePathTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
-        self.root=Path(self.temp.name)
+        self.root=Path(self.temp.name).resolve()
         self.patch=patch.object(ex,'ROOT',self.root/'local');self.patch.start()
     def tearDown(self):
         self.patch.stop();self.temp.cleanup()
@@ -76,3 +77,33 @@ class RemotePathTests(unittest.TestCase):
         with patch.object(ex.servers,'probe',return_value={'id':'fresh'}),patch.object(ex.servers,'preview',return_value={'resource_ready':True,'profile':{}}),patch.object(ex,'bundle',return_value=({'stage':'scf'},{'INCAR':b'new'})),patch.object(ex,'ssh',side_effect=ssh),patch.object(ex,'start_watcher'):
             result=ex.submit('a')
         self.assertEqual(result['state'],'UNKNOWN');self.assertEqual(sentinel.read_text(),'preserve original');self.assertFalse((destination/'.job-id').exists())
+
+    def test_submit_into_parent_with_old_identity_creates_only_a_new_attempt(self):
+        root=self.root/'remote';root.mkdir()
+        relative=paths.attempt_relative_path('p',3,'scf','20261018-120000-abcd')
+        destination=root/relative;project=destination.parents[5]
+        metadata=project/'.fpilot/project.json';metadata.parent.mkdir(parents=True)
+        raw=r'{\"schema\":\"fpilot.remote-project.v1\",\"project_id\":\"old\"}'
+        metadata.write_text(raw)
+        old=destination.parent/'older';old.mkdir(parents=True);(old/'INCAR').write_text('preserve')
+        programs=self.root/'bin';programs.mkdir()
+        qsub=programs/'qsub';calls=self.root/'qsub-calls'
+        qsub.write_text('#!/bin/sh\necho called >> "'+str(calls)+'"\nprintf "123.node01\\n"\n');qsub.chmod(0o700)
+        record={'id':'a','state':'PREPARED','config':{'alias':'jutai-1','scheduler':'pbs'},'node':'node01','cores':1,'reason':'','profile':{},'bundle_id':'test',
+                'path_schema':'fpilot.remote-attempt-path','remote_workspace_root':str(root),'remote_workspace_root_abs':str(root),
+                'remote_relative_path':relative,'remote_path_absolute':str(destination),'remote_project_path_absolute':str(project),
+                'project_id':'new','project_slug':'p','script':'#!/bin/bash\ntrue\n','script_sha256':'test','input_audit':{}}
+        with ex.db() as c:c.execute('INSERT INTO attempts VALUES(?,?,?)',('a','PREPARED',json.dumps(record)))
+        def ssh(alias,command,data=None,**kwargs):
+            result=subprocess.run(['bash','-c',command],input=data,capture_output=True,
+                                  env={**os.environ,'PATH':str(programs)+os.pathsep+os.environ['PATH']})
+            return {'exit_code':result.returncode,'stdout':result.stdout.decode(),'stderr':result.stderr.decode()}
+        with patch.object(ex.servers,'probe',return_value={'id':'fresh'}),patch.object(ex.servers,'preview',return_value={'resource_ready':True,'profile':{}}),\
+             patch.object(ex,'bundle',side_effect=lambda *a,**kw:({'stage':'scf'},{'INCAR':b'ENCUT=400','POSCAR':b'structure'})),\
+             patch.object(ex,'ssh',side_effect=ssh),patch.object(ex,'refresh',side_effect=ex.get):
+            first=ex.submit('a');second=ex.submit('a')
+        self.assertEqual(first['job_id'],'123.node01',first.get('dispatch_receipt'));self.assertEqual(second['job_id'],first['job_id'])
+        self.assertEqual(calls.read_text(),'called\n')
+        self.assertEqual(metadata.read_text(),raw);self.assertEqual((old/'INCAR').read_text(),'preserve')
+        self.assertEqual((destination/'INCAR').read_text(),'ENCUT=400')
+        self.assertEqual(json.loads((destination/'_fpilot/attempt.json').read_text())['project_id'],'new')
