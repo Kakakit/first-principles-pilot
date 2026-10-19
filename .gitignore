@@ -1,25 +1,10 @@
 node_modules/
-.fpilot-cache/
-.fpilot-runtime/
-dist/
-*.tsbuildinfo
 __pycache__/
-.sites-runtime/
-workspace-data/
-research-data/
+*.pyc
 .DS_Store
-fpilot.local.json
-startup-check.json
-release-diagnostics.json
-releases/
-First Principles 工作台.app/
-
-# Machine-only cluster registration and personal scheduler scripts
-resources/preflight/hpc_cluster_registry.json
-resources/templates/*/
-resources/jobs/wannier90/*
-!resources/jobs/wannier90/README.md
+.venv/
 .env
 .env.*
-!.env.example
-*.pyc
+workspace-data/
+outputs/
+runs/

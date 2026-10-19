@@ -1,6 +1,0 @@
-import type {WindowDraft} from './windowScan';
-export function simpleWindowRequest(draft:WindowDraft){const range=draft.ranges[draft.boundary];return {boundary:draft.boundary,...(draft.input_mode==='list'?{values:(draft.values_text||'').split(/[\s,，;；]+/).filter(Boolean).map(Number)}:{start:Number(range?.lower),end:Number(range?.upper),step:Number(range?.step)}),...(draft.target_min.trim()&&draft.target_max.trim()?{target:[Number(draft.target_min),Number(draft.target_max)]}:{})};}
-export function simpleWindowReady(draft:WindowDraft){if(draft.target_min.trim()||draft.target_max.trim()){if(!draft.target_min.trim()||!draft.target_max.trim()||!Number.isFinite(Number(draft.target_min))||!Number.isFinite(Number(draft.target_max))||Number(draft.target_min)>=Number(draft.target_max))return false;}
- if(draft.input_mode==='list'){const tokens=(draft.values_text||'').split(/[\s,，;；]+/).filter(Boolean);return tokens.length>0&&tokens.length<=64&&tokens.every(v=>Number.isFinite(Number(v)));}
- const range=draft.ranges[draft.boundary];if(!range||!Object.values(range).every(v=>v.trim()&&Number.isFinite(Number(v))))return false;const {start,end,step}=simpleWindowRequest(draft) as {start:number;end:number;step:number};return step!==0&&(end-start)*step>=0&&Math.floor((end-start)/step+1e-8)+1<=64;
-}

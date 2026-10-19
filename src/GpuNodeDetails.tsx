@@ -1,8 +1,0 @@
-import type {ProbeNode} from './executionUi';
-import './gpu-node-details.css';
-type Device={index:number;name:string;memory_total_mib:number|null;memory_used_mib:number|null;memory_free_mib:number|null;utilization_percent:number|null;compute_processes:number};
-const memory=(value:number|null)=>typeof value==='number'&&Number.isFinite(value)?(value/1024).toFixed(2)+' GiB':'待核验';
-export default function GpuNodeDetails({node}:{node:ProbeNode}){
- let devices:Device[]=[];try{const parsed:unknown=JSON.parse(node.GPU_DEVICES_JSON||'[]');if(Array.isArray(parsed))devices=parsed.filter((d):d is Device=>!!d&&typeof d==='object'&&Number.isInteger(d.index)&&typeof d.name==='string'&&Number.isInteger(d.compute_processes)&&d.compute_processes>=0);}catch{/* Leave old caches readable. */}
- return <section className="gpu-node-details"><h4>GPU 状态 · {node.NODE}</h4>{devices.length?<div className="table-scroll"><table><thead><tr><th>GPU</th><th>显存</th><th>使用状态</th></tr></thead><tbody>{devices.map(d=><tr key={d.index}><td>{d.index} · {d.name}</td><td><span>已占 {memory(d.memory_used_mib)} / {memory(d.memory_total_mib)}</span><span>剩余 {memory(d.memory_free_mib)}</span></td><td><span>利用率 {d.utilization_percent??'待核验'} %</span><span>{d.compute_processes>0?`${d.compute_processes} 个计算进程 · 正在占用`:'无计算进程'}</span></td></tr>)}</tbody></table></div>:<p>逐卡显存未返回，请刷新节点检查。未知信息不会按空闲处理。</p>}<p>已占显存含驱动保留。继续采用整节点独占，各卡显存分别计算；剩余显存不保证新任务不会超出显存。已有 GPU 计算时等待，不开启同卡共享。</p>{node.GPU_QUERY_SECONDS&&<small>GPU 采集 {node.GPU_QUERY_SECONDS} 秒 · {node.GPU_METHOD==='NVML'?'已有 NVML 接口':node.GPU_METHOD==='NVIDIA_SMI_XML'?'单次 NVIDIA 查询':'原查询'}</small>}</section>;
-}

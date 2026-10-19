@@ -1,9 +1,0 @@
-.gpu-node-details{min-width:0;margin:16px 0;padding:16px;border:1px solid var(--color-border);border-radius:8px;background:var(--color-surface)}
-.gpu-node-details h4{margin:0 0 12px}
-.gpu-node-details .table-scroll{max-width:100%;overflow-x:auto}
-.gpu-node-details table{width:100%;border-collapse:collapse;font-size:var(--font-secondary);table-layout:fixed}
-.gpu-node-details th,.gpu-node-details td{padding:10px 7px;text-align:left;vertical-align:top;border-bottom:1px solid var(--color-border);overflow-wrap:anywhere}
-.gpu-node-details td span{display:block;margin-bottom:4px}
-.gpu-node-details th{background:var(--color-surface-raised)}
-.gpu-node-details p{line-height:1.6}
-.gpu-node-details small{color:var(--color-muted-text)}

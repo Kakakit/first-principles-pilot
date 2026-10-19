@@ -1,4 +1,5 @@
 """Build reproducible extension distribution ZIPs; never imports or runs extensions."""
+import argparse
 import hashlib
 import json
 import re
@@ -19,29 +20,30 @@ def exported_bytes(path):
         def portable(value):
             if isinstance(value, dict):
                 return {key: ('archived-development-source/' + Path(item).name
-                              if key == 'source_path' and isinstance(item, str) and item.startswith('/Users/')
+                              if key == 'source_path' and isinstance(item, str) and item.startswith(('/Users/','/home/'))
                               else portable(item)) for key, item in value.items()}
             if isinstance(value, list):
                 return [portable(item) for item in value]
             if isinstance(value, str):
-                return value.replace('/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python', 'python')
+                return 'python' if re.fullmatch(r'/Users/[^/]+/.*/python[0-9.]*', value) else value
             return value
         updated = portable(obj)
         if updated != obj:
             raw = (json.dumps(updated, ensure_ascii=False, indent=2) + '\n').encode()
     if path.suffix == '.md':
-        text = raw.decode().replace('/Users/kafka/Documents/FeCrO论文/06_工具/.venv-figure/bin/python', 'python')
-        text = text.replace('/Users/kafka/Documents/FeCrO论文/plugins/first-principles-pilot/extensions/', 'resources/extensions/')
-        text = re.sub(r"/Users/kafka/[^\s`\"']+", lambda match: 'archived-development-source/' + match.group().split('/')[-1], text)
+        text = re.sub(r"/Users/[^/\s]+/[^\s`\"']+", lambda match: 'archived-development-source/' + match.group().split('/')[-1], raw.decode())
         raw = text.encode()
     return raw
 
 
-def package_extensions():
+def package_extensions(selected=None):
     OUTPUT.mkdir(exist_ok=True)
     packages = OUTPUT / 'packages'
     packages.mkdir(exist_ok=True)
     entries = []
+    folders = {p.name for p in SOURCE.iterdir() if p.is_dir() and not p.name.startswith("_")}
+    if selected and selected not in folders:
+        raise ValueError("Unknown extension: " + selected)
     for folder in sorted(SOURCE.iterdir()):
         if not folder.is_dir() or folder.name.startswith('_'):
             continue
@@ -64,13 +66,14 @@ def package_extensions():
         if not paths or len(paths) > 1000 or sum(p.stat().st_size for p in paths) > 20 * 1024 * 1024:
             raise ValueError('Package exceeds host limits: ' + folder.name)
         target = packages / (folder.name + '-' + version + '.zip')
-        with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-            for path in paths:
-                info = zipfile.ZipInfo(folder.name + '/' + path.relative_to(folder).as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
-                info.create_system = 3
-                info.external_attr = (stat.S_IFREG | (0o755 if path.stat().st_mode & 0o111 else 0o644)) << 16
-                info.compress_type = zipfile.ZIP_DEFLATED
-                archive.writestr(info, exported_bytes(path))
+        if not selected or folder.name == selected or not target.exists():
+            with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+                for path in paths:
+                    info = zipfile.ZipInfo(folder.name + '/' + path.relative_to(folder).as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
+                    info.create_system = 3
+                    info.external_attr = (stat.S_IFREG | (0o755 if path.stat().st_mode & 0o111 else 0o644)) << 16
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    archive.writestr(info, exported_bytes(path))
         with zipfile.ZipFile(target) as archive:
             if archive.testzip():
                 raise ValueError('ZIP checksum failure: ' + str(target))
@@ -90,7 +93,7 @@ def package_extensions():
         rows.append('| '+item['name']+' | '+item['version']+' | '+label+' | [ZIP]('+item['package'].removeprefix('extensions/')+') | [README](../'+item['source']+'/README.md) |')
     readme = '''# 扩展统一发布目录
 
-这里集中管理现有 9 个扩展的版本、可下载 ZIP 和 SHA256。源码统一维护在 [`resources/extensions/`](../resources/extensions/)，本目录由 `scripts/package-extensions.py` 生成，不手工改 ZIP。
+这里集中管理独立扩展的版本和 ZIP。源码只在本仓库 `extensions` 分支的 [`resources/extensions/`](../resources/extensions/) 维护，主体宿主位于 main。本目录由 `scripts/package-extensions.py` 生成。
 
 '''+ '\n'.join(rows)+'''
 
@@ -103,7 +106,7 @@ def package_extensions():
 
 ## 可复现管理
 
-从仓库根目录使用已有 Python 3.9+ 执行 `python scripts/package-extensions.py`，生成固定排序、时间戳的 ZIP，导出说明和旧清单中的开发机路径改为可移植占位；原开发源保持。不执行扩展、不连接服务器、不安装依赖。`catalog.json` 保存接口、版本、下载路径、ZIP SHA256 及包内各文件 SHA256，可用 `shasum -a 256 extensions/packages/*.zip` 核对下载。
+从仓库根目录使用已有 Python 3.9+ 执行 `python scripts/package-extensions.py --extension tb2j`，只重建选中包；省略选项重建全部。生成固定排序、时间戳的 ZIP，导出说明和旧清单中的开发机路径改为可移植占位；原开发源保持。不执行扩展、不连接服务器、不安装依赖。`catalog.json` 保存接口、版本、下载路径、ZIP SHA256 及包内各文件 SHA256，校验字段仅供机器核对，不作为界面标识。
 
 包内包括代码、说明、第三方许可和最小测试样例；不包括研究任务目录、POTCAR、SSH 配置、密钥、虚拟环境或运行缓存。保留各第三方许可；本目录不是对上游代码重新授权。
 '''
@@ -112,4 +115,6 @@ def package_extensions():
 
 
 if __name__ == '__main__':
-    package_extensions()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--extension", help="Only rebuild this extension ZIP; keep other ZIPs")
+    package_extensions(parser.parse_args().extension)

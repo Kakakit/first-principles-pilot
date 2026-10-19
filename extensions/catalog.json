@@ -9,7 +9,7 @@
       "install_mode": "workbench-v2",
       "source": "resources/extensions/crystal-structure-distortion-analysis",
       "package": "extensions/packages/crystal-structure-distortion-analysis-2.0.0.zip",
-      "sha256": "fb966eb6e98fcbaa0a748631b27ad46ded115ac3b2fd46525a54e485f718b652",
+      "sha256": "386536aa01205f2d4d16422223b65483094f3735eb6ac852e386d39bb71b35e6",
       "size_bytes": 28947,
       "files": [
         {
@@ -90,8 +90,8 @@
       "install_mode": "legacy-cli",
       "source": "resources/extensions/electronic-structure-characterization",
       "package": "extensions/packages/electronic-structure-characterization-0.3.0.zip",
-      "sha256": "4f1d61aa9cd5d9c855de4a73b17f8d04f388872e736a1d3e128e7c10ff52db97",
-      "size_bytes": 74242,
+      "sha256": "7269cbab7ac855c48bb2ad069e2f7cb68df89ae97dadc5159768300990d0018d",
+      "size_bytes": 74341,
       "files": [
         {
           "path": "README.md",
@@ -247,7 +247,7 @@
         },
         {
           "path": "src/banddos_core/plotting.py",
-          "sha256": "2afdf544c56697277ceb1665eff33ba83cd8b13e1842b38470ae9f6c9c596938"
+          "sha256": "598a2246c7af9ce4f107d1672ff062a82cf335ccb21b25ae9b68c75a44a61a45"
         },
         {
           "path": "src/banddos_core/processed.py",
@@ -486,8 +486,8 @@
       "install_mode": "legacy-cli",
       "source": "resources/extensions/pyw90",
       "package": "extensions/packages/pyw90-0.5.1.zip",
-      "sha256": "4a7a3bd7dd247388111d9dcb25741e08d63977f096a7d19d830852661537ae68",
-      "size_bytes": 62841,
+      "sha256": "c79704b4a7d9610bc39004cadc932579448e2e81886a1fb933f03bfa76db4e07",
+      "size_bytes": 64746,
       "files": [
         {
           "path": "README.md",
@@ -514,6 +514,10 @@
           "sha256": "2aca0d8dbc0e7665dcd468375528e487affcb4f244f49626f76db936768e8140"
         },
         {
+          "path": "scripts/comparison_metrics.py",
+          "sha256": "24beff7b0a315f16cf2f1585caed5ab00b9ead902b7c0991a5e88e5ed25a19a8"
+        },
+        {
           "path": "scripts/pyw90.py",
           "sha256": "9696f77e5026bd25b549c6eead4b5e2918244e7e46f00c70f354459dc4fad1f1"
         },
@@ -523,7 +527,7 @@
         },
         {
           "path": "scripts/pyw90_window_scan.py",
-          "sha256": "b53fbe28407f251197d68fa6615760307ae67562ae21544537ba2b10524353ac"
+          "sha256": "87261dc765b6ddc5f398528e1a351be01750ac83710437c48dbb5b8109a9ac13"
         },
         {
           "path": "tests/fixtures/fake_pyw90.py",
@@ -628,17 +632,17 @@
     {
       "id": "tb2j",
       "name": "TB2J 交换参数与轨道分解",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "schema": "fpilot.extension.v2",
       "install_mode": "workbench-v2",
       "source": "resources/extensions/tb2j",
-      "package": "extensions/packages/tb2j-2.1.0.zip",
-      "sha256": "4f9f91bfaacaa48892192c86a19cad8fef8283c0c28c2f977372633ba352b38d",
-      "size_bytes": 251842,
+      "package": "extensions/packages/tb2j-2.2.0.zip",
+      "sha256": "892db699c32fe4d069cd2460c5fcd77e87dfbcc0bce85ea27869123cb9e56d02",
+      "size_bytes": 281485,
       "files": [
         {
           "path": "README.md",
-          "sha256": "58c575709e6e3a13147c1c40384f435b4442b93d18e7df836033409dcbc5a84d"
+          "sha256": "0d4bfa97836541e650ea50456620ec83dee3b0cf2ad210142dae04518788163d"
         },
         {
           "path": "examples/collinear.request.json",
@@ -654,7 +658,7 @@
         },
         {
           "path": "extension.manifest.json",
-          "sha256": "57a1ced495b7606cc669eb03f248d7b11c93397e414c7210789f40856a4559e5"
+          "sha256": "a27df64e967f27ef922caf17dd8fc50f2830493ce34512b5f0d1f4816a395637"
         },
         {
           "path": "references/tb2j-wannier90.md",
@@ -669,12 +673,16 @@
           "sha256": "975e5435f0ddd0683d0344450931bad9dc2a5772f42746585514efdc275bf0ee"
         },
         {
+          "path": "scripts/orbital_labels.py",
+          "sha256": "58a298d228c81f677a5a5618e34741c2af33d91b07f5c0f8b7d5b8d708db6e79"
+        },
+        {
           "path": "scripts/presentation.py",
-          "sha256": "b467573853e9997ad93df99a67679fd52c9d00d042bb76ba01a3d8376155b86e"
+          "sha256": "cffff4b27868c399a569723e834716cb1db1d9742d3e9a13fa1fe453b9637ed0"
         },
         {
           "path": "scripts/results_v2.py",
-          "sha256": "7de5620f662ec1d89773bfedd7f5d265b403a0358ecdf4ba176b121ffb6288f0"
+          "sha256": "413ee702b7ee2ae6b2d05e0597e845f35ec51ff44250818098ca69c3858b3c62"
         },
         {
           "path": "scripts/tb2j.py",
@@ -814,7 +822,7 @@
         },
         {
           "path": "tests/test_v2.py",
-          "sha256": "2f87e811bb321c5ddde72d4d4a9498445fa3bb48dbe5a4bc7bbee860c488b604"
+          "sha256": "bf359a86598fe8e1a4aebfff5aac1e8d018b4e53ca274d8c4d8513c61c07d7de"
         },
         {
           "path": "viewer/ECHARTS-LICENSE.txt",
@@ -830,19 +838,19 @@
         },
         {
           "path": "viewer/main.js",
-          "sha256": "60364a710181cd0a224320b9013c2780965531adf2ccd2ecf31ff8e9a16ab164"
+          "sha256": "2acf397286de92a6536c24843570295a7f39d347a4ec7c5205aaea83c894b595"
         },
         {
           "path": "viewer/model.js",
-          "sha256": "f29c896900b3c6b77c35b10d11f3c23bee74a9ce81f7420b424af54978e07a30"
+          "sha256": "10550430c89d59d52b1b2f7c460354f95e35a499b0ea9ffa039720881318c9f0"
         },
         {
           "path": "viewer/shell.html",
-          "sha256": "9d0a174a034d435756fc6fb91a8e5194d4a4bab8805c8e4caffd7b41a6a6c36f"
+          "sha256": "7446820787068a855c14a338567f902c7d5e79574078736a4be7723538e514fc"
         },
         {
           "path": "viewer/viewer.html",
-          "sha256": "41ed6001afc54517d3a6a8b335dcb7ef2668c044f356b86a055a7a16799c2996"
+          "sha256": "2bbd1b0fbea12ad1e884972686d489bff73ff120c70ea0d7ebb2e8f059c60e6a"
         }
       ]
     }

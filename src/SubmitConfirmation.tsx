@@ -1,7 +1,0 @@
-import {useEffect,useRef} from 'react';
-import type {ReactNode} from 'react';
-export default function SubmitConfirmation({title='确认提交',children,script,busy,onClose,onConfirm}:{title?:string;children:ReactNode;script?:string;busy?:boolean;onClose:()=>void;onConfirm:()=>void}){
- const close=useRef<HTMLButtonElement>(null);
- useEffect(()=>{const previous=document.activeElement as HTMLElement;close.current?.focus();return()=>previous?.focus();},[]);
- return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)onClose();}}><section className="modal submit-confirmation" role="dialog" aria-modal="true" aria-label={title} onKeyDown={e=>{if(e.key==='Escape'&&!busy)onClose();if(e.key==='Tab'){const fields=Array.from(e.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),a[href],textarea'));const index=fields.indexOf(document.activeElement as HTMLElement);if(e.shiftKey&&index<=0){e.preventDefault();fields.at(-1)?.focus();}else if(!e.shiftKey&&index===fields.length-1){e.preventDefault();fields[0]?.focus();}}}}><h2>{title}</h2>{children}{script&&<details open><summary>最终任务脚本</summary><pre className="input-text">{script}</pre></details>}<div className="submit-actions"><button ref={close} className="button" disabled={busy} onClick={onClose}>返回修改</button><button className="button primary" disabled={busy} onClick={onConfirm}>确认提交一次</button></div></section></div>;
-}
