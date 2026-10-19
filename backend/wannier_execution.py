@@ -680,7 +680,7 @@ cat .job-id
         raise
 
 
-def refresh(key):
+def refresh(key,automatic=False):
     record = ex.get(key)
     if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'):
         from .execution_cancel import recover
@@ -689,6 +689,9 @@ def refresh(key):
     if record['state'] == 'CANCELLED': return record
     if record['state'] in ('PREPARED', 'COMPLETED', 'FAILED'):
         return record
+    if automatic and record.get('automatic_audit_paused'):return record
+    if not automatic:record.pop('automatic_audit_paused',None)
+    previous=record.get('updated_at')
     ex.assert_recovery_target(record)
     root = remote_paths.shell_path(ex.attempt_path(record)['shell'])
     scheduler = record['scheduler']
@@ -702,6 +705,7 @@ if test -s ''' + seed + '''.wout; then
   printf 'FPILOT_DIS='; grep -c 'Disentanglement convergence criteria satisfied' ''' + seed + '''.wout || true
 fi
 '''
+    if automatic:command=ex.file_status_command(record,root,command,[seed+'.wout',seed+'.win','.exit-status','.job-id'])
     if record.get('job_id'):
         job = shlex.quote(record['job_id'])
         if scheduler == 'pbs':
@@ -712,6 +716,12 @@ fi
     else:
         command += ex.recovered_job_command(scheduler)
     receipt = ex.ssh(record['config']['alias'], command, timeout=30)
+    if receipt.get('exit_code')!=0 or 'FPILOT_FILES_CHANGED' in receipt.get('stdout',''):
+        record.update(tracking_error=receipt.get('stderr') or '原文件核查未完成；保留上次状态与证据',
+                      tracking_checked_at=ex.now(),updated_at=ex.now(),status_receipt=receipt)
+        if receipt.get('exit_code') is None:record['automatic_audit_paused']=True
+        return ex.save(record,expected_updated_at=previous)
+    if automatic:ex.remember_file_status(record,receipt)
     out = receipt['stdout']
     recovered=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',out,re.M)
     if recovered and not record.get('job_id'):record['job_id']=recovered.group(1)
@@ -733,7 +743,7 @@ fi
         state = {'PENDING':'QUEUED','RUNNING':'RUNNING','COMPLETING':'EXITING'}.get(slurm_live.group(1), 'UNKNOWN')
     elif slurm_account and slurm_account.group(1).split('+',1)[0] in {'FAILED','CANCELLED','TIMEOUT','NODE_FAIL','OUT_OF_MEMORY','PREEMPTED'}:
         state = 'FAILED'
-    record.update(state=state, status_receipt=receipt, updated_at=ex.now(),
+    record.update(state=state, status_receipt=receipt, updated_at=ex.now(),tracking_error='',tracking_checked_at=ex.now(),
                   evidence={'scheduler':scheduler,
                             'scheduler_state':pbs_state.group(1) if pbs_state else 'C' if trace_complete and trace_exit == 0 else slurm_live.group(1) if slurm_live else slurm_account.group(1) if slurm_account else None,
                             'scheduler_evidence_source':'tracejob' if trace_complete else 'qstat' if pbs_state else 'sacct' if slurm_account else None,
@@ -745,7 +755,7 @@ fi
                             'scientific_validation':'NOT_PERFORMED'})
     from .fast_dispatch import tracking_note
     tracking_note(record)
-    result = ex.save(record)
+    result = ex.save(record,expected_updated_at=previous)
     if result['state'] == 'FAILED':
         control.freeze_failure(key)
     return result

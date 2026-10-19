@@ -448,6 +448,7 @@ def availability_command(config):
     gpu_source = (RESOURCES/'preflight/gpu_node_facts.py').read_text(encoding='utf-8')
     gpu_command = ('if command -v nvidia-smi >/dev/null 2>&1; then\n'
                    + shlex.quote(interpreter) + ' -c ' + shlex.quote(gpu_source) + ' || true\nfi\n')
+    if not resource_request(config):gpu_command=''
     return ("printf '\\n===== %s =====\\n' "+shlex.quote(config['alias'])+'\n'
             +'(\nMOM_MAX_AGE=300\nUNTRACKED_LOAD_THRESHOLD=auto\nEXCLUDED_NODES='+shlex.quote(excluded)+'\n'+body+'\n)\n' + gpu_command)
 
@@ -488,7 +489,7 @@ def capacity_probe(config, purpose='vasp', context=None):
     argv = ['env'] + (['EXCLUDED_NODES='+' '.join(excluded_nodes(config))] if excluded_nodes(config) else [])
     scheduler = normalize_scheduler(config['scheduler'])
     command = 'qstat -Qf' if scheduler == 'pbs' else "sinfo -h -o 'FPILOT_PARTITION=%P|%a|%l'"
-    shared_key = (config['alias'], scheduler)
+    shared_key = (config['alias'], scheduler,tuple(sorted(excluded_nodes(config))),bool(resource_request(config)))
     if context is not None and shared_key in context:
         availability, diagnostics = context[shared_key]
     else:

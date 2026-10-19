@@ -5,11 +5,38 @@ import hashlib
 import math
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from pathlib import Path
+from filelock import FileLock
 
-from . import execution as ex, remote_paths, scans
+from . import execution as ex, remote_paths, scans,remote_transport
 from pymatgen.core import Lattice
 
 LATTICE_KEYS = ('lattice_a', 'lattice_b', 'lattice_c', 'lattice_alpha', 'lattice_beta', 'lattice_gamma', 'volume')
+SUMMARY_PARSER = r'''
+import hashlib,json,os,re,sys
+path='OUTCAR';cached=json.loads(sys.argv[1]);before=os.stat(path,follow_symlinks=False)
+def stamp(s):return [s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns]
+if cached.get('signature')==stamp(before):
+    print(cached['output']);sys.exit(0)
+digest=hashlib.sha256();found={};lattice=[];lattice_line=None;remaining=0
+patterns=('free  energy   TOTEN','number of electron.*magnetization','Elapsed time \\(sec\\)','reached required accuracy')
+with open(path,'rb') as stream:
+    for index,raw in enumerate(stream,1):
+        digest.update(raw);line=raw.decode(errors='replace').rstrip('\r\n')
+        for pattern in patterns:
+            if re.search(pattern,line):found[pattern]=line
+        if 'direct lattice vectors' in line.lower():
+            lattice=[];lattice_line=index;remaining=3
+        elif remaining:
+            lattice.append(line);remaining-=1
+after=os.stat(path,follow_symlinks=False)
+if stamp(before)!=stamp(after):raise ValueError('OUTCAR changed during summary extraction')
+sha=digest.hexdigest();lines=['FPILOT_SHA='+sha]+list(found.values())
+if lattice_line:
+    lines+=['FPILOT_LATTICE_LINE='+str(lattice_line),'FPILOT_LATTICE_BEGIN']+lattice+['FPILOT_LATTICE_END']
+lines+=['FPILOT_SHA_AFTER='+sha,'FPILOT_SUMMARY_STAMP='+json.dumps(stamp(after))]
+print('\n'.join(lines))
+'''
 
 
 def _lattice_metrics(output, source):
@@ -66,16 +93,20 @@ def _atom_count(record):
 
 
 def _extract(record):
+    folder=ex.ROOT/'scan-metrics';folder.mkdir(parents=True,exist_ok=True)
+    with FileLock(str(folder/(record['id']+'.lock')),timeout=190):
+        return _extract_locked(record,folder/(record['id']+'.json'))
+
+
+def _extract_locked(record,cache_path):
     path = remote_paths.shell_path(ex.attempt_path(record)['shell'])
-    command = ('set -e\ncd ' + path + '\ntest -f OUTCAR; test ! -L OUTCAR\n'
-               'printf "FPILOT_SHA="; sha256sum OUTCAR | cut -d " " -f1\n'
-               "grep -E 'free  energy   TOTEN' OUTCAR | tail -n 1 || true\n"
-               "grep -E 'number of electron.*magnetization' OUTCAR | tail -n 1 || true\n"
-               "grep -E 'Elapsed time \\(sec\\)' OUTCAR | tail -n 1 || true\n"
-               "grep -E 'reached required accuracy' OUTCAR | tail -n 1 || true\n"
-               "awk 'tolower($0) ~ /direct lattice vectors/ {block=\"\"; line=NR; for(i=0;i<3;i++){if(getline<=0)break; block=block $0 \"\\n\"}} "
-               "END {if(line){printf \"FPILOT_LATTICE_LINE=%d\\nFPILOT_LATTICE_BEGIN\\n%sFPILOT_LATTICE_END\\n\",line,block}}' OUTCAR\n"
-               'printf "FPILOT_SHA_AFTER="; sha256sum OUTCAR | cut -d " " -f1\n')
+    import shlex
+    identity=[record['config']['alias'],path,record['bundle_id'],1]
+    try:cached=json.loads(cache_path.read_text())
+    except (OSError,ValueError):cached={}
+    if cached.get('identity')!=identity:cached={}
+    command=('set -e\ncd '+path+'\ntest -f OUTCAR; test ! -L OUTCAR\n'+shlex.quote(remote_transport._interpreter(record['config']['alias']))+' -c '+
+             shlex.quote(SUMMARY_PARSER)+' '+shlex.quote(json.dumps(cached)))
     receipt = ex.ssh(record['config']['alias'], command, timeout=180, stdout_limit=16384)
     if receipt['exit_code'] != 0: raise ValueError('远端 OUTCAR 摘要提取失败')
     output = receipt['stdout']
@@ -85,6 +116,10 @@ def _extract(record):
     after = re.search(r'^FPILOT_SHA_AFTER=([a-f0-9]{64})$', output, re.M)
     if not after or after.group(1) != sha:
         raise ValueError('OUTCAR 在读取过程中发生变化或缺少读取后校验；请重新读取指标')
+    stamp=re.search(r'^FPILOT_SUMMARY_STAMP=(.+)$',output,re.M)
+    if stamp:
+        from .extension_protocol import atomic_json
+        atomic_json(cache_path,{'identity':identity,'signature':json.loads(stamp.group(1)),'output':output})
     def last(pattern):
         found = re.findall(pattern, output, re.M)
         return float(found[-1]) if found else None

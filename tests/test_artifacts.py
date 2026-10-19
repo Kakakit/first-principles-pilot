@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from backend import artifacts, execution, postprocessing, extension_sdk
 
 class ArtifactTests(unittest.TestCase):
     def setUp(self):
+        runtime=patch('backend.remote_transport._interpreter',return_value=sys.executable);runtime.start();self.addCleanup(runtime.stop)
         self.temp=tempfile.TemporaryDirectory();self.base=Path(self.temp.name)
         self.workspace=self.base/'230269265lht';self.attempt=self.workspace/'material-projects/p/flows/main/stages/03-scf/attempts/20260921-120000-abcd'
         self.attempt.mkdir(parents=True)

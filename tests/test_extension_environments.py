@@ -83,7 +83,8 @@ class ExtensionEnvironmentTests(unittest.TestCase):
         runs._execute(key);finished=runs.get(key)
         self.assertEqual(finished['state'],'COMPLETED',finished.get('error'))
         self.assertEqual(finished['runtime']['python'],sys.executable)
-        self.assertEqual([r['phase'] for r in self.trace()],['doctor','check','run'])
+        # The already checked, frozen interpreter reuses its doctor receipt.
+        self.assertEqual([r['phase'] for r in self.trace()],['check','run'])
         self.assertEqual({r['python'] for r in self.trace()},{sys.executable})
         self.assertEqual(finished['runtime_doctor']['python'],sys.executable)
         self.assertTrue(finished['runtime_doctor']['python_version'])

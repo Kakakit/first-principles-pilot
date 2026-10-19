@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import tempfile
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from backend import execution as ex, inputs, scans, scan_results
 
 class ScanTests(unittest.TestCase):
     def setUp(self):
+        runtime=patch('backend.remote_transport._interpreter',return_value=sys.executable);runtime.start();self.addCleanup(runtime.stop)
         self.temp=tempfile.TemporaryDirectory()
         self.root=Path(self.temp.name)
         self.ex_patch=patch.object(ex,'ROOT',self.root);self.ex_patch.start()

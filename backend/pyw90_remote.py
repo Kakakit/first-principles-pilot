@@ -68,7 +68,8 @@ def _run(alias, path, arguments, input_names):
                + shlex.quote(tool['python'])
                + ' -c ' + shlex.quote(checker + '\n' + adapter + '\nmain()\n') + ' '
                + invocation + '\n')
-    receipt = execution.ssh(alias, command, timeout=210, stdout_limit=524288)
+    from .analysis_queue import slot,environment
+    with slot(alias):receipt = execution.ssh(alias,environment(tool.get('cores'))+command,timeout=210,stdout_limit=524288,lane='analysis')
     if receipt['exit_code'] != 0 or receipt.get('stdout_truncated') or receipt.get('stderr_truncated'):
         diagnostic = receipt.get('stderr', '')[-700:]
         if 'KeyError: PeriodicSite:' in diagnostic:

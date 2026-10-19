@@ -37,16 +37,28 @@ def save_runtime(value):
 
 
 def cli_command(runtime,entrypoint,action,seconds):
-    runner="import os,signal,subprocess,sys; p=subprocess.Popen(sys.argv[2:],start_new_session=True)\ntry: code=p.wait(timeout=int(sys.argv[1]))\nexcept subprocess.TimeoutExpired:\n os.killpg(p.pid,signal.SIGKILL); p.wait(); print('Extension CLI timeout; process group stopped',file=sys.stderr); code=124\nsys.exit(code)"
-    return ' '.join(shlex.quote(str(s)) for s in [runtime['python'],'-c',runner,seconds,runtime['python'],'package/'+entrypoint,action])
+    return ' '.join(shlex.quote(str(s)) for s in [runtime['python'],'extension-runner.py','cli',seconds,runtime['python'],'package/'+entrypoint,action])
 
 
-def doctor(receipt,runtime):
+def doctor(receipt,runtime,refresh=False):
+    from . import remote_cache
+    from .site_registration import connection_identity
+    identity={'package':receipt['revision'],'runtime':runtime,'connection':connection_identity(runtime['alias'])}
+    with remote_cache.singleflight('extension-doctor',identity):
+        cached=remote_cache.read('extension-doctor',identity)
+        if cached and not refresh:return cached
+        result=_doctor(receipt,runtime)
+        if result.get('ready'):remote_cache.write('extension-doctor',identity,result)
+        return result
+
+
+def _doctor(receipt,runtime):
     """Run only doctor in an isolated small-package directory; never dispatch."""
     directory=remote_paths.validate_root(runtime['config'].get('remote_workspace_root')).rstrip('/')+'/extension-checks/'+uuid.uuid4().hex
     stream=io.BytesIO()
     with tarfile.open(fileobj=stream,mode='w:gz') as archive:
         archive.add(receipt['root'],arcname='package',filter=lambda info:None if '__pycache__' in info.name else info)
+        archive.add(Path(__file__).with_name('extension_process.py'),arcname='extension-runner.py')
     command='set -e\ndest='+remote_paths.shell_path(directory)+'\ntest ! -e "$dest"\nmkdir -p "$dest"\ntar -xzf - -C "$dest"\ncd "$dest"\nexport PYTHONDONTWRITEBYTECODE=1\n'+cli_command(runtime,receipt['manifest']['entrypoint'],'doctor',30)+'\n'
     try:
         response=ex.ssh(runtime['alias'],command,stream.getvalue(),timeout=75)
@@ -95,6 +107,8 @@ def script(runtime, directory, entrypoint, mode, cores=None, timeout=300):
         return cli_command(runtime,entrypoint,action,seconds)
     # Keep command failures observable: errexit would skip the durable exit receipt.
     header += ['set -u','cd '+remote_paths.shell_path(directory)+' || exit "$?"','export PYTHONDONTWRITEBYTECODE=1',
+               'export OMP_NUM_THREADS='+str(cores or runtime.get('cores') or 1),
+               'export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS MKL_NUM_THREADS=$OMP_NUM_THREADS NUMEXPR_NUM_THREADS=$OMP_NUM_THREADS',
                command('doctor',30)+' > doctor.json 2> doctor.err',
                'code=$?', 'if test "$code" -eq 0; then',
                shlex.quote(runtime['python'])+" -c 'import json,sys; sys.exit(0 if json.load(open(\"doctor.json\")).get(\"ready\") is True else 4)'",'code=$?','fi', 'if test "$code" -eq 0; then',

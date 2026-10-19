@@ -52,6 +52,9 @@ def _presentation_record(record):
 def save(record):
     if inactive('analyses',record['id'],record):return record
     record['updated_at']=now();p.atomic_json(directory(record['id'])/'analysis.json',record)
+    if record['state'] not in ('DISPATCHING','RUNNING','SUBMITTED','UNKNOWN'):
+        from .analysis_queue import notify
+        notify()
     return record
 
 
@@ -169,6 +172,8 @@ def describe_sources(raw,project_id=None):
                          'stage':stage,'name':record.get('job_id') or ('已完成运行' if record['state']=='COMPLETED' else '未提交运行'),'alias':record['config']['alias'],
                          'state':record['state'],'evidence':record.get('evidence') or {},'input_summary':model,
                          'remote_root':ex.attempt_path(record)['shell'],'files':[f for f in listing['files'] if f['path']==f['name']],
+                         'needs_refresh':listing.get('needs_refresh',False),'host_state':listing.get('host_state','READY'),
+                         'files_incomplete':listing.get('truncated',False),'refreshing':listing.get('refreshing',False),
                          'chosen_files':value.get('files') or {}})
         else:raise ValueError('来源必须为结构草稿或明确 attempt')
     if len({r['id'] for r in rows})!=len(rows):raise ValueError('来源重复，请选择不同结果')
@@ -202,7 +207,7 @@ def blockers(manifest,sources,location='local'):
             except ValueError as exc:reasons.append(source['name']+'：'+str(exc));continue
             if candidate is None and not role.get('required',True):continue
             if not candidate or not 0<candidate['size_bytes']<=role['max_bytes']:
-                reasons.append(source['name']+'：缺少有效 '+role['title'])
+                reasons.append(source['name']+('：文件清单待更新' if source.get('needs_refresh') or source.get('files_incomplete') else '：缺少有效 '+role['title']))
             elif location=='local' and candidate['size_bytes']>artifacts.MAX_PULL_BYTES:reasons.append(source['name']+'：'+candidate['name']+' 超过 10 MiB，请在远端运行')
     return reasons
 
@@ -220,10 +225,11 @@ def context(payload):
             try:
                 runtime=environments.resolve(item['id'],location,payload.get('alias',''))
                 if location=='local':
-                    environment=p.doctor(p.installed(item['id']),python=runtime['python'])
-                    if not environment['ready']:reasons.append('本机缺依赖或 Python 不可用：'+', '.join(environment.get('missing') or [environment.get('reason') or '请重新检查环境']))
+                    environment=p.doctor(p.installed(item['id']),python=runtime['python'],background=True)
+                    if environment and not environment['ready']:reasons.append('本机缺依赖或 Python 不可用：'+', '.join(environment.get('missing') or [environment.get('reason') or '请重新检查环境']))
             except ValueError as exc:reasons.append(str(exc))
-        rows.append({**item,'blockers':reasons,'runtime':runtime,'runtime_doctor':environment})
+        rows.append({**item,'blockers':reasons,'runtime':runtime,'runtime_doctor':environment,
+                     'environment_checking':location=='local' and runtime is not None and environment is None})
     return {'extensions':rows,'sources':[{k:v for k,v in s.items() if k!='poscar'} for s in sources]}
 
 
@@ -266,7 +272,7 @@ def start(payload):
         if not approval or approval['binding']!=binding or (datetime.now(timezone.utc)-datetime.fromisoformat(approval['created_at'])).total_seconds()>600:raise ValueError('请重新预览当前来源、选项和运行环境')
         runtime=copy.deepcopy(runtime)
         if location!='local' and any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
-    environment=p.doctor(receipt,refresh=True,python=runtime['python']) if location=='local' else None
+    environment=p.doctor(receipt,python=runtime['python']) if location=='local' else None
     if environment is not None and not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     key=uuid.uuid4().hex;dest=directory(key);dest.mkdir(parents=True)
     shutil.copytree(receipt['root'],dest/'package',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
@@ -327,7 +333,7 @@ def check(payload):
     if reasons:return {'status':'NOT_APPLICABLE','reason':'；'.join(reasons)}
     runtime=environments.resolve(manifest['id'],payload.get('location','local'),payload.get('alias',''));environments.expected(runtime,payload)
     if payload.get('location','local')!='local':return {'status':'PENDING_REMOTE','reason':'文件清单适用；远端环境和内容检查将在独立分析目录执行'}
-    environment=p.doctor(receipt,refresh=True,python=runtime['python'])
+    environment=p.doctor(receipt,python=runtime['python'])
     if not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     with tempfile.TemporaryDirectory(prefix='fpilot-analysis-check-') as temporary:
         dest=Path(temporary);record={'id':'check','manifest':manifest,'sources':sources,'options':options,'location':'local'}
@@ -345,21 +351,24 @@ def _local(record):
     assert_available('analyses',record['id'],record)
     dest=directory(record['id']);record.update(state='RUNNING',owner_pid=os.getpid());save(record)
     python=(record.get('runtime') or {}).get('python') or sys.executable
-    environment=p.doctor(p.inspect_package(dest/'package'),refresh=True,python=python);record['runtime_doctor']=environment;save(record)
+    environment=p.doctor(p.inspect_package(dest/'package'),python=python);record['runtime_doctor']=environment;save(record)
     if not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
     checked=_check_result(p.invoke(dest/'package','check',dest/'request.json',python=python,timeout=min(record['manifest']['execution']['timeout_seconds'],60)))
     assert_available('analyses',record['id'],record)
     record['check']=checked;save(record)
     if checked['status']!='APPLICABLE':record.update(state='NOT_APPLICABLE',error=checked['reason']);save(record);return
+    from .analysis_queue import subprocess_environment
     with (dest/'stdout.log').open('w') as stdout,(dest/'stderr.log').open('w') as stderr:
-        process=subprocess.Popen([python,str(p.inside(dest/'package',record['manifest']['entrypoint'])),'run','--request',str(dest/'request.json')],cwd=dest,stdout=stdout,stderr=stderr,start_new_session=True,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'})
+        process=subprocess.Popen([python,str(p.inside(dest/'package',record['manifest']['entrypoint'])),'run','--request',str(dest/'request.json')],cwd=dest,stdout=stdout,stderr=stderr,start_new_session=True,env=subprocess_environment((record.get('runtime') or {}).get('cores')))
         with _process_lock:_local_processes[record['id']]=process
         try:
             if inactive('analyses',record['id'],record):stop_local(record['id'])
             code=process.wait(timeout=record['manifest']['execution']['timeout_seconds'])
         except subprocess.TimeoutExpired:
-            stop_child(process,force=True);process.wait();raise ValueError('分析超时，独立子进程已停止')
+            stopped=_stop_local_child(process)
+            if not stopped:record['stop_unconfirmed']=True
+            raise ValueError('分析超时，独立子进程已停止' if stopped else '分析超时，未确认子进程退出；状态保留 UNKNOWN，请手动核查')
         finally:
             with _process_lock:_local_processes.pop(record['id'],None)
     record['exit_code']=code
@@ -386,6 +395,10 @@ def _refresh(record):
     receipt=remote.inspect(record)
     record['last_checked_at']=now()
     record['remote_logs']=receipt.get('logs') or {}
+    if receipt.get('stop_unconfirmed'):
+        record.update(state='UNKNOWN',error='分析已超时，无法确认进程退出；保留原目录，不自动重新执行',
+                      stop_unconfirmed=receipt['stop_unconfirmed'])
+        return save(record)
     if receipt.get('doctor'):
         receipt['doctor']=p.doctor_result(receipt['doctor'],record['runtime']['python'])
         record['runtime_doctor']=receipt['doctor']
@@ -434,6 +447,7 @@ def _remote(record):
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
     text=remote.script(record['runtime'],record['runtime']['config'].get('remote_workspace_root','$HOME').rstrip('/')+'/analyses/'+record['id'],record['manifest']['entrypoint'],record['location'],cores,record['manifest']['execution']['timeout_seconds'])
     (dest/'launch.sh').write_text(text);record['script']=text
+    shutil.copy2(Path(__file__).with_name('extension_process.py'),dest/'extension-runner.py')
     assert_available('analyses',record['id'],record)
     record['remote_dir']=remote.stage(record,dest,request);save(record)
     # A crash from here must never resubmit, even if job.id hasn't arrived yet.
@@ -456,12 +470,17 @@ def _execute(key):
                 record=get(key)
                 if record['state'] not in ('QUEUED','WAIT_RESOURCE'):return
                 if record['location']=='local':_local(record)
-                else:_remote(record)
+                else:
+                    from .analysis_queue import slot,Busy
+                    try:
+                        with slot(record['runtime']['alias'],owner=key,wait=False):_remote(record)
+                    except Busy as exc:
+                        record.update(state='WAIT_RESOURCE',error=str(exc));save(record)
         except (SyncStopped,AttemptBusy):
             return  # Retain the queued analysis; ownership never becomes retry authority.
         except Exception as exc:
             # A submission timeout is uncertainty, not a reason to resubmit.
-            uncertain=record.get('submission_started') and record.get('exit_code') is None
+            uncertain=record.get('stop_unconfirmed') or (record.get('submission_started') and record.get('exit_code') is None)
             record.update(state='UNKNOWN' if uncertain else 'FAILED',error=str(exc)[-2500:]);save(record)
 
 
@@ -523,9 +542,13 @@ def stop_local(key):
     """Stop only an exact child process owned by this backend; no remote action."""
     with _process_lock:process=_local_processes.get(key)
     if process is not None and process.poll() is None:
-        try:
-            stop_child(process)
-            process.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            stop_child(process,force=True);process.wait()
-        except ProcessLookupError:pass
+        return _stop_local_child(process)
+    return True
+
+
+def _stop_local_child(process):
+    try:stop_child(process,force=True)
+    except (ProcessLookupError,subprocess.TimeoutExpired):pass
+    try:process.wait(timeout=2)
+    except subprocess.TimeoutExpired:return False
+    return True

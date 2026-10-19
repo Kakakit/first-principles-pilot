@@ -12,6 +12,7 @@ from . import storage
 ROOT = None  # Tests may supply an isolated workspace.
 INTERVAL = 900
 MAX_RETRIES = 5
+PROBE_COMMAND = 'printf FPILOT_CONNECTION_OK'
 
 
 def root():
@@ -61,7 +62,7 @@ def claim(alias, connection, retry=False, timeout=90):
         row=values.setdefault(key,dict(alias=alias,state='READY',retry_count=0,next_retry_at=None,counters={}))
         row.pop('superseded',None)
         recovering=row['state']!='READY'
-        if recovering:
+        if recovering or retry == 'manual':
             if not retry:
                 raise Deferred('主机自动连接已暂停' if row['state']=='PAUSED' else '主机连接冷却中；每 15 分钟重试，最多 5 次。可手动检测并恢复连接')
             if row.get('claim_until',0)>now:raise Deferred('本主机已有恢复检测在进行')
@@ -84,14 +85,19 @@ def finish(ticket, error=None, probe_command=None, counters=None):
         row=values[key]
         for name,count in (counters or {}).items():row['counters'][name]=row['counters'].get(name,0)+count
         owns=row.get('claim')==token
+        if owns and (recovering or manual):
+            row['last_recovery_at']=now;row['last_recovery_error']=str(error)[-2000:] if error else ''
         if error:
             row['counters']['failures']=row['counters'].get('failures',0)+1
             if row['state']=='READY':row.update(state='COOLDOWN',retry_count=0,next_retry_at=now+INTERVAL)
+            if manual and owns:
+                row.update(state='PAUSED',next_retry_at=None)
             elif owns:
                 row['state']='PAUSED' if row['retry_count']>=MAX_RETRIES else 'COOLDOWN'
                 row['next_retry_at']=None if row['state']=='PAUSED' else now+INTERVAL
             row['last_error']=str(error)[-2000:];row['last_failure_at']=now
-            if probe_command:row['probe_command']=probe_command
+            # Old records may contain an expensive failed business command. Never replay it.
+            row.pop('probe_command',None)
         elif owns or row['state']=='READY':
             row.update(state='READY',retry_count=0,next_retry_at=None,last_success_at=now,last_error='')
             row.pop('probe_command',None)
@@ -110,5 +116,4 @@ def due():
 
 
 def probe_command(alias, connection):
-    row=_read().get(identity(alias,connection),{})
-    return row.get('probe_command') or 'test -d "$HOME" && printf FPILOT_CONNECTION_OK'
+    return PROBE_COMMAND

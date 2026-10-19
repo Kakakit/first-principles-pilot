@@ -91,5 +91,5 @@ def check(key,target=None):
     location=target.get('location','local')
     if target and location not in receipt['manifest']['execution']['locations']:raise ValueError('清单不支持此运行位置')
     runtime=resolve(key,location,target.get('alias',''))
-    result=p.doctor(receipt,refresh=True,python=runtime['python']) if location=='local' else remote.doctor(receipt,runtime)
+    result=p.doctor(receipt,refresh=True,python=runtime['python']) if location=='local' else remote.doctor(receipt,runtime,refresh=True)
     return {'runtime':runtime,'doctor':result}

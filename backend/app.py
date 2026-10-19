@@ -8,11 +8,18 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(application):
     from . import problem_records
+    from . import analysis_queue,remote_transport
+    analysis_queue.start()
     try:problem_records.backfill()
     except Exception:
         import logging
         logging.getLogger(__name__).exception('Problem notebook backfill failed; execution state is unchanged')
-    yield
+    from . import extension_protocol
+    import threading
+    threading.Thread(target=extension_protocol.warm_doctors,name='extension-startup',daemon=True).start()
+    try:yield
+    finally:
+        analysis_queue.stop();remote_transport.close_all()
 
 
 app = FastAPI(title="First Principles Workbench", version="1.0.0",lifespan=lifespan)

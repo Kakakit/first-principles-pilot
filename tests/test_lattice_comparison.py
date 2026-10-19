@@ -1,6 +1,7 @@
 import hashlib
 import math
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,6 +29,7 @@ class LatticeComparisonTests(unittest.TestCase):
         self.files = {'POSCAR': b'Si\n1\n2 0 0\n0 3 0\n0 0 4\nSi\n1\nDirect\n0 0 0\n',
                       'INCAR': b'ENCUT = 400\n', 'POTCAR': b'fixture'}
         patch.object(ex, 'ROOT', self.root).start()
+        patch('backend.remote_transport._interpreter',return_value=sys.executable).start()
         patch.object(ex, 'bundle', side_effect=lambda *a, **kw: (self.manifest, self.files)).start()
         patch.object(ex, 'attempt_path', return_value={'shell': str(self.root)}).start()
         patch.object(ex, 'get', return_value=self.record).start()

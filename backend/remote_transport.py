@@ -278,16 +278,14 @@ class Session:
                     # A command timeout also indicates a potentially blocked host.
                     receipts=[i['future'].result() for i in group if i['future'].done() and not i['future'].cancelled()]
                     failed=next((r for r in receipts if r.get('exit_code') is None),None)
-                    probe=next((i['job']['command'] for i in group if not i['mutating'] and len(i['job']['command'])<=65536),None)
-                    remote_health.finish(ticket,(failed.get('stderr') or '远程请求超时') if failed else None,probe,
-                        {'connection_attempts':int(self.connection_attempted),'session_reuses':int(not self.connection_attempted),'commands':len(group)})
+                    remote_health.finish(ticket,(failed.get('stderr') or '远程请求超时') if failed else None,
+                        counters={'connection_attempts':int(self.connection_attempted),'session_reuses':int(not self.connection_attempted),'commands':len(group)})
             except (OSError, ValueError, TimeoutError, ConnectionError, LockTimeout) as exc:
                 deferred=isinstance(exc,(remote_health.Deferred,LockTimeout))
                 if not deferred:
                     self.close()
                     if ticket:
-                        probe=next((i['job']['command'] for i in group if not i['mutating'] and len(i['job']['command'])<=65536),None)
-                        remote_health.finish(ticket,str(exc),probe,{'connection_attempts':int(self.connection_attempted)})
+                        remote_health.finish(ticket,str(exc),counters={'connection_attempts':int(self.connection_attempted)})
                 for item in group:
                     if item['scope'] is not None:
                         with item['scope']['lock']:item['scope']['events'].append({'ssh_requests':int(item.get('send_started',False)),
@@ -420,12 +418,22 @@ atexit.register(close_all)
 def recover(alias, manual=False):
     from .site_registration import connection_identity
     connection=tuple(sorted(connection_identity(alias).items()))
-    command=remote_health.probe_command(alias,connection)
-    retry='manual' if manual else True
-    if os.environ.get('FPILOT_SSH_MODE','session')!='session':
+    requested_at=time.time()
+    folder=remote_health.root()/'ssh-lanes'/remote_health.identity(alias,connection)
+    folder.mkdir(parents=True,exist_ok=True)
+    with FileLock(str(folder/'recovery.lock'),timeout=35):
+        row=remote_health._read().get(remote_health.identity(alias,connection),{})
+        if row.get('last_recovery_at',0)>=requested_at:
+            error=row.get('last_recovery_error','')
+            return {'exit_code':None if error else 0,'stdout':'' if error else 'FPILOT_CONNECTION_OK',
+                    'stderr':error,'coalesced':True,'transport_state':'UNCERTAIN' if error else 'RECEIVED'}
+        if not manual and row.get('state')=='READY':
+            return {'exit_code':0,'stdout':'FPILOT_CONNECTION_OK','stderr':'','transport_state':'NOT_SENT'}
+        command=remote_health.probe_command(alias,connection)
+        retry='manual' if manual else True
+        # Probe only the shell connection, without starting the scientific Python environment.
         args=['ssh',*_options(alias),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes',alias,command]
-        return legacy(args,timeout=30,retry=retry)
-    return run(alias,command,timeout=30,stdout_limit=524288,mutating=False,retry=retry)
+        return legacy(args,timeout=30,stdout_limit=4096,retry=retry)
 
 
 def legacy(argv,data=None,timeout=90,stdout_limit=524288,retry=False,lane='normal',on_output=None):
@@ -445,7 +453,8 @@ def legacy(argv,data=None,timeout=90,stdout_limit=524288,retry=False,lane='norma
             result=remote_worker.execute({'argv':argv,
                 'data':base64.b64encode(data or b'').decode(),'timeout':timeout,'stdout_limit':stdout_limit},on_output=on_output)
             for name in ('stdout','stderr'):result[name]=base64.b64decode(result[name]).decode(errors='replace')
-            failed=result['exit_code'] in (None,255)
+            failed=result['exit_code'] in (None,255) or bool(retry and
+                (result['exit_code']!=0 or 'FPILOT_CONNECTION_OK' not in result['stdout']))
             remote_health.finish(ticket,(result['stderr'] or 'SSH 连接失败（无错误输出）') if failed else None,counters={'connection_attempts':1,'commands':1})
             if failed:
                 result['exit_code']=None

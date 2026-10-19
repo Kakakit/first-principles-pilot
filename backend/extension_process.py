@@ -40,7 +40,8 @@ def alive(marker):
 
 
 def read(path):
-    return json.loads(path.read_text()) if path.is_file() else None
+    try:return json.loads(path.read_text()) if path.is_file() else None
+    except (OSError,ValueError):return None
 
 
 def inspect(directory):
@@ -66,32 +67,48 @@ def inspect(directory):
                 stream.seek(max(0, path.stat().st_size - 1500))
                 logs[name] = stream.read().decode(errors='replace')
     return {'exit': read(root / 'exit.json'), 'launch': marker,
+            'stop_unconfirmed': read(root / 'stop-unconfirmed.json'),
             'process_alive': alive(marker), 'run_receipt': receipt,
             'job_id': (root / 'job.id').read_text().strip().split(';')[0] if (root / 'job.id').is_file() else None,
             'doctor': read(root / 'doctor.json'), 'check': read(root / 'check.json'), 'logs': logs}
 
 
-def stop_descendants(process):
-    # Kill only the exact supervised descendants, including nested CLI sessions.
-    children = {process.pid: identity(process.pid)}
-    changed = True
-    while changed:
-        changed = False
-        for path in pathlib.Path('/proc').iterdir():
-            if not path.name.isdigit() or int(path.name) in children:
-                continue
-            try:
-                raw = (path / 'stat').read_text()
-                fields = raw[raw.rfind(')') + 2:].split()
-                if int(fields[1]) in children:
-                    children[int(path.name)] = identity(int(path.name)); changed = True
-            except (OSError, ValueError, IndexError):
-                pass
-    for pid, marker in reversed(list(children.items())):
-        if marker and alive(marker):
-            try: os.kill(pid, signal.SIGKILL)
-            except ProcessLookupError: pass
-    process.wait()
+def stop_descendants(process, root=None):
+    """Stop owned groups only. A D-state child must never make this wait unbounded."""
+    groups={process.pid};deadline=time.monotonic()+2
+    if root is not None:
+        marker=read(root/'cli-group.json')
+        if marker:
+            current=identity(marker['pid'])
+            if current is None or alive(marker):groups.add(marker['pid'])
+    for group in groups:
+        try:os.killpg(group,signal.SIGKILL)
+        except ProcessLookupError:pass
+    try:process.wait(timeout=max(.001,deadline-time.monotonic()))
+    except subprocess.TimeoutExpired:return False
+    while time.monotonic()<deadline:
+        remaining=[]
+        for group in groups:
+            try:os.killpg(group,0);remaining.append(group)
+            except ProcessLookupError:pass
+        if not remaining:return True
+        time.sleep(.02)
+    return False
+
+
+def cli(seconds, command):
+    root=pathlib.Path.cwd()
+    process=subprocess.Popen(command,start_new_session=True)
+    atomic(root/'cli-group.json',identity(process.pid) or {'pid':process.pid})
+    try:
+        try:return process.wait(timeout=seconds)
+        except subprocess.TimeoutExpired:
+            stopped=stop_descendants(process)
+            if not stopped:atomic(root/'stop-unconfirmed.json',{'pid':process.pid,'reason':'CLI timeout'})
+            print('Extension CLI timeout; '+('process group stopped' if stopped else 'stop unconfirmed'),file=sys.stderr)
+            return 124
+    finally:
+        if not (root/'stop-unconfirmed.json').exists():(root/'cli-group.json').unlink(missing_ok=True)
 
 
 def supervise(root, timeout):
@@ -100,11 +117,12 @@ def supervise(root, timeout):
     atomic(root / 'launch.json', marker)
     code = 127
     try:
-        process = subprocess.Popen(['bash', 'launch.sh'], cwd=root, stdin=subprocess.DEVNULL)
+        process = subprocess.Popen(['bash', 'launch.sh'], cwd=root, stdin=subprocess.DEVNULL,start_new_session=True)
         try: code = process.wait(timeout=timeout + 120)
         except subprocess.TimeoutExpired:
-            stop_descendants(process); code = 124
-            print('Extension supervisor timeout; exact process tree stopped', file=sys.stderr)
+            stopped=stop_descendants(process,root);code=124
+            if not stopped:atomic(root/'stop-unconfirmed.json',{'pid':process.pid,'reason':'supervisor timeout'})
+            print('Extension supervisor timeout; '+('groups stopped' if stopped else 'stop unconfirmed'),file=sys.stderr)
     finally:
         if not (root / 'exit.json').is_file():
             atomic(root / 'exit.json', {'exit_code': code})
@@ -128,6 +146,8 @@ def start(root, timeout):
 
 
 def main():
+    if len(sys.argv)>1 and sys.argv[1]=='cli':
+        sys.exit(cli(int(sys.argv[2]),sys.argv[3:]))
     parser = argparse.ArgumentParser(); parser.add_argument('action', choices=['start', 'wait', 'inspect'])
     parser.add_argument('directory'); parser.add_argument('--timeout', type=int, default=300)
     args = parser.parse_args(); root = pathlib.Path(args.directory).resolve()

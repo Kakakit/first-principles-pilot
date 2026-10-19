@@ -16,6 +16,7 @@ import tempfile
 import threading
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from jsonschema import Draft7Validator
 from .storage import ROOT
@@ -31,6 +32,9 @@ MODES = {'local', 'ssh', 'scheduler'}
 _cache = {}
 _doctor_cache = {}
 _lock = threading.RLock()
+_doctor_executor = ThreadPoolExecutor(max_workers=1,thread_name_prefix='extension-doctor')
+_doctor_pending = set()
+_doctor_locks = {}
 
 
 def atomic_json(path, value):
@@ -134,27 +138,50 @@ def invoke(root, action, request=None, python=None, timeout=30):
     manifest = inspect_package(root)['manifest']
     argv = [python or sys.executable, str(inside(root,manifest['entrypoint'])),action]
     if request: argv += ['--request',str(request)]
-    result = subprocess.run(argv,cwd=str(root),capture_output=True,text=True,timeout=timeout,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'})
+    from .analysis_queue import subprocess_environment
+    result = subprocess.run(argv,cwd=str(root),capture_output=True,text=True,timeout=timeout,env=subprocess_environment())
     if result.returncode: raise ValueError((result.stderr or result.stdout or '扩展非零退出')[-2000:])
     try: payload = json.loads(result.stdout)
     except ValueError: raise ValueError('扩展 CLI 须在 stdout 返回单个 JSON 回执')
     return payload
 
 
-def doctor(receipt, refresh=False, python=None):
+def doctor(receipt, refresh=False, python=None, background=False):
     from .extension_environments import resolve
     python=python or resolve(receipt['manifest']['id'])['python']
     try:modified=Path(python).stat().st_mtime_ns
     except OSError:modified=None
-    key = (receipt['revision'],python,modified)
+    key = (str(ROOT),receipt['revision'],python,modified)
     if not refresh and key in _doctor_cache: return _doctor_cache[key]
-    try:
-        result = invoke(receipt['root'],'doctor',python=python,timeout=30)
-        if result.get('schema') != 'fpilot.extension-doctor.v2' or type(result.get('ready')) is not bool: raise ValueError('doctor 回执格式无效')
-        result = doctor_result(result,python)
-    except Exception as exc: result = {'schema':'fpilot.extension-doctor.v2','ready':False,'missing':[],'python':python,'reason':str(exc)[:1500]}
-    _doctor_cache[key] = result
-    return result
+    if background:
+        with _lock:
+            if key not in _doctor_pending:
+                _doctor_pending.add(key)
+                def check():
+                    try:doctor(receipt,python=python)
+                    finally:
+                        with _lock:_doctor_pending.discard(key)
+                _doctor_executor.submit(check)
+        return None
+    with _lock:lock=_doctor_locks.setdefault(key,threading.Lock())
+    with lock:
+        if not refresh and key in _doctor_cache:return _doctor_cache[key]
+        try:
+            result = invoke(receipt['root'],'doctor',python=python,timeout=30)
+            if result.get('schema') != 'fpilot.extension-doctor.v2' or type(result.get('ready')) is not bool: raise ValueError('doctor 回执格式无效')
+            result = doctor_result(result,python)
+        except Exception as exc: result = {'schema':'fpilot.extension-doctor.v2','ready':False,'missing':[],'python':python,'reason':str(exc)[:1500]}
+        _doctor_cache[key] = result
+        return result
+
+
+def warm_doctors():
+    """Warm local environments once, off the UI request and without remote access."""
+    from .extension_environments import resolve
+    for row in catalog():
+        if row.get('enabled') and 'local' in row.get('execution',{}).get('locations',[]):
+            try:doctor(installed(row['id']),python=resolve(row['id'])['python'],background=True)
+            except (ValueError,OSError):pass
 
 
 def doctor_result(result,python):

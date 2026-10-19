@@ -116,7 +116,8 @@ printf 'FPILOT_PRE_BAND_BYTES=%s\n' "$(wc -c < bnd.dat)"
 PYTHONPATH={package} MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' cmp FPilot --path . --seedname {shlex.quote(seed)} --vasp bnd.dat --efermi {fermi:.12g} > cmp.log 2>&1
 grep -E 'Final Quality|Quality|Error' cmp.log | tail -8
 '''
-    receipt = remote_transport.run(alias, command, timeout=420, stdout_limit=5000, lane='analysis')
+    from .analysis_queue import slot,environment
+    with slot(alias):receipt = remote_transport.run(alias,environment(pyw90_remote.runtime(alias).get('cores'))+command,timeout=420,stdout_limit=5000,lane='analysis')
     if receipt['exit_code'] != 0 or receipt.get('stdout_truncated'):
         return {'status': 'FAILED', 'reason': (receipt.get('stderr') or receipt.get('stdout') or 'PyW90 pre band/cmp 失败')[-500:],
                 'source_hashes': checks}
@@ -352,7 +353,8 @@ def start(**options):
             with JOB_LOCK:job.update(state='READY',result=result,seconds=time.time()-job['started_at'])
         except Exception as exc:
             with JOB_LOCK:job.update(state='FAILED',error=str(exc)[:1000])
-    threading.Thread(target=work,daemon=True).start();return dict(job)
+    from .analysis_queue import executor
+    executor.submit(work);return dict(job)
 
 
 def status(key):
@@ -386,4 +388,5 @@ def start_diagnostic(project_id, identifier):
             with JOB_LOCK:job.update(state='READY',result=result,seconds=time.time()-job['started_at'])
         except Exception as exc:
             with JOB_LOCK:job.update(state='FAILED',error=str(exc)[:1000])
-    threading.Thread(target=work,daemon=True).start();return dict(job)
+    from .analysis_queue import executor
+    executor.submit(work);return dict(job)

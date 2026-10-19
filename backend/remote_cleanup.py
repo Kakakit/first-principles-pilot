@@ -87,7 +87,7 @@ fi
 else
   marker=$(find "$dest" -maxdepth 2 -type f -printf '%P|%s|%T@\\n' | LC_ALL=C sort | sha256sum | awk '{print $1}')
 fi
-bytes=$(du -s -B1 "$dest" | awk '{print $1}')
+bytes=-
 ''')
         if not delete:
             script += '''find "$dest" -maxdepth 2 -type f -printf 'FPILOT_DELETE_FILE=%P|%s\\n' | head -20
@@ -110,10 +110,10 @@ def _check_receipt(receipt, label):
         if blocked:
             raise ValueError('调度器仍显示任务状态 ' + blocked.group(1) + '；未删除')
         raise ValueError('远端目录身份、路径、调度状态或权限核对失败；未确认删除。' + receipt.get('stderr', '')[-250:])
-    match = re.search(r'^FPILOT_DELETE_' + label + r'=([a-f0-9]{64})\|(\d+)$', receipt.get('stdout', ''), re.M)
+    match = re.search(r'^FPILOT_DELETE_' + label + r'=([a-f0-9]{64})\|(\d+|-)$', receipt.get('stdout', ''), re.M)
     if not match:
         raise ValueError('远端删除回执不完整；请只读检查该目录状态，不要盲目重试')
-    return match.group(1), int(match.group(2))
+    return match.group(1), int(match.group(2)) if match.group(2)!='-' else None
 
 
 def preview(project_id, attempt_id):

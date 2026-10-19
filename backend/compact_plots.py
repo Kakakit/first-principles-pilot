@@ -34,11 +34,15 @@ def local(record, kind):
 
 def script(record, kind, output):
     from . import interactive_plots as plots
+    from .extension_remote import runtimes
+    cores=max(1,int(runtimes().get(record['config']['alias'],{}).get('cores') or 1))
     functions = ['_sha','_pband_names','_species','_canonical','_doscar','_eigenval','_pband',
-                 '_is_noncollinear','_fermi','_kpath_labels']
+                 '_outcar_info','_unsupported_vaspkit_cli','_kpath_labels']
     source = '\n'.join(inspect.getsource(getattr(plots,name)) for name in functions)
     source = ('from __future__ import annotations\nimport os,json,re,math,hashlib,stat,shutil,subprocess,time\n'
-              'from pathlib import Path\nimport numpy as np\n'
+              'from pathlib import Path\n'
+              'for name in ("OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS","NUMEXPR_NUM_THREADS"):os.environ[name]='+repr(str(cores))+'\n'
+              'import numpy as np\n'
               +'NUMBER='+repr(plots.NUMBER)+'\nPBAND_COLUMNS='+repr(plots.PBAND_COLUMNS)+'\n'+source)
     request = {'root': execution.attempt_path(record)['shell'], 'output': output, 'kind':kind,
                'attempt_id':record['id'],'host':record['config']['alias']}
@@ -64,7 +68,9 @@ def take(path):
     return path
 poscar=take(root/'POSCAR');outcar=take(root/'OUTCAR')
 species=_species(poscar);elements=list(dict.fromkeys(species))
-reference=_fermi(outcar)
+outcar_info=_outcar_info(outcar);reference=outcar_info['reference']
+if reference is None:raise ValueError('OUTCAR has no Fermi energy')
+sources[-1].update(sha256=outcar_info['sha256'],verification_mode='content')
 generation=None
 if REQUEST['kind']=='band':
     eigenval=take(root/'EIGENVAL');kpoints=take(root/'KPOINTS')
@@ -75,10 +81,16 @@ if REQUEST['kind']=='band':
         if not tool:raise ValueError('VASPKIT is missing; PROCAR stays on server')
         origin=out.parent/'vaspkit';origin.mkdir(exist_ok=True)
         for name in ('INCAR','POSCAR','KPOINTS','EIGENVAL','DOSCAR','PROCAR'):
-            path=take(root/name);shutil.copyfile(path,origin/name)
+            path=take(root/name)
+            if path.name in ('PROCAR','DOSCAR','EIGENVAL'):
+                target=origin/name
+                if target.exists() or target.is_symlink():target.unlink()
+                target.symlink_to(path)
+            else:shutil.copyfile(path,origin/name)
         with (origin/'vaspkit.log').open('w') as log:
             result=subprocess.run([tool,'-task','213'],cwd=str(origin),stdout=log,stderr=subprocess.STDOUT,timeout=1200)
-            if result.returncode:
+            log.flush()
+            if result.returncode and _unsupported_vaspkit_cli(origin/'vaspkit.log'):
                 result=subprocess.run([tool],input='213\n',text=True,cwd=str(origin),stdout=log,stderr=subprocess.STDOUT,timeout=1200)
         if result.returncode:raise ValueError('VASPKIT 213 failed; see independent analysis log')
         found=_pband_names(elements,{p.name for p in origin.glob('PBAND_*.dat') if p.is_file() and p.stat().st_size>0})
@@ -86,7 +98,7 @@ if REQUEST['kind']=='band':
         generation={'tool':tool,'task':213,'directory':str(origin)}
     mode,names=found
     files=[take(origin/name) for name in names]
-    if (mode=='soc')!=_is_noncollinear(outcar):raise ValueError('PBAND SOC mode does not match OUTCAR')
+    if (mode=='soc')!=outcar_info['noncollinear']:raise ValueError('PBAND SOC mode does not match OUTCAR')
     meta=_pband(files,elements,mode,eigenval,work)
     meta['kpath_labels']=_kpath_labels(kpoints,meta['nk'])
     meta['kpath_breaks']=[r['index'] for r in meta['kpath_labels'][2::2]]
@@ -131,7 +143,9 @@ def fetch(record, kind, force=False):
             if scf['config']['alias']!=record['config']['alias']:raise ValueError('绘图 SCF 来源服务器不一致')
             companion += '\n'+remote_energy.command(scf,remote_cache.read('energy',remote_energy.identity(scf)))
         started=time.monotonic()
-        with tempfile.TemporaryDirectory(prefix='fpilot-compact-') as temporary:
+        from .analysis_queue import slot
+        with slot(record['config']['alias']),tempfile.TemporaryDirectory(prefix='fpilot-compact-') as temporary:
+            recycle.assert_available('attempts',record['id'],record)
             target=Path(temporary)/'data.npz'
             receipt=safe_files.pull_many(record['config']['alias'],[{'remote_path':output,'destination':str(target)}],
                 companion_command=companion,timeout=1500,lane='analysis')
@@ -184,7 +198,9 @@ def selected_series(meta, selected, emin, emax, directory):
         source+='with gzip.open(str(output),"wt") as stream:json.dump(data,stream)\n'
         source+='if output.stat().st_size>10485760:raise ValueError("所选投影仍超过 10 MiB，请减少同时显示的轨道；不缩减 k 点或能带")\n'
         command=shlex.quote(remote_transport._interpreter(record['config']['alias']))+' -c '+shlex.quote(source)
-        with tempfile.TemporaryDirectory(prefix='fpilot-selected-') as temp:
+        from .analysis_queue import slot
+        with slot(record['config']['alias']),tempfile.TemporaryDirectory(prefix='fpilot-selected-') as temp:
+            recycle.assert_available('attempts',record['id'],record)
             target=Path(temp)/'selected.json.gz'
             safe_files.pull_many(record['config']['alias'],[{'remote_path':output,'destination':str(target)}],companion_command=command,lane='analysis',timeout=180)
             with gzip.open(target,'rt') as stream:return json.load(stream)

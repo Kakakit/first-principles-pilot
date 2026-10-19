@@ -6,18 +6,44 @@ import json
 import os
 import re
 import shlex
+import shlex
 import subprocess
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from filelock import FileLock
 
-from . import execution, remote_paths
+from . import execution, remote_paths, remote_transport
 from .storage import ROOT
 
 MAX_PULL_BYTES = 10 * 1024 * 1024
 MAX_PREVIEW_BYTES = 256 * 1024
 MAX_ENTRIES = 2000
+METADATA_TTL = 60
+LIST_FILES = r'''
+import os,stat,time,json,base64
+started=time.monotonic();base=os.getcwd();device=os.stat(base).st_dev
+pending=[base];visited=0;truncated=False;partial=False
+while pending and not truncated:
+    if time.monotonic()-started>=10:truncated=True;break
+    directory=pending.pop()
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            if visited>=2000 or time.monotonic()-started>=10:
+                truncated=True;break
+            visited+=1
+            try:
+                item=entry.stat(follow_symlinks=False)
+                if item.st_dev!=device:continue
+                if stat.S_ISDIR(item.st_mode):pending.append(entry.path)
+                elif stat.S_ISREG(item.st_mode):
+                    name=os.path.relpath(entry.path,base)
+                    print('FPILOT_FILE=%s|%s|%s'%(item.st_size,int(item.st_mtime),base64.b64encode(name.encode()).decode()))
+            except FileNotFoundError:continue
+            except PermissionError:partial=True
+if truncated or partial:print('FPILOT_TRUNCATED=1')
+'''
 
 
 def attempts(project_id, node_id):
@@ -57,24 +83,25 @@ def _category(name):
 
 
 def refresh(key):
-    record = execution.get(key)
+    execution.get(key)  # Resolve the record before creating any lock or progress file.
+    started=time.time()
+    folder=ROOT/'artifact-cache';folder.mkdir(parents=True,exist_ok=True)
+    with FileLock(str(folder/(key+'.lock')),timeout=50):
+        record=execution.get(key);cached=_observation(record)
+        if cached and cached.get('checked_epoch',0)>=started-0.25:
+            return {**cached,'cached':True,'needs_refresh':False,'refreshing':False}
+        from .extension_protocol import atomic_json
+        marker=folder/(key+'.refreshing.json')
+        atomic_json(marker,{'at':time.time()})
+        try:return _refresh(record)
+        finally:marker.unlink(missing_ok=True)
+
+
+def _refresh(record):
+    key=record['id']
     root = _root(record)
     root_q = remote_paths.shell_path(root)
-    command = r'''set -e
-base=%s
-test -d "$base"
-cd "$base"
-count=0
-while IFS= read -r -d '' file; do
-  count=$((count+1)); test "$count" -le %d || { printf 'FPILOT_TRUNCATED=1\n'; break; }
-  rel=${file#./}
-  size=$(stat -c '%%s' -- "$file" 2>/dev/null || stat -f '%%z' -- "$file")
-  mtime=$(stat -c '%%Y' -- "$file" 2>/dev/null || stat -f '%%m' -- "$file")
-  printf 'FPILOT_FILE=%%s|%%s|' "$size" "$mtime"
-  printf '%%s' "$rel" | base64 | tr -d '\n'
-  printf '\n'
-done < <(find . -xdev -type f -print0)
-''' % (root_q, MAX_ENTRIES)
+    command='set -e\ncd '+root_q+'\n'+shlex.quote(remote_transport._interpreter(record['config']['alias']))+' -c '+shlex.quote(LIST_FILES)
     receipt = execution.ssh(record['config']['alias'], command, timeout=45)
     if receipt.get('exit_code') != 0:
         raise ValueError('远程 attempt 文件列表读取失败：' + str(receipt.get('stderr', ''))[-400:])
@@ -97,7 +124,8 @@ done < <(find . -xdev -type f -print0)
     result = {'attempt_id': key, 'host': record['config']['alias'], 'root': root,
             'files': files, 'truncated': 'FPILOT_TRUNCATED=1' in receipt.get('stdout', ''),
             'limit': MAX_ENTRIES, 'observed_state': record['state'], 'source_identity': _identity(record), 'refreshed_at': datetime.now(timezone.utc).isoformat(),
-            'remote_mutation': False}
+            'remote_mutation': False,'checked_epoch':time.time(),'cached':False,
+            'needs_refresh':False,'refreshing':False,'host_state':'READY'}
     cache = ROOT / 'artifact-cache' / (key + '.json')
     cache.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=cache.parent, delete=False) as handle:
@@ -120,19 +148,35 @@ def cached_listing(record):
                 and record['state'] in ('COMPLETED', 'FAILED', 'CANCELLED')
                 and result.get('observed_state') == record['state']
                 and result.get('source_identity') == _identity(record)
-                and result.get('refreshed_at')):
+                and result.get('refreshed_at')
+                and time.time()-result.get('checked_epoch',0)<METADATA_TTL):
             return result
     except (OSError, ValueError, KeyError):
         pass
     return None
 
 
+def _observation(record):
+    try:
+        value=json.loads((ROOT/'artifact-cache'/(record['id']+'.json')).read_text())
+        if value.get('source_identity')==_identity(record):return value
+    except (OSError,ValueError):pass
+    return None
+
+
 def listing(key):
+    from . import remote_health
     record = execution.get(key)
-    result = cached_listing(record)
-    if result:
-        return {**result, 'cached': True, 'verification_status': 'VERIFIED'}
-    return refresh(key)
+    result=_observation(record)
+    try:refreshing=time.time()-json.loads((ROOT/'artifact-cache'/(key+'.refreshing.json')).read_text())['at']<50
+    except (OSError,ValueError,KeyError):refreshing=False
+    hosts=remote_health.status(record['config']['alias']);host=hosts[0] if hosts else {}
+    stale=not result or time.time()-result.get('checked_epoch',0)>=METADATA_TTL
+    return {**(result or {'attempt_id':key,'host':record['config']['alias'],'root':_root(record),
+                         'files':[],'refreshed_at':None,'truncated':False,'remote_mutation':False}),
+            'cached':bool(result),'needs_refresh':stale,'refreshing':refreshing,
+            'host_state':host.get('state','READY'),
+            'verification_status':'UNOBSERVED' if not result else 'PARTIAL' if result.get('truncated') else 'STALE' if stale else 'OBSERVED'}
 
 
 def _small_bytes(record, relative, mode='tail', limit=MAX_PREVIEW_BYTES):

@@ -47,8 +47,10 @@ def _remote_table(record, entry, directory, mode, ions, orbitals, fermi=None, no
         shlex.quote(str(part)) for part in ([mode, entry['path'], ions, orbitals] +
                                      ([str(fermi)] if fermi is not None else []) +
                                      (['noncollinear'] if noncollinear else [])))
-    receipt = execution.ssh(alias, command, data=EXTRACTOR.read_bytes(), timeout=180,
-                            stdout_limit=artifacts.MAX_PULL_BYTES + 4096)
+    from .analysis_queue import slot,environment
+    with slot(alias):
+        receipt = execution.ssh(alias,environment()+command,data=EXTRACTOR.read_bytes(),timeout=180,
+                                stdout_limit=artifacts.MAX_PULL_BYTES+4096,lane='analysis')
     if receipt['exit_code'] != 0 or receipt.get('stdout_truncated'):
         raise ValueError('服务器侧有界提取失败：' + receipt.get('stderr', '')[-500:] + receipt.get('stdout', '')[-500:])
     lines = receipt['stdout'].splitlines()
@@ -67,6 +69,7 @@ def _remote_table(record, entry, directory, mode, ions, orbitals, fermi=None, no
 
 
 def run(project_id, attempt_id, mode, ions='all', orbitals='d'):
+    from .analysis_queue import subprocess_environment
     if mode not in ('pdos','fatband') or not SAFE_SELECTOR.fullmatch(ions) or not SAFE_ORBITALS.fullmatch(orbitals):
         raise ValueError('请选择 PDOS/fatband 与有效的离子、轨道')
     record = execution.get(attempt_id)
@@ -78,7 +81,7 @@ def run(project_id, attempt_id, mode, ions='all', orbitals='d'):
     expected = 'dos' if mode == 'pdos' else 'bands'
     if manifest.get('stage') != expected:
         raise ValueError('PDOS 需要 DOS attempt；fatband 需要能带 attempt')
-    listing = artifacts.listing(attempt_id)
+    listing = artifacts.refresh(attempt_id)
     names = {entry['path']:entry for entry in listing['files']}
     required = 'DOSCAR' if mode == 'pdos' else 'PROCAR'
     if required not in names:
@@ -142,7 +145,7 @@ def run(project_id, attempt_id, mode, ions='all', orbitals='d'):
         elif noncollinear and mode == 'pdos':
             sources.insert(0,_local_file(attempt_id,names[required],directory))
             extracted=subprocess.run([sys.executable,str(EXTRACTOR),'doscar',required,ions,orbitals,'noncollinear'],
-                                     cwd=directory,capture_output=True,text=True,timeout=180)
+                                     cwd=directory,capture_output=True,text=True,timeout=180,env=subprocess_environment())
             lines=extracted.stdout.splitlines()
             if extracted.returncode or len(lines)<3 or not lines[0].startswith('FPILOT_META=') or lines[-1]!='FPILOT_END':
                 raise ValueError('本机 SOC DOSCAR 电荷投影提取失败：'+(extracted.stderr or extracted.stdout)[-500:])
@@ -155,7 +158,7 @@ def run(project_id, attempt_id, mode, ions='all', orbitals='d'):
             command.extend(['--'+required.lower(),required,'--ions',ions,'--orbitals',orbitals])
         completed=None
         for plot_command in commands:
-            completed=subprocess.run(plot_command,cwd=directory,capture_output=True,text=True,timeout=300)
+            completed=subprocess.run(plot_command,cwd=directory,capture_output=True,text=True,timeout=300,env=subprocess_environment())
             if completed.returncode:
                 raise ValueError((completed.stderr or completed.stdout)[-900:])
         outputs=sorted(path.name for path in directory.glob('figure*') if path.suffix in ('.png','.pdf'))

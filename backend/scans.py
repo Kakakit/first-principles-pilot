@@ -466,11 +466,11 @@ def retry_case(batch_id, project_id, case_id):
     return status(batch_id,project_id)
 
 
-def tick():
+def tick(capacity_context=None):
     """Fill available candidates within one cycle; keep exact receipts on recovery."""
     with closing(database()) as db:
         ids=[r[0] for r in db.execute("SELECT id FROM scan_batches WHERE state IN ('ACTIVE','BLOCKED','PAUSED') ORDER BY rowid")]
-    capacity_context={}
+    capacity_context={} if capacity_context is None else capacity_context
     for batch_id in ids:
         with _dispatch_lock(batch_id) as owned:
             if owned:

@@ -206,14 +206,51 @@ class RecoveryTests(unittest.TestCase):
 
     def test_worker_reads_more_than_history_page(self):
         for i in range(105):self.record(str(i))
-        with patch.object(ex,'refresh',side_effect=lambda key:ex.get(key)) as refresh:
+        with patch.object(ex,'refresh',side_effect=lambda key,**kwargs:ex.get(key)) as refresh:
             self.assertEqual(worker.tick()['checked'],105);self.assertEqual(refresh.call_count,105)
+
+    def test_unknown_without_job_id_only_reads_receipt_and_failed_read_waits_for_manual_check(self):
+        record=self.record(state='UNKNOWN');record['job_id']=None;ex.save(record)
+        with patch.object(ex,'ssh',return_value={'exit_code':None,'stdout':'','stderr':'I/O timeout'}) as ssh:
+            result=ex.refresh('a',automatic=True)
+            self.assertNotIn('OUTCAR',ssh.call_args.args[1]);self.assertIn('.job-id',ssh.call_args.args[1])
+        self.assertTrue(result['automatic_audit_paused']);self.assertEqual(result['state'],'UNKNOWN')
+        with patch.object(ex,'ssh') as ssh:
+            ex.refresh('a',automatic=True);ssh.assert_not_called()
+        with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'FPILOT_EXIT=0\nFPILOT_TIMING=1\njob_state = C\n','stderr':''}) as ssh:
+            result=ex.refresh('a');self.assertEqual(ssh.call_count,1)
+        self.assertFalse(result.get('automatic_audit_paused'))
+
+    def test_wannier_disconnect_preserves_evidence_and_requires_manual_deep_read(self):
+        record=self.record();record.update(kind='wannier90',scheduler='pbs',seed='wannier90',evidence={'wannier_final_state':True})
+        ex.save(record)
+        with patch.object(ex,'ssh',return_value={'exit_code':None,'stdout':'','stderr':'I/O timeout'}):result=ex.refresh('a',automatic=True)
+        self.assertEqual(result['state'],'RUNNING');self.assertEqual(result['evidence'],record['evidence']);self.assertTrue(result['automatic_audit_paused'])
+        with patch.object(ex,'ssh') as ssh:ex.refresh('a',automatic=True);ssh.assert_not_called()
+        receipt={'exit_code':0,'stdout':'FPILOT_EXIT=0\nFPILOT_DONE=1\nFPILOT_FINAL=1\njob_state = C\n','stderr':''}
+        with patch.object(ex,'ssh',return_value=receipt):result=ex.refresh('a')
+        self.assertEqual(result['state'],'COMPLETED');self.assertFalse(result.get('automatic_audit_paused'))
+
+    @unittest.skipUnless(os.name=='posix','POSIX remote shell receipt fixture')
+    def test_unchanged_file_evidence_skips_full_reads_but_keeps_scheduler_queries(self):
+        self.record();(self.root/'OUTCAR').write_text('General timing and accounting informations\naborting loop because EDIFF is reached\n')
+        reads=self.root/'reads';calls=[];version=['one']
+        def ssh(alias,command,**kwargs):
+            prelude=('stat(){ printf '+version[0]+'; }; qstat(){ printf "job_state = R\\n"; }; '
+                     'grep(){ printf x >> '+str(reads)+'; command grep "$@"; };\n')
+            response=subprocess.run(['bash','-c',prelude+command],capture_output=True,text=True)
+            calls.append(command);return {'exit_code':response.returncode,'stdout':response.stdout,'stderr':response.stderr}
+        with patch.object(ex,'ssh',side_effect=ssh),patch.object(ex,'attempt_path',return_value={'shell':str(self.root)}):
+            ex.refresh('a',automatic=True);first=reads.read_text()
+            ex.refresh('a',automatic=True);self.assertEqual(reads.read_text(),first)
+            self.assertIn('qstat -f',calls[-1]);version[0]='two'
+            ex.refresh('a',automatic=True);self.assertGreater(len(reads.read_text()),len(first))
 
     def test_real_worker_restart_and_singleton_use_isolated_fake_ssh(self):
         self.record()
         shim=self.root/'bin';shim.mkdir();mode=self.root/'mode';mode.write_text('offline')
         ssh=shim/'ssh'
-        ssh.write_text('#!'+sys.executable+'\nimport os,pathlib,sys\nr=pathlib.Path(os.environ["FPILOT_WORKSPACE"])\nwith (r/"ssh-calls").open("a") as f:f.write(" ".join(sys.argv)+"\\n")\nif "-G" in sys.argv:print("hostname test.invalid\\nuser test\\nport 22");sys.exit(0)\nif (r/"mode").read_text()=="offline":sys.exit(255)\nprint("FPILOT_EXIT=0\\nFPILOT_TIMING=1\\njob_state = C")\n')
+        ssh.write_text('#!'+sys.executable+'\nimport os,pathlib,sys\nr=pathlib.Path(os.environ["FPILOT_WORKSPACE"])\nwith (r/"ssh-calls").open("a") as f:f.write(" ".join(sys.argv)+"\\n")\nif "-G" in sys.argv:print("hostname test.invalid\\nuser test\\nport 22");sys.exit(0)\nif (r/"mode").read_text()=="offline":sys.exit(255)\nif sys.argv[-1]=="printf FPILOT_CONNECTION_OK":print("FPILOT_CONNECTION_OK");sys.exit(0)\nprint("FPILOT_EXIT=0\\nFPILOT_TIMING=1\\njob_state = C")\n')
         ssh.chmod(0o700)
         env=dict(os.environ,FPILOT_WORKSPACE=str(self.root),FPILOT_NOTIFICATIONS='0',FPILOT_REMOTE_DISABLED='0',FPILOT_SSH_MODE='legacy',PATH=str(shim)+os.pathsep+os.environ.get('PATH',''))
         cwd=Path(__file__).resolve().parents[1]

@@ -334,12 +334,12 @@ def status(key,project_id):
     return op
 
 
-def process(key):
+def process(key,capacity_context=None):
     """HTTP background work and the existing worker share the same durable lock."""
     with exclusive_lock(path(key).with_suffix('.lock')) as owned:
         if not owned:return
         op=read(key)
-        if op['state']=='CONFIRMED':_dispatch(op)
+        if op['state']=='CONFIRMED':_dispatch(op,capacity_context)
 
 
 def progress(op,info,phase):
@@ -410,8 +410,9 @@ def coordinates_changed(case,info):
     return [(p['key'],p['value']) for p in case.get('parameters',[])]!=[(p['key'],p['value']) for p in _parameters(case,info)]
 
 
-def _dispatch(op):
+def _dispatch(op,capacity_context=None):
     from . import candidate_pool
+    capacity_context={} if capacity_context is None else capacity_context
     for info in op['items']:
         if info['dispatch_state']!='PENDING':continue
         try:
@@ -461,7 +462,7 @@ def _dispatch(op):
                 if record is None:
                     purpose='wannier90' if info['window'] else 'vasp'
                     progress(op,info,'PROBING')
-                    probe=servers.capacity_probe(info['config'],purpose=purpose)
+                    probe=servers.capacity_probe(info['config'],purpose=purpose,context=capacity_context)
                     choices=[{'node':info['node'],'cores':info['cores']}]
                     rendered=None
                     for choice in choices:
@@ -523,11 +524,12 @@ def holds_item(operation_id,item_id):
     return bool(item and item['dispatch_state'] in ('PENDING','FAILED'))
 
 
-def tick():
+def tick(capacity_context=None):
+    capacity_context={} if capacity_context is None else capacity_context
     for p in (ex.ROOT/'task-recovery').glob('*.json'):
         op=json.loads(p.read_text())
         if op['state']!='CONFIRMED':continue
-        process(op['id'])
+        process(op['id'],capacity_context)
 
 
 def release_quota(project_id,key):

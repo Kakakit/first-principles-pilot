@@ -29,7 +29,7 @@ class HostRecoveryTests(unittest.TestCase):
             self.assertEqual(health.status('test')[0]['retry_count'],index)
         self.assertEqual(health.due(),[])
         self.assertEqual(health.status('test')[0]['state'],'PAUSED')
-        self.assertEqual(health.probe_command('test',()),'stat /same/path')
+        self.assertEqual(health.probe_command('test',()),'printf FPILOT_CONNECTION_OK')
         with self.assertRaises(health.Deferred):health.claim('test',(),retry=True)
         # A second process sees the same persisted pause; no SSH is involved.
         code='from backend import remote_health as h;from pathlib import Path;h.ROOT=Path(__import__("sys").argv[1]);print(h.status("test")[0]["state"])'
@@ -55,7 +55,8 @@ class HostRecoveryTests(unittest.TestCase):
     def test_manual_failure_does_not_restart_automatic_budget(self):
         self.fail_first();health.finish(health.claim('test',(),retry='manual'),'offline')
         self.assertEqual(health.status('test')[0]['retry_count'],0)
-        self.assertEqual(health.status('test')[0]['next_retry_at'],1900)
+        self.assertEqual(health.status('test')[0]['state'],'PAUSED')
+        self.assertIsNone(health.status('test')[0]['next_retry_at'])
     def test_expired_queue_item_cannot_execute_later(self):
         session=transport.Session('test','normal');future=concurrent.futures.Future()
         item={'job':{'timeout':1},'future':future,'scope':None,'mutating':True,'queued':time.monotonic(),
@@ -179,10 +180,11 @@ class BoundedOutputTests(unittest.TestCase):
         self.assertTrue(receipt['stdout_truncated'])
     def test_scheduler_batch_does_not_read_output_files(self):
         records=[{'id':key,'job_id':key+'.node','state':'RUNNING','config':{'alias':'test','scheduler':'pbs'}} for key in ('11','12')]
-        receipt={'exit_code':0,'stdout':'FPILOT_MONITOR_ID=11\njob_state = R\nFPILOT_MONITOR_ID=12\njob_state = Q\n','stderr':''}
+        receipt={'exit_code':0,'stdout':'Job Id: 11.node\n job_state = R\nJob Id: 12.node\n job_state = Q\n','stderr':''}
         with patch.object(remote_monitor.ex,'ssh',return_value=receipt) as ssh:
             result=remote_monitor.batch(records)
         self.assertEqual(ssh.call_count,1)
+        self.assertEqual(ssh.call_args.args[1].count('qstat '),1)
         self.assertNotIn('OUTCAR',ssh.call_args.args[1]);self.assertNotIn('OSZICAR',ssh.call_args.args[1])
         self.assertEqual(remote_monitor.active_state(records[0],result['11']),'RUNNING')
         self.assertEqual(remote_monitor.active_state(records[1],result['12']),'QUEUED')

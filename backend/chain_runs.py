@@ -682,13 +682,14 @@ def _quota_available(alias):
     return (limits['max_inflight_total'] is None or len(active)<limits['max_inflight_total']) and (limits['max_inflight_per_host'] is None or sum(item['config']['alias']==alias for item in active)<limits['max_inflight_per_host'])
 
 
-def tick():
+def tick(capacity_context=None):
+    capacity_context={} if capacity_context is None else capacity_context
     with closing(database()) as db:
         ids = [row[0] for row in db.execute(
             "SELECT id FROM chain_runs WHERE state='ACTIVE' ORDER BY rowid")]
     for run_id in ids:
         try:
-            _tick_one(run_id)
+            _tick_one(run_id,capacity_context)
         except Exception as exc:
             run = get(run_id)
             run['last_worker_error'] = control.redact(str(exc))[:1000]
@@ -698,15 +699,15 @@ def tick():
                 pass
 
 
-def _tick_one(run_id):
+def _tick_one(run_id,capacity_context=None):
     with _dispatch_lock(run_id) as owned:
         if owned:
-            return _dispatch_pass(run_id)
+            return _dispatch_pass(run_id,capacity_context)
 
 
-def _dispatch_pass(run_id):
+def _dispatch_pass(run_id,capacity_context=None):
     try:
-        _advance(run_id)
+        _advance(run_id,capacity_context)
     except Exception as exc:
         current = get(run_id)
         if current['state'] == 'ACTIVE':
@@ -721,7 +722,7 @@ def _dispatch_pass(run_id):
             _update_dispatch(run_id, state='FINISHED', finished_at=ex.now())
 
 
-def _advance(run_id):
+def _advance(run_id,capacity_context=None):
     run = get(run_id)
     if recycle.inactive('chains',run['id'],run) or run.get('local_cleanup_blocker'):return
     if run['state'] != 'ACTIVE':
@@ -729,7 +730,7 @@ def _advance(run_id):
     by_id = {step['node_id']: step for step in run['steps']}
     authorization = run['authorization']
     probes = {}
-    capacity_context = {}
+    capacity_context = {} if capacity_context is None else capacity_context
     for step in run['steps']:
         from .task_recovery import holds_item
         if holds_item(step.get('recovery_operation_id'),step['node_id']):continue

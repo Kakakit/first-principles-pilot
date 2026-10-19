@@ -137,6 +137,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
   const [pointSize,setPointSize]=useState(0.5);
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[title,setTitle]=useState('');
   const exporting=useRef(false),[saving,setSaving]=useState(false);
+  const seriesQueue=useRef<{running:boolean;pending?:()=>Promise<void>}>({running:false});
 
   const candidateLabel=(item:Candidate)=>{
     const node=project.nodes.find(row=>row.id===(item.node_id||item.execution_scope));
@@ -171,8 +172,15 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
   useEffect(()=>{
     if(!visible||job?.state!=='READY'||!Number.isFinite(emin)||!Number.isFinite(emax)||emin>=emax)return;
     let cancelled=false;const controller=new AbortController();
-    const timer=window.setTimeout(()=>void api('/api/interactive-plots/series',{cache_id:job.id,selected:selected.map(item=>{const [element,orbital]=item.split('|');return {element,orbital};}),emin,emax},controller.signal).then(value=>{if(!cancelled)setData(value);}).catch(caught=>{if(!cancelled)setError((caught as Error).message);}),120);
-    return ()=>{cancelled=true;controller.abort();window.clearTimeout(timer);};
+    const remote=Boolean(meta?.remote_parts&&Object.keys(meta.remote_parts).length);
+    const run=async()=>{
+      const queue=seriesQueue.current;
+      queue.pending=async()=>{if(cancelled)return;try{const value=await api('/api/interactive-plots/series',{cache_id:job.id,selected:selected.map(item=>{const [element,orbital]=item.split('|');return {element,orbital};}),emin,emax},controller.signal);if(!cancelled)setData(value);}catch(caught){if(!cancelled)setError((caught as Error).message);}};
+      if(queue.running)return;queue.running=true;
+      try{while(queue.pending){const request=queue.pending;queue.pending=undefined;await request();}}finally{queue.running=false;}
+    };
+    const timer=window.setTimeout(()=>void run(),remote?500:120);
+    return ()=>{cancelled=true;if(!remote)controller.abort();window.clearTimeout(timer);};
   },[visible,job?.state,job?.id,selected,emin,emax]);
   const prepare=async(force=false)=>{setError('');if(force)setData(null);try{setJob(await api('/api/interactive-plots/prepare',{project_id:projectId,band_attempt_id:bandId||null,dos_attempt_id:dosId||null,force}));}catch(caught){setError((caught as Error).message);}};
   const toggle=(item:string)=>{setData(null);setSelected(old=>old.includes(item)?old.filter(value=>value!==item):[...old,item]);};

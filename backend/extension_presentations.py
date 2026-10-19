@@ -109,8 +109,9 @@ def generate(record,view,dest,entry):
              'view_state':json.loads((dest/'state.json').read_text()) if (dest/'state.json').is_file() else {'revision':0,'value':{}}}
     if record['location']=='local':
         p.atomic_json(dest/'request.json',request)
+        from .analysis_queue import subprocess_environment
         response=subprocess.run([view['python'],str(p.inside(dest/'package',entry)),'render','--request',str(dest/'request.json')],
-            cwd=dest,capture_output=True,text=True,timeout=180,env={**os.environ,'PYTHONDONTWRITEBYTECODE':'1'})
+            cwd=dest,capture_output=True,text=True,timeout=180,env=subprocess_environment((record.get('runtime') or {}).get('cores')))
         if response.returncode:raise ValueError((response.stderr or response.stdout)[-2000:])
         manifest=validate(json.loads(response.stdout),output)
     else:
@@ -128,7 +129,9 @@ def remote_generate(record,view,dest,entry,request):
         archive.add(dest/'package',arcname='package',filter=lambda item:None if '__pycache__' in item.name else item)
         archive.add(dest/'request.json',arcname='request.json')
     command='set -e\ndest='+remote_paths.shell_path(remote_dir)+'\ntest ! -e "$dest"\nmkdir -p "$dest/outputs"\ntar -xzf - -C "$dest"\ncd "$dest"\nexport PYTHONDONTWRITEBYTECODE=1\n'+shlex.quote(view['python'])+' '+shlex.quote('package/'+entry)+' render --request request.json'
-    response=ex.ssh(record['runtime']['alias'],command,stream.getvalue(),timeout=180,mutating=True)
+    from .analysis_queue import slot,environment
+    with slot(record['runtime']['alias']):
+        response=ex.ssh(record['runtime']['alias'],environment(record['runtime'].get('cores'))+command,stream.getvalue(),timeout=180,mutating=True,lane='analysis')
     if response.get('exit_code')!=0:raise ValueError('服务器展示生成未完成：'+response.get('stderr','')[-1500:]+'；原计算不会重跑')
     manifest=json.loads(response['stdout'])
     assets=manifest.get('assets') or []

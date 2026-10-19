@@ -192,6 +192,7 @@ class ExtensionHostTests(unittest.TestCase):
                 dest=self.root/case;(dest/'package/scripts').mkdir(parents=True)
                 cli="import json,sys,time\naction=sys.argv[1]\nif action=='doctor': print(json.dumps({'ready': "+str(case!='environment')+"}))\nelif action=='check': print(json.dumps({'status': '"+('NOT_APPLICABLE' if case=='not-applicable' else 'APPLICABLE')+"'}))\nelse:\n time.sleep("+('20' if case=='timeout' else '0')+")\n sys.exit(7)\n"
                 (dest/'package/scripts/cli.py').write_text(cli)
+                shutil.copy2(BASE/'backend/extension_process.py',dest/'extension-runner.py')
                 (dest/'launch.sh').write_text(remote.script(runtime,str(dest),'scripts/cli.py','ssh',timeout=1))
                 response=subprocess.run(['bash',str(dest/'launch.sh')],capture_output=True,text=True,timeout=8)
                 self.assertEqual(response.returncode,expected,response.stderr)

@@ -1,5 +1,6 @@
 """One frozen-input PBS/Slurm attempt with at-most-once dispatch and evidence refresh."""
 import hashlib
+import base64
 import io
 import json
 import re
@@ -1074,7 +1075,24 @@ def assert_recovery_target(record):
             raise ValueError('实际 SSH 连接目标已改变；请恢复原服务器连接后核查原作业，不会重投')
 
 
-def refresh(key, poll_receipt=None):
+def file_status_command(record,path,command,names):
+    """Cache only file evidence; scheduler history must remain outside this block."""
+    cached=record.get('status_file_snapshot') or {}
+    stamp="stat -c '%n|%d|%i|%s|%y|%z' -- "+' '.join(map(shlex.quote,names))+" 2>/dev/null || true"
+    return ('cd '+path+' || exit 3\nfile_stamp=$('+stamp+')\n'
+            +'printf "FPILOT_FILE_EVIDENCE_BEGIN\\n"\n'
+            +'if test "$file_stamp" = '+shlex.quote(cached.get('stamp','!unobserved'))+'; then\n'
+            +'printf %s '+shlex.quote(cached.get('output',''))+'\nelse\n'+command+'\nfi\n'
+            +'test "$file_stamp" = "$('+stamp+')" || { printf "FPILOT_FILES_CHANGED\\n"; exit 42; }\n'
+            +'printf "FPILOT_FILE_EVIDENCE_END\\nFPILOT_FILE_STAMP="\nprintf %s "$file_stamp" | base64 | tr -d "\\n"\nprintf "\\n"\n')
+
+
+def remember_file_status(record,receipt):
+    files=re.search(r'FPILOT_FILE_EVIDENCE_BEGIN\n(.*?)FPILOT_FILE_EVIDENCE_END\nFPILOT_FILE_STAMP=([^\n]*)',receipt.get('stdout',''),re.S)
+    if files:record['status_file_snapshot']={'output':files.group(1),'stamp':base64.b64decode(files.group(2)).decode()}
+
+
+def refresh(key, poll_receipt=None, automatic=False):
     if recycle.inactive('attempts',key,get(key)):return get(key)
     record=get(key)
     if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'):
@@ -1094,14 +1112,29 @@ def refresh(key, poll_receipt=None):
         observed=active_state(record,poll_receipt)
         if observed and observed!='EXITING':
             previous=record.get('updated_at')
-            evidence=dict(record.get('evidence') or {});evidence['scheduler']=record['config']['scheduler']
-            evidence['scheduler_state']={'QUEUED':'Q','RUNNING':'R','HELD':'H'}.get(observed,observed) if record['config']['scheduler']=='pbs' else {'QUEUED':'PENDING','RUNNING':'RUNNING','HELD':'SUSPENDED'}.get(observed,observed)
+            evidence=dict(record.get('evidence') or {});evidence['scheduler']=scheduler_name(record)
+            evidence['scheduler_state']={'QUEUED':'Q','RUNNING':'R','HELD':'H'}.get(observed,observed) if scheduler_name(record)=='pbs' else {'QUEUED':'PENDING','RUNNING':'RUNNING','HELD':'SUSPENDED'}.get(observed,observed)
             record.update(state=observed,updated_at=now(),status_receipt=poll_receipt,evidence=evidence,
                           tracking_error='',tracking_checked_at=now(),state_checked_at=now())
             return save(record,expected_updated_at=previous)
+    if automatic and record.get('automatic_audit_paused'):return record
+    if not automatic:record.pop('automatic_audit_paused',None)
+    if automatic and record['state']=='UNKNOWN' and not record.get('job_id'):
+        previous=record.get('updated_at');assert_recovery_target(record)
+        path=remote_paths.shell_path(attempt_path(record)['shell'])
+        receipt=ssh(record['config']['alias'],'cd '+path+' || exit 3\nif test -s .job-id; then head -c 256 .job-id; fi',timeout=15,mutating=False)
+        job=receipt.get('stdout','').strip().split(';')[0]
+        if receipt.get('exit_code') is None:record['automatic_audit_paused']=True
+        if re.fullmatch(r'\d+(?:_\d+)?(?:\.[A-Za-z0-9_.-]+)?',job):record['job_id']=job
+        record.update(tracking_checked_at=now(),updated_at=now(),
+                      tracking_error=receipt.get('stderr') or ('' if record.get('job_id') else '尚未取得 job ID；保留 UNKNOWN，可手动核对原目录'))
+        return save(record,expected_updated_at=previous)
     if record.get('kind') in ('wannier90', 'wannier90-plot'):
         from . import wannier_execution
-        return wannier_execution.refresh(key)
+        result=wannier_execution.refresh(key,automatic=automatic)
+        if automatic and result.get('tracking_error') and not result.get('automatic_audit_paused'):
+            result['automatic_audit_paused']=True;return save(result)
+        return result
     if record['state'] in ('PREPARED','FAILED'):return record
     if record['state']=='COMPLETED':
         terminal={'pbs':'C','slurm':'COMPLETED'}[scheduler_name(record)]
@@ -1135,6 +1168,9 @@ if test -f INCAR && test -f OSZICAR; then
   fi
 fi
 '''
+    # Reuse file evidence while metadata is unchanged, but still query terminal scheduler receipts.
+    if automatic:
+        command=file_status_command(record,path,command,['OUTCAR','OSZICAR','INCAR','vasp.out','.exit-status','.job-id'])
     scheduler=scheduler_name(record)
     if record.get('job_id'):
         if scheduler=='pbs':
@@ -1147,8 +1183,13 @@ fi
         command+=recovered_job_command(scheduler)
     receipt=ssh(record['config']['alias'],command,timeout=30)
     if receipt.get('exit_code') is None:
-        record.update(tracking_error=receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),status_receipt=receipt,updated_at=now())
+        record.update(tracking_error=receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),status_receipt=receipt,updated_at=now(),automatic_audit_paused=True)
         return save(record,expected_updated_at=expected_updated_at)
+    if 'FPILOT_FILES_CHANGED' in receipt.get('stdout',''):
+        record.update(tracking_error='结果在核查期间变化；保留原状态与证据',tracking_checked_at=now(),updated_at=now())
+        return save(record,expected_updated_at=expected_updated_at)
+    if automatic:
+        remember_file_status(record,receipt)
     match=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',receipt['stdout'],re.M)
     if match and not record.get('job_id'):record['job_id']=match.group(1)
     out=receipt['stdout'];exit_match=re.search(r'^FPILOT_EXIT=(\d+)\s*$',out,re.M)

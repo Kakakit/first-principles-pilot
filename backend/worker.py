@@ -60,7 +60,7 @@ def tick(refresh=None, notify=False):
                 timeout=r.get('dispatch_timeout_seconds',900 if any(item.get('mode')=='reflink-or-copy' for item in r.get('source_file_plan',{}).values()) else 180)
                 if age<timeout+65:continue
             try:
-                updated=refresh(r['id']) if custom_refresh is not None or r['id'] not in scheduler else ex.refresh(r['id'],poll_receipt=scheduler[r['id']])
+                updated=refresh(r['id']) if custom_refresh is not None else ex.refresh(r['id'],poll_receipt=scheduler.get(r['id']),automatic=True)
                 checked+=1
                 if updated['state']=='FAILED':control.freeze_failure(r['id'])
                 if notify and updated['state'] in ('FAILED','COMPLETED'):notify_terminal(r['id'])
@@ -81,16 +81,17 @@ def tick(refresh=None, notify=False):
         if recycle.inactive('attempts',key,ex.get(key)):continue
         if not (ex.ROOT/'failure-snapshots'/(key+'.json')).exists():control.freeze_failure(key)
     from . import task_recovery
-    try:task_recovery.tick()
+    capacity_context={}
+    try:task_recovery.tick(capacity_context=capacity_context)
     except Exception as exc:errors.append({'batch':'task-recovery','message':control.redact(str(exc))[:1000]})
     from . import scans
     try:
-        scans.tick()
+        scans.tick(capacity_context=capacity_context)
     except Exception as exc:
         errors.append({'batch':'scan-dispatch','message':control.redact(str(exc))[:1000]})
     from . import chain_runs
     try:
-        chain_runs.tick()
+        chain_runs.tick(capacity_context=capacity_context)
     except Exception as exc:
         errors.append({'batch':'chain-dispatch','message':control.redact(str(exc))[:1000]})
     from . import extension_runs

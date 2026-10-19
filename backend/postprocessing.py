@@ -205,7 +205,7 @@ def check_applicability(attempt_id, extension_id, options):
 
 
 def run(attempt_id, extension_id, confirmed=False, options=None):
-    eligible = next((item for item in catalog(attempt_id) if item['id'] == extension_id), None)
+    eligible = next((item for item in catalog(attempt_id,listing=artifacts.refresh(attempt_id)) if item['id'] == extension_id), None)
     if not eligible or extension_id not in extension_sdk.available_ids():
         raise ValueError('该扩展未安装到本项目')
     if not eligible['ready']:

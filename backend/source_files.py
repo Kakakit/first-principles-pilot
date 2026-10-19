@@ -3,6 +3,12 @@ import re
 import shlex
 
 from . import remote_paths
+LIGHTWEIGHT_BYTES = 1024 * 1024
+INPUT_NAMES = {'INCAR','POSCAR','CONTCAR','KPOINTS','POTCAR'}
+
+
+def content_required(name,size,mode):
+    return mode=='full' or name in INPUT_NAMES or name.endswith('.win') or (not is_large(name) and size<=LIGHTWEIGHT_BYTES)
 
 
 def is_large(name):
@@ -17,10 +23,14 @@ def snapshot(alias, path, names, ssh, mode='lightweight'):
         if not re.fullmatch(r'[A-Za-z0-9_.-]+', name):
             raise ValueError('来源文件名无效')
         quoted = shlex.quote(name)
+        digest="sha256sum "+quoted+" | awk '{printf $1\"|\"}'"
+        if mode=='lightweight':
+            if is_large(name):digest="printf -- '-|'"
+            elif name not in INPUT_NAMES and not name.endswith('.win'):
+                digest='if test "$(stat -c %s '+quoted+')" -gt '+str(LIGHTWEIGHT_BYTES)+"; then printf -- '-|'; else "+digest+'; fi'
         commands += ['test -f '+quoted+' && test ! -L '+quoted+' && test -s '+quoted,
                      "printf 'FPILOT_FILE="+name+"|'",
-                     ("printf -- '-|'" if mode == 'lightweight' and is_large(name) else
-                      "sha256sum "+quoted+" | awk '{printf $1\"|\"}'"),
+                     digest,
                      "stat -c '%s|%y' "+quoted]
     receipt = ssh(alias, '\n'.join(commands)+'\n', timeout=180)
     if receipt['exit_code'] != 0:
@@ -33,7 +43,7 @@ def snapshot(alias, path, names, ssh, mode='lightweight'):
                        **({'sha256': sha} if sha != '-' else {})}
     if set(found) != set(names) or any(item['size_bytes'] <= 0 for item in found.values()):
         raise ValueError('来源文件核验回执不完整')
-    if any(bool(info.get('sha256')) != (mode == 'full' or not is_large(name)) for name, info in found.items()):
+    if any(bool(info.get('sha256')) != content_required(name,info['size_bytes'],mode) for name, info in found.items()):
         raise ValueError('来源文件核验回执与所选策略不符')
     return found
 

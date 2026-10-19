@@ -165,7 +165,8 @@ def prepare(project_id: str, band_attempt_id: str | None = None, dos_attempt_id:
         job={'id':key,'source_attempt_ids':[a['id'] for a in (band,dos) if a],
              'state':'GENERATING','downloaded_bytes':0,'total_bytes':0,'current_file':'服务器解析绘图数据','error':''}
         JOBS[key]=job
-    threading.Thread(target=_compact_build,args=(key,project_id,band,dos,force),daemon=True).start()
+    from .analysis_queue import executor
+    executor.submit(_compact_build,key,project_id,band,dos,force)
     return dict(job)
 
 
@@ -323,6 +324,7 @@ def _generate_pbands(record: dict, elements: list[str]) -> tuple[str, str, list[
         'for name in ' + ' '.join(VASPKIT_INPUTS) + '; do cp -- "$source_dir/$name" "$scratch_dir/$name"; done',
         'cd "$scratch_dir"',
         'if ' + shlex.quote(tool) + ' -task 213 >vaspkit.log 2>&1; then :; else',
+        "  grep -Eiq '(unknown|unrecognized|invalid|illegal) (option|argument).*[-]task' vaspkit.log || { tail -30 vaspkit.log >&2; exit 1; }",
         '  rm -f -- PBAND_*.dat KLABELS KLINES.dat',
         "  printf '213\\n' | " + shlex.quote(tool) + ' >vaspkit.log 2>&1 || { tail -30 vaspkit.log >&2; exit 1; }',
         'fi',
@@ -368,18 +370,30 @@ def _reciprocal_lattice(poscar: Path) -> np.ndarray:
     return 2 * np.pi * np.linalg.inv(lattice).T
 
 
+def _outcar_info(outcar: Path) -> dict:
+    found={};noncollinear=False;digest=hashlib.sha256()
+    patterns={'precise':r'Fermi energy:\s*('+NUMBER+')','short':r'E-fermi\s*:\s*('+NUMBER+')',
+              'vbm_eV':r'val\. band max:\s*('+NUMBER+')','cbm_eV':r'cond\. band min:\s*('+NUMBER+')'}
+    with outcar.open('rb') as stream:
+        for raw in stream:
+            digest.update(raw);line=raw.decode(errors='replace')
+            noncollinear=noncollinear or bool(re.search(r'\b(?:LSORBIT|LNONCOLLINEAR)\s*=\s*T\b',line,re.I))
+            for name,pattern in patterns.items():
+                values=re.findall(pattern,line)
+                if values:found[name]=float(values[-1])
+    result=None
+    if 'precise' in found or 'short' in found:
+        result={'fermi_eV':found.get('precise',found.get('short')),
+                'fermi_source':'Fermi energy' if 'precise' in found else 'E-fermi',
+                'vbm_eV':found.get('vbm_eV'),'cbm_eV':found.get('cbm_eV')}
+        if result['vbm_eV'] is None or result['cbm_eV'] is None or result['cbm_eV']<=result['vbm_eV']:
+            result['vbm_eV']=result['cbm_eV']=None
+    return {'reference':result,'noncollinear':noncollinear,'sha256':digest.hexdigest()}
+
+
 def _fermi(outcar: Path) -> dict:
-    text = outcar.read_text(errors='replace')
-    precise = re.findall(r'Fermi energy:\s*(' + NUMBER + r')', text)
-    short = re.findall(r'E-fermi\s*:\s*(' + NUMBER + r')', text)
-    if not precise and not short:
-        raise ValueError('OUTCAR 未找到费米能')
-    result = {'fermi_eV': float((precise or short)[-1]), 'fermi_source': 'Fermi energy' if precise else 'E-fermi'}
-    for key, pattern in (('vbm_eV', 'val. band max:'), ('cbm_eV', 'cond. band min:')):
-        found = re.findall(re.escape(pattern) + r'\s*(' + NUMBER + r')', text)
-        result[key] = float(found[-1]) if found else None
-    if result['vbm_eV'] is None or result['cbm_eV'] is None or result['cbm_eV'] <= result['vbm_eV']:
-        result['vbm_eV'] = result['cbm_eV'] = None
+    result=_outcar_info(outcar)['reference']
+    if result is None:raise ValueError('OUTCAR 未找到费米能')
     return result
 
 
@@ -590,8 +604,13 @@ def _pband(files: list[Path], elements: list[str], mode: str, eigenval: Path, ta
 
 
 def _is_noncollinear(outcar: Path) -> bool:
-    text = outcar.read_text(errors='replace')
-    return bool(re.search(r'\b(?:LSORBIT|LNONCOLLINEAR)\s*=\s*T\b', text, re.I))
+    return _outcar_info(outcar)['noncollinear']
+
+
+def _unsupported_vaspkit_cli(log: Path) -> bool:
+    with log.open('rb') as stream:
+        stream.seek(max(0,log.stat().st_size-8192));tail=stream.read().decode(errors='replace')
+    return bool(re.search(r'(unknown|unrecognized|invalid|illegal)\s+(option|argument)[^\n]{0,80}-task',tail,re.I))
 
 
 def _kpath_labels(kpoints: Path, nk: int) -> list[dict]:

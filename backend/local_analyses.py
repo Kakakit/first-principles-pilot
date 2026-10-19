@@ -22,7 +22,7 @@ def _source(attempt_id, project_id, node_id, directory, prefix):
         raise ValueError('请选择对应计算节点已完成的 attempt')
     if not (record.get('evidence') or {}).get('vasp_timing'):
         raise ValueError('来源缺少 VASP 程序完成证据')
-    files = {item['path']: item for item in artifacts.listing(attempt_id)['files']}
+    files = {item['path']: item for item in artifacts.refresh(attempt_id)['files']}
     geometry = 'POSCAR' if 'POSCAR' in files else 'CONTCAR'
     if geometry not in files or 'OUTCAR' not in files:
         raise ValueError('来源缺少 POSCAR/CONTCAR 或 OUTCAR')
