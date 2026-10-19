@@ -5,12 +5,12 @@ export function bonds(raw,atoms){
  return raw.map(v=>({id:v[0],i:v[1],j:v[2],R:v.slice(3,6),r:v[6],J:v[7],DMI:v[8],Jani:v[9],si:symbols.get(v[1]),sj:symbols.get(v[2]),pair:pairName(symbols.get(v[1]),symbols.get(v[2]))}));
 }
 export function selectBonds(rows,f){
- return rows.filter(r=>f.pairs.includes(r.pair)&&(!f.atomI||r.i===Number(f.atomI))&&(!f.atomJ||r.j===Number(f.atomJ))&&(f.rMin===''||r.r>=Number(f.rMin))&&(f.rMax===''||r.r<=Number(f.rMax)));
+ return rows.filter(r=>f.pairs.includes(r.pair)&&(!f.atomI||r.i===Number(f.atomI))&&(!f.atomJ||r.j===Number(f.atomJ))&&(f.rMin===''||r.r>=Number(f.rMin))&&(f.rMax===''||r.r<Number(f.rMax))&&['Rx','Ry','Rz'].every((key,index)=>f[key]===undefined||f[key]===''||r.R[index]===Number(f[key])));
 }
 export function selectJ(rows,f){return rows.filter(r=>(f.jMin===''||r.J>=Number(f.jMin))&&(f.jMax===''||r.J<=Number(f.jMax)));}
 export function orderRows(rows,key='r',direction='asc'){
  const sign=direction==='desc'?-1:1;
- return [...rows].sort((a,b)=>{const x=a[key],y=b[key];const d=typeof x==='number'&&typeof y==='number'?x-y:String(x??'').localeCompare(String(y??''));return sign*d||a.id-b.id||(a.oi||0)-(b.oi||0)||(a.oj||0)-(b.oj||0);});
+ return [...rows].sort((a,b)=>{const x=key==='absJ'?Math.abs(a.J):a[key],y=key==='absJ'?Math.abs(b.J):b[key];const d=typeof x==='number'&&typeof y==='number'?x-y:String(x??'').localeCompare(String(y??''));return sign*d||a.id-b.id||(a.oi||0)-(b.oi||0)||(a.oj||0)-(b.oj||0);});
 }
 export function validateMapping(rows,atoms){
  const bounds=new Map(atoms.map(a=>[a.index,a.orbitals]));const seen=new Set();
@@ -37,4 +37,19 @@ export function csv(rows,orbital=false){
  const quote=value=>'"'+String(value??'').replaceAll('"','""')+'"';
  const body=rows.map(r=>[r.si,r.i,r.sj,r.j,JSON.stringify(r.R),r.r,r.J,...(orbital?[r.oi,r.li,r.gi,r.oj,r.lj,r.gj,r.totalJ]:[]),r.DMI?JSON.stringify(r.DMI):'',r.Jani?JSON.stringify(r.Jani):''].map(quote).join(','));
  return '\ufeff'+columns.join(',')+'\n'+body.join('\n')+'\n';
+}
+export function shells(rows,tolerance=0.001){
+ const output=[];
+ for(const pair of [...new Set(rows.map(r=>r.pair))].sort()){
+  const sorted=orderRows(rows.filter(r=>r.pair===pair),'r');let current=[];
+  const flush=()=>{if(!current.length)return;const values=current.map(r=>r.J).sort((a,b)=>a-b),middle=Math.floor(values.length/2);output.push({pair,minR:current[0].r,maxR:current.at(-1).r,minJ:values[0],maxJ:values.at(-1),medianJ:values.length%2?values[middle]:(values[middle-1]+values[middle])/2,count:current.length,representative:current.reduce((a,b)=>Math.abs(b.J-values[middle])<Math.abs(a.J-values[middle])?b:a).id});};
+  for(const row of sorted){if(current.length&&row.r-current[0].r>tolerance){flush();current=[];}current.push(row);}flush();
+ }
+ return output;
+}
+export function validateFilters(f){
+ for(const key of ['rMin','rMax','jMin','jMax'])if(f[key]!==''&&f[key]!==undefined&&!Number.isFinite(Number(f[key])))throw Error('筛选值必须为有限数字');
+ if(f.rMin!==''&&Number(f.rMin)<0||f.rMax!==''&&Number(f.rMax)<=0)throw Error('距离下界不能为负，上界须大于零');
+ if(f.rMin!==''&&f.rMax!==''&&Number(f.rMin)>=Number(f.rMax))throw Error('距离下界须小于上界');
+ if(f.jMin!==''&&f.jMax!==''&&Number(f.jMin)>Number(f.jMax))throw Error('J 下界不能大于上界');
 }

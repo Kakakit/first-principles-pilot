@@ -78,6 +78,13 @@ class TB2JV2Tests(unittest.TestCase):
                     argv=json.loads((root/'outputs/command.json').read_text())['argv'];self.assertEqual(argv[:3],[sys.executable,'-m','TB2J.scripts.wann2J']);self.assertIn('--np',argv);self.assertNotIn('qsub',' '.join(argv));self.assertNotIn('FPILOT_ALLOCATED',' '.join(argv))
                     if mode=='collinear' and combination=='tb':self.assertEqual(argv[argv.index('--index_magnetic_atoms')+1:argv.index('--prefix_up')],['1','3'])
                     self.assertEqual(before,{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in (root/'inputs').rglob('*') if p.is_file()})
+    def test_cutoff_is_frozen_in_official_argv_and_outside_native_results_are_rejected(self):
+        req=request(self.root/'inside','collinear');req['options']['rcut_angstrom']=9;self.cli('run',req)
+        command=json.loads((Path(req['output_dir'])/'command.json').read_text());self.assertEqual(command['options']['rcut_angstrom'],9);self.assertEqual(command['argv'][command['argv'].index('--rcut')+1],'9')
+        outside=request(self.root/'outside','collinear');outside['options']['rcut_angstrom']=7;path=self.root/'outside-request.json';path.write_text(json.dumps(outside))
+        result=subprocess.run([sys.executable,str(BASE/'scripts/cli.py'),'run','--request',str(path)],capture_output=True,text=True,env={**os.environ,'PYTHONPATH':str(FAKE)},timeout=35)
+        self.assertEqual(result.returncode,2);self.assertIn('超出请求最大距离',result.stderr);self.assertTrue((Path(outside['output_dir'])/'TB2J_results/TB2J.pickle').is_file())
+
     def test_optional_inputs_match_source_id_when_first_source_omitted(self):
         req=request(self.root,'collinear','tb');seed='wannier90.2';path=self.root/'inputs/down'/(seed+'_centres.xyz');req['inputs']['centres']=[{'path':str(path),'name':path.name,'source_id':req['sources'][1]['id'],'size_bytes':path.stat().st_size}]
         self.assertEqual(self.cli('check',req)['status'],'APPLICABLE')

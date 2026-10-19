@@ -2,7 +2,7 @@
   "schema": "fpilot.extension.v2",
   "id": "tb2j",
   "name": "TB2J 交换参数与轨道分解",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "从完成的 Wannier 来源计算 J、SOC DMI/各向异性和可选轨道分解。在来源服务器直接执行 TB2J，原文件保留。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
@@ -85,32 +85,49 @@
       "mode": {
         "type": "string",
         "title": "自旋模式",
-        "enum": [
-          "auto",
-          "collinear",
-          "spinor"
-        ],
         "default": "auto",
-        "description": "SOC：一个完成的 spinor attempt；共线：同父来源的 .1 上自旋和 .2 下自旋。"
+        "description": "SOC：一个完成的 spinor attempt；共线：同父来源的 .1 上自旋和 .2 下自旋。",
+        "oneOf": [
+          {
+            "const": "auto",
+            "title": "自动识别来源"
+          },
+          {
+            "const": "collinear",
+            "title": "共线 · 上/下自旋双通道"
+          },
+          {
+            "const": "spinor",
+            "title": "SOC · spinor 单通道"
+          }
+        ]
       },
       "energy_source": {
         "type": "string",
         "title": "费米能来源",
-        "enum": [
-          "frozen",
-          "manual"
-        ],
         "default": "frozen",
-        "description": "优先使用所选 Wannier attempt 冻结的 DFT 能量参考；缺少时选择 manual 并填写数值和来源。"
+        "description": "优先使用所选 Wannier attempt 冻结的 DFT 能量参考；缺少时选择 manual 并填写数值和来源。",
+        "oneOf": [
+          {
+            "const": "frozen",
+            "title": "使用来源冻结的费米能（默认）"
+          },
+          {
+            "const": "manual",
+            "title": "手动填写费米能与来源"
+          }
+        ]
       },
       "efermi_ev": {
         "type": "number",
-        "title": "手动费米能 E_F（eV，绝对能量）"
+        "title": "手动费米能 E_F（eV，绝对能量）",
+        "description": "仅在手动能量参考时填写：与本次 Hamiltonian 相同能量零点下的绝对费米能，单位 eV；不能直接填相对能量 0。"
       },
       "energy_note": {
         "type": "string",
         "title": "手动能量参考来源说明",
-        "maxLength": 2000
+        "maxLength": 2000,
+        "description": "说明手动费米能取自哪次计算、哪个文件；自动冻结参考可用时无需填写。"
       },
       "magnetic_elements": {
         "type": "array",
@@ -120,7 +137,8 @@
           "pattern": "^[A-Z][a-z]?$"
         },
         "uniqueItems": true,
-        "default": []
+        "default": [],
+        "description": "选择参与交换作用的元素，例如 Cr 和 Fe；将包含这些元素的全部原子。氧等配体仍保留在 Wannier 模型中，不必仅为保留配体而勾选它。"
       },
       "magnetic_atoms": {
         "type": "array",
@@ -147,63 +165,73 @@
           5,
           5
         ],
-        "description": "官方默认用于起步，不是收敛推荐。"
+        "description": "TB2J 在布里渊区积分的三个方向网格，不会重做 DFT/Wannier。更密通常更耗时，并扩大可表示的平移范围；默认 5×5×5 仅作起步，不能证明收敛。"
       },
       "emin_ev": {
         "type": "number",
         "title": "积分下界 E−E_F（eV）",
         "default": -14,
-        "description": "官方默认 -14 eV；需要独立检验积分区间。"
+        "description": "能量积分从 E_F 加此值开始，单位 eV。默认 −14；应覆盖与磁性交换有关的低能态。改变它会改变结果，需检查收敛。"
       },
       "emax_ev": {
         "type": "number",
         "title": "积分上界 E−E_F（eV）",
-        "default": 0
+        "default": 0,
+        "description": "能量积分到 E_F 加此值结束，单位 eV。默认 0 对应费米能；正值包含费米能以上的能量，需有明确研究用途，不是单纯提高精度。"
       },
       "nz": {
         "type": "integer",
         "title": "积分点数",
         "minimum": 1,
         "default": 100,
-        "description": "官方默认 100；不代表数值已收敛。"
+        "description": "能量积分的数值采样点数，默认 100。增大通常提高积分分辨率并增加耗时；需比较不同点数的 J 判断收敛。"
       },
       "rcut_angstrom": {
         "type": "number",
-        "title": "交换截断距离（Å，可留空）",
+        "title": "最大原子间距离（Å）",
         "exclusiveMinimum": 0,
-        "description": "留空沿用 TB2J 全部与 k 网格相容的 R。"
+        "description": "只计算 d 小于此数值的原子对。例如 9 表示 d < 9 Å；不是晶格平移 R 的整数大小。缩小范围会减少交换项；k 网格仍限制可覆盖范围。历史结果页可直接筛选距离，无需重算。",
+        "default": 9
       },
       "nproc": {
         "type": "integer",
         "title": "TB2J 并行进程",
         "minimum": 1,
         "default": 1,
-        "description": "服务器直接命令行运行，默认 1 个进程，无 PBS/Slurm 提交。"
+        "description": "同一服务器上的 TB2J 进程数，默认 1；并非调度器申请核数。不会提交 PBS/Slurm，也不会因为修改显示选项启动计算。"
       },
       "orb_decomposition": {
         "type": "boolean",
         "title": "输出轨道分解",
-        "default": false
+        "default": false,
+        "description": "同时保存每条交换作用的轨道贡献矩阵，便于点选查看热图；会增加结果体积。轨道标签自动读取已有投影，代表初始投影参考，不保证最终 WF 为纯原子轨道。"
       },
       "groupby": {
         "type": "string",
         "title": "SOC 基底顺序（必须明确选择）",
-        "enum": [
-          "spin",
-          "orbital"
-        ],
-        "description": "spin：所有 up 轨道后接所有 down；orbital：每个轨道的 up/down 相邻。"
+        "description": "spin：所有 up 轨道后接所有 down；orbital：每个轨道的 up/down 相邻。",
+        "oneOf": [
+          {
+            "const": "spin",
+            "title": "按自旋：全部 up 后接全部 down"
+          },
+          {
+            "const": "orbital",
+            "title": "按轨道：各轨道 up/down 相邻"
+          }
+        ]
       },
       "basis_confirmed": {
         "type": "boolean",
         "title": "已核对 SOC spinor 基底顺序",
-        "default": false
+        "default": false,
+        "description": "仅 SOC 需要；基底顺序影响 spinor Hamiltonian 的解释，不能由轨道数量猜测。共线计算无需确认。"
       },
       "orbital_mapping": {
         "type": "array",
         "title": "可选轨道标签与分组映射",
         "default": [],
-        "description": "轨道序号是该原子的 TB2J 轨道矩阵序号（从 1 开始）；不自动推断 dxy、t2g 或 eg。映射范围在读取实际矩阵时核验。",
+        "description": "高级、可选。通常无需填写：结果页会自动显示有文件证据的初始投影名称。仅在确实知道实际基底含义时覆盖标签，不会重算或改变 J。",
         "items": {
           "type": "object",
           "additionalProperties": false,
@@ -241,7 +269,8 @@
         "type": "string",
         "title": "分析说明",
         "default": "TB2J exchange analysis",
-        "maxLength": 2000
+        "maxLength": 2000,
+        "description": "可选备注，用于区分参数与用途；不影响 J 的数值。"
       }
     },
     "required": [
@@ -291,7 +320,8 @@
     },
     "orbital_mapping": {
       "ui:options": {
-        "orderable": false
+        "orderable": false,
+        "addable": true
       }
     },
     "magnetic_elements": {
@@ -299,7 +329,77 @@
       "ui:options": {
         "source_enum": "elements"
       }
-    }
+    },
+    "kmesh": {
+      "ui:options": {
+        "orderable": false,
+        "addable": false,
+        "removable": false
+      }
+    },
+    "ui:groups": [
+      {
+        "title": "常用参数",
+        "fields": [
+          "magnetic_elements",
+          "rcut_angstrom",
+          "kmesh",
+          "orb_decomposition"
+        ]
+      },
+      {
+        "title": "高级参数与来源解释",
+        "collapsed": true,
+        "fields": [
+          "mode",
+          "energy_source",
+          "efermi_ev",
+          "energy_note",
+          "magnetic_atoms",
+          "emin_ev",
+          "emax_ev",
+          "nz",
+          "nproc",
+          "groupby",
+          "basis_confirmed",
+          "orbital_mapping",
+          "description"
+        ]
+      }
+    ],
+    "ui:visibility": {
+      "groupby": {
+        "field": "mode",
+        "equals": "spinor",
+        "source_spinors": true
+      },
+      "basis_confirmed": {
+        "field": "mode",
+        "equals": "spinor",
+        "source_spinors": true
+      },
+      "efermi_ev": {
+        "field": "energy_source",
+        "equals": "manual"
+      },
+      "energy_note": {
+        "field": "energy_source",
+        "equals": "manual"
+      },
+      "orbital_mapping": {
+        "field": "orb_decomposition",
+        "equals": true
+      }
+    },
+    "ui:preview": [
+      "rcut_angstrom",
+      "magnetic_elements",
+      "kmesh",
+      "emin_ev",
+      "emax_ev",
+      "nz",
+      "orb_decomposition"
+    ]
   },
   "outputs": [
     "table",
@@ -312,6 +412,53 @@
     "tests/fixtures/v2/spinor/wannier90_tb.dat"
   ],
   "presentation": {
-    "entrypoint": "scripts/presentation.py"
+    "entrypoint": "scripts/presentation.py",
+    "location": "local",
+    "inputs": [
+      {
+        "path": "exchange.csv",
+        "required": true
+      },
+      {
+        "path": "orbitals.csv",
+        "required": false
+      },
+      {
+        "path": "command.json",
+        "required": true
+      },
+      {
+        "path": "result.json",
+        "required": true
+      },
+      {
+        "path": "TB2J_results/assigned_basis.txt",
+        "required": false
+      },
+      {
+        "path": "model/up.win",
+        "required": false
+      },
+      {
+        "path": "model/down.win",
+        "required": false
+      },
+      {
+        "path": "model/spinor.win",
+        "required": false
+      },
+      {
+        "path": "model/up_centres.xyz",
+        "required": false
+      },
+      {
+        "path": "model/down_centres.xyz",
+        "required": false
+      },
+      {
+        "path": "model/spinor_centres.xyz",
+        "required": false
+      }
+    ]
   }
 }

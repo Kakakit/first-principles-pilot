@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render existing TB2J JSON into an offline view; never invoke TB2J or SSH."""
+"""Render complete existing TB2J CSV/JSON into an offline view; never invoke TB2J or SSH."""
 import argparse
 import json
 import math
@@ -26,40 +26,35 @@ def key(row):
     return tuple(row['R'])+(row['atom_i'],row['atom_j'])
 
 
-def orbital_metadata(source,full,bounds):
-    atoms={r['atom_i']:r['symbol_i'] for r in full['exchange']}
-    atoms.update({r['atom_j']:r['symbol_j'] for r in full['exchange']})
-    win=next(iter(sorted((source/'model').glob('*.win'))),None)
-    text=win.read_text() if win else ''
-    block=re.search(r'begin\s+atoms_(?:cart|frac)\s*\n(.*?)end\s+atoms_(?:cart|frac)',text,re.S|re.I)
-    sites={};counts={}
-    if block:
-        symbols=[m.group(1) for line in block.group(1).splitlines() for m in [re.match(r'\s*([A-Z][a-z]?)\s+[-+.0-9]',line)] if m]
-        for index,symbol in enumerate(symbols,1):
-            counts[symbol]=counts.get(symbol,0)+1;sites[symbol+str(counts[symbol])]=index
-            if index in atoms and atoms[index]!=symbol:raise ValueError('Frozen model atom order differs from result')
-    basis_path=source/'TB2J_results/assigned_basis.txt'
-    basis=basis_path.read_text() if basis_path.is_file() else ''
-    basis_rows=[]
-    for line in basis.splitlines():
-        match=re.fullmatch(r'\s*([A-Z][a-z]?\d+)\|orb_(\d+)\s+(\d+)\s*',line)
-        if match and match.group(1) in sites:
-            basis_rows.append({'atom_index':sites[match.group(1)],'orbital_index':int(match.group(2)),'wannier_index':int(match.group(3))})
-    projection=re.search(r'begin\s+projections\s*\n(.*?)end\s+projections',text,re.S|re.I)
-    projection=projection.group(1).strip() if projection else ''
-    simple={};orders={'s':['s'],'p':['pz','px','py'],'d':['dz2','dxz','dyz','dx2-y2','dxy']}
-    for line in projection.splitlines():
-        match=re.fullmatch(r'\s*([A-Z][a-z]?)\s*:\s*([spd])\s*',line,re.I)
-        if match and match.group(1) not in simple:simple[match.group(1)]=orders[match.group(2).lower()]
-        elif match:simple[match.group(1)]=None
-    candidates=[]
-    for ai,symbol in sorted(atoms.items()):
-        order=simple.get(symbol)
-        matches=[r for r in basis_rows if r['atom_index']==ai]
-        if order and bounds.get(ai)==len(order) and len(matches)==len(order):
-            for index,label in enumerate(order,1):candidates.append({'atom_index':ai,'orbital_index':index,'label':label,'group':''})
-    return {'atoms':[{'index':ai,'symbol':symbol,'orbitals':bounds.get(ai,0)} for ai,symbol in sorted(atoms.items())],
-            'basis_text':basis,'basis_rows':basis_rows,'projections':projection,'candidate_mapping':candidates}
+def read_data(source):
+    """CSV is the complete native export, not the truncated result tables."""
+    command=json.loads((source/'command.json').read_text()) if (source/'command.json').is_file() else {}
+    if not (source/'exchange.csv').is_file():
+        full=json.loads((source/'exchange.json').read_text())
+        return full,command
+    import csv
+    def rows(path,orbital=False):
+        with path.open(newline='',encoding='utf-8-sig') as stream:
+            reader=csv.DictReader(stream);required={'atom_i','atom_j','R','distance_A','J_meV'}|({'orbital_i','orbital_j'} if orbital else {'symbol_i','symbol_j'})
+            if not required<=set(reader.fieldnames or []):raise ValueError('完整 CSV 缺少所需列')
+            result=[]
+            for row in reader:
+                item={k:row[k] for k in ('symbol_i','symbol_j') if k in row}
+                for k in ('atom_i','atom_j')+(('orbital_i','orbital_j') if orbital else ()):item[k]=int(row[k])
+                item.update(R=json.loads(row['R']),distance_A=float(row['distance_A']),J_meV=float(row['J_meV']))
+                for k in ('DMI_meV','Jani_meV'):
+                    if row.get(k):item[k]=json.loads(row[k])
+                result.append(item)
+            return result
+    options=command.get('options') or {}
+    mode=options.get('mode','auto')
+    if mode=='auto':mode='spinor' if '--spinor' in command.get('argv',[]) else 'collinear'
+    orbital_path=source/'orbitals.csv'
+    if options.get('orb_decomposition') and not orbital_path.is_file():raise ValueError('本机缺少完整轨道 CSV；不会连接服务器或使用截断表格')
+    full={'schema':'fpilot.tb2j-data.v2','units':{'exchange':'meV','distance':'Å'},'atom_index_base':1,'orbital_index_base':1,
+          'mode':mode,'exchange':rows(source/'exchange.csv'),'orbital':rows(orbital_path,True) if orbital_path.is_file() else [],
+          'orbital_mapping':options.get('orbital_mapping',[]),'energy_reference':command.get('energy_reference')}
+    return full,command
 
 
 def shards(output,prefix,rows,pair=None):
@@ -78,7 +73,7 @@ def shards(output,prefix,rows,pair=None):
 
 
 def render(source,output):
-    full=json.loads((source/'exchange.json').read_text())
+    full,command=read_data(source)
     if full.get('schema')!='fpilot.tb2j-data.v2' or full.get('units')!={'exchange':'meV','distance':'Å'} or full.get('atom_index_base')!=1 or full.get('orbital_index_base')!=1:raise ValueError('Unknown TB2J data schema, unit, or index base')
     output.mkdir(parents=True,exist_ok=True)
     pairs=[];lookup={};symbols={};pair_counts={}
@@ -95,7 +90,7 @@ def render(source,output):
         if distance<0:raise ValueError('Negative pair distance')
         pairs.append([index,row['atom_i'],row['atom_j'],*row['R'],distance,check_number(row['J_meV']),row.get('DMI_meV'),row.get('Jani_meV')])
         pair='–'.join(sorted((row['symbol_i'],row['symbol_j'])));pair_counts[pair]=pair_counts.get(pair,0)+1
-    orbital={};bounds={};count=0
+    orbital={};bounds={};count=0;matrix_cells={}
     for row in full.get('orbital',[]):
         bond=key(row)
         if bond not in lookup:raise ValueError('Orbital contribution has no native pair')
@@ -103,14 +98,23 @@ def render(source,output):
             ai=row['atom_'+end];oi=row['orbital_'+end]
             if type(oi) is not int or oi<1:raise ValueError('Invalid orbital index')
             bounds[ai]=max(bounds.get(ai,0),oi)
+        cell=(row['orbital_i'],row['orbital_j']);cells=matrix_cells.setdefault(bond,set())
+        if cell in cells:raise ValueError('Duplicate orbital matrix entry')
+        cells.add(cell)
+        if abs(check_number(row['distance_A'])-pairs[lookup[bond]][6])>1e-7:raise ValueError('Orbital and exchange distances differ')
         pair='–'.join(sorted((symbols[row['atom_i']],symbols[row['atom_j']])))
         orbital.setdefault(pair,[]).append([lookup[bond],row['orbital_i'],row['orbital_j'],check_number(row['J_meV']),row.get('DMI_meV'),row.get('Jani_meV')]);count+=1
+    if count:
+        for bond in lookup:
+            if len(matrix_cells.get(bond,()))!=bounds.get(bond[-2],0)*bounds.get(bond[-1],0):raise ValueError('Incomplete orbital matrix; refusing a truncated view')
     exchange_parts=shards(output,'exchange',pairs)
     orbital_parts=[]
     for index,(pair,rows) in enumerate(sorted(orbital.items())):orbital_parts+=shards(output,'orbital-'+str(index),rows,pair)
-    meta=orbital_metadata(source,full,bounds)
+    from orbital_labels import metadata
+    meta=metadata(source,full,bounds,command.get('options') or {})
     result=json.loads((source/'result.json').read_text()) if (source/'result.json').is_file() else {}
     index={'schema':'fpilot.tb2j-view.v1','units':full['units'],'mode':full['mode'],
+           'default_max_distance_A':(command.get('options') or {}).get('rcut_angstrom') or 9,'calculation_max_distance_A':(command.get('options') or {}).get('rcut_angstrom'),
            'exchange_count':len(pairs),'orbital_count':count,'pair_columns':PAIR_COLUMNS,'orbital_columns':ORBITAL_COLUMNS,
            'exchange_parts':exchange_parts,'orbital_parts':orbital_parts,'element_pairs':pair_counts,
            'frozen_mapping':full.get('orbital_mapping') or [],'energy_reference':full.get('energy_reference'),

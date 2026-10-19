@@ -51,6 +51,7 @@ def parse(raw,checked,options,output):
         distance=io.distance_dict[key]
         length=float(distance[1])
         if not np.isfinite(length) or length<0:raise ValueError('TB2J 原子间距无效')
+        if options.get('rcut_angstrom') is not None and length>=float(options['rcut_angstrom']):raise ValueError('TB2J 返回了超出请求最大距离的交换项；原产物保留，请核对实际命令与版本')
         base={'atom_i':ai,'atom_j':aj,'symbol_i':io.atoms[ai-1].symbol,'symbol_j':io.atoms[aj-1].symbol,'R':list(map(int,R)),'distance_A':length}
         row={**base,'J_meV':float(real(io.exchange_Jdict[key],()))}
         for name,attribute,shape in [('DMI_meV','dmi_ddict',(3,)),('Jani_meV','Jani_dict',(3,3))]:
@@ -95,7 +96,7 @@ def parse(raw,checked,options,output):
     cols=common+[column('J_meV','J','meV')]
     if any('DMI_meV' in r for r in rows):cols+=[column('DMI_meV','DMI [x,y,z]','meV')]
     if any('Jani_meV' in r for r in rows):cols+=[column('Jani_meV','各向异性交换 3×3','meV')]
-    tables=[{'title':'交换参数（最多展示 1000 对；完整数据见下载）','columns':cols,'rows':rows[:1000]}]
+    tables=[{'title':'交换参数（按距离升序，最多展示 1000 对；完整数据见下载）','columns':cols,'rows':sorted(rows,key=lambda r:r['distance_A'])[:1000]}]
     if orbital:tables.append({'title':'原子内轨道矩阵序号（未映射项保留原始序号）','columns':common+[column('orbital_i','轨道 i（1 起）'),column('orbital_j','轨道 j（1 起）'),column('label_i','标签 i'),column('label_j','标签 j'),column('group_i','分组 i'),column('group_j','分组 j'),column('J_meV','轨道 J','meV')],'rows':orbital[:1000]})
     if groups:tables.append({'title':'仅用户映射的分组汇总与总 J 差值','columns':common+[column(k,label,'meV') for k,label in [('total_J_meV','总 J'),('matrix_sum_meV','完整矩阵和'),('matrix_minus_J_meV','矩阵和−J'),('mapped_group_sum_meV','已映射分组和'),('unmapped_matrix_meV','未分组矩阵元素和'),('mapped_minus_J_meV','分组和−J')]],'rows':groups[:1000]})
     curve={'title':'交换参数随距离（原始原子对；非收敛检验）','x_label':'距离','x_unit':'Å','y_label':'J','y_unit':'meV','series':[{'label':'J','points':[[r['distance_A'],r['J_meV']] for r in sorted(rows,key=lambda r:r['distance_A'])[:2000]]}]}
