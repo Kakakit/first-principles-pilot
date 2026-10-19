@@ -62,6 +62,12 @@ def schedule(key,frozen=False):
         version=uuid.uuid4().hex;dest=root(key)/version;dest.mkdir()
         view={'id':version,'status':'GENERATING','version':receipt['manifest']['version'],
               'created_at':runs.now(),'owner_pid':os.getpid(),'python':(record.get('runtime') or {}).get('python') or __import__('sys').executable}
+        presentation=receipt['manifest']['presentation']
+        view['location']='local' if presentation.get('location')=='local' or record['location']=='local' else 'source'
+        if presentation.get('location')=='local':
+            from .extension_environments import resolve
+            view['python']=resolve(record['extension_id'],'local')['python']
+        view['inputs']=presentation.get('inputs')
         if previous and previous.get('status')=='READY':
             view['previous_id']=previous['id']
             old_state=state(key,previous['id'])
@@ -107,7 +113,21 @@ def generate(record,view,dest,entry):
     request={'schema':'fpilot.extension-presentation-request.v1','analysis_id':record['id'],
              'source_dir':str(directory(record['id'])/'outputs'),'output_dir':str(output),
              'view_state':json.loads((dest/'state.json').read_text()) if (dest/'state.json').is_file() else {'revision':0,'value':{}}}
-    if record['location']=='local':
+    if view.get('location','local' if record['location']=='local' else 'source')=='local':
+        if view.get('inputs'):
+            # Snapshot only declared, already-returned files. Never fetch missing remote data.
+            source=directory(record['id'])/'outputs';snapshot=dest/'source';snapshot.mkdir()
+            for item in view['inputs']:
+                try:path=p.inside(source,item['path'])
+                except (ValueError,OSError):
+                    if item.get('required',True):raise ValueError('本机缺少展示输入：'+item['path']+'；不会自动连接服务器')
+                    continue
+                if not path.is_file():
+                    if item.get('required',True):raise ValueError('本机缺少展示输入：'+item['path']+'；不会自动连接服务器')
+                    continue
+                if path.stat().st_size>artifacts.MAX_PULL_BYTES:raise ValueError('本地展示输入超过 10 MiB：'+item['path'])
+                target=snapshot/item['path'];target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(path,target)
+            request['source_dir']=str(snapshot)
         p.atomic_json(dest/'request.json',request)
         from .analysis_queue import subprocess_environment
         response=subprocess.run([view['python'],str(p.inside(dest/'package',entry)),'render','--request',str(dest/'request.json')],
@@ -131,7 +151,7 @@ def remote_generate(record,view,dest,entry,request):
     command='set -e\ndest='+remote_paths.shell_path(remote_dir)+'\ntest ! -e "$dest"\nmkdir -p "$dest/outputs"\ntar -xzf - -C "$dest"\ncd "$dest"\nexport PYTHONDONTWRITEBYTECODE=1\n'+shlex.quote(view['python'])+' '+shlex.quote('package/'+entry)+' render --request request.json'
     from .analysis_queue import slot,environment
     with slot(record['runtime']['alias']):
-        response=ex.ssh(record['runtime']['alias'],environment(record['runtime'].get('cores'))+command,stream.getvalue(),timeout=180,mutating=True,lane='analysis')
+        response=ex.ssh(record['runtime']['alias'],environment(record['runtime'].get('cores'))+command,stream.getvalue(),timeout=180,mutating=True)
     if response.get('exit_code')!=0:raise ValueError('服务器展示生成未完成：'+response.get('stderr','')[-1500:]+'；原计算不会重跑')
     manifest=json.loads(response['stdout'])
     assets=manifest.get('assets') or []

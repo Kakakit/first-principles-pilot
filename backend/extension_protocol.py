@@ -89,8 +89,18 @@ def inspect_package(root):
     inside(root, manifest['entrypoint'])
     if 'presentation' in manifest:
         view=manifest['presentation']
-        if not isinstance(view,dict) or set(view)!={'entrypoint'}:raise ValueError('展示配置须声明独立 entrypoint')
+        if not isinstance(view,dict) or 'entrypoint' not in view or set(view)-{'entrypoint','location','inputs'}:raise ValueError('展示配置须声明独立 entrypoint')
         inside(root,view['entrypoint'])
+        if view.get('location','source') not in ('source','local'):raise ValueError('展示位置须为 source 或 local')
+        if 'inputs' in view:
+            if not isinstance(view['inputs'],list) or not 1<=len(view['inputs'])<=64:raise ValueError('展示输入清单无效')
+            names=set()
+            for item in view['inputs']:
+                if not isinstance(item,dict) or 'path' not in item or set(item)-{'path','required'} or type(item.get('required',True)) is not bool:raise ValueError('展示输入定义无效')
+                name=item['path']
+                if not isinstance(name,str) or not name or Path(name).is_absolute() or '..' in Path(name).parts or '\\' in name or name in names:raise ValueError('展示输入路径越界或重复')
+                names.add(name)
+        if view.get('location')=='local' and not view.get('inputs'):raise ValueError('本地展示须声明所需输入文件')
     if not isinstance(manifest['fixtures'],list) or not manifest['fixtures']: raise ValueError('扩展需提供 fixture')
     for name in manifest['fixtures']: inside(root,name)
     if not isinstance(manifest['contexts'],list) or not manifest['contexts'] or not set(manifest['contexts']) <= {'structure','attempt'}:

@@ -84,6 +84,25 @@ class PresentationHostTests(unittest.TestCase):
     def test_update_preserves_saved_view_state_and_uses_frozen_python(self):
         self.package();record=self.execute();view=record['presentation'];views.save_state(record['id'],view['id'],{'confirmed':True})
         views.schedule(record['id']);new=runs.get(record['id'])['presentation'];self.assertNotEqual(view['id'],new['id']);self.assertEqual(views.state(record['id'],new['id'])['value'],{'confirmed':True});self.assertEqual(new['python'],record['runtime']['python'])
+    def test_remote_analysis_can_render_declared_local_snapshot_without_ssh(self):
+        receipt=self.package();record=self.execute();original=record['runtime']['python']
+        root=Path(receipt['root']) if 'root' in receipt else p.installed('different-viewer-name')['root']
+        manifest=json.loads((root/'extension.manifest.json').read_text());manifest['presentation'].update(location='local',inputs=[{'path':'elements.csv'}]);p.atomic_json(root/'extension.manifest.json',manifest);p.install_directory(root)
+        record.update(location='ssh',runtime={'python':'/remote/only/python','alias':'fixture'},remote_dir='/remote/original');runs.save(record)
+        before=(runs.directory(record['id'])/'outputs/elements.csv').read_bytes();views.schedule(record['id']);updated=runs.get(record['id']);view=updated['presentation']
+        self.assertEqual(view['status'],'READY',view.get('error'));self.assertEqual(view['location'],'local');self.assertEqual(view['python'],original);self.assertEqual(updated['runtime']['python'],'/remote/only/python')
+        request=json.loads((views.root(record['id'])/view['id']/'request.json').read_text());snapshot=Path(request['source_dir'])/'elements.csv';self.assertEqual(snapshot.read_bytes(),before)
+        snapshot.write_text('snapshot can be modified independently');self.assertEqual((runs.directory(record['id'])/'outputs/elements.csv').read_bytes(),before)
+    def test_missing_declared_local_input_fails_without_remote_fallback(self):
+        self.package();record=self.execute();receipt=p.installed('different-viewer-name');root=receipt['root'];manifest=receipt['manifest'];manifest['presentation'].update(location='local',inputs=[{'path':'not-returned.csv'}]);p.atomic_json(root/'extension.manifest.json',manifest);p.install_directory(root)
+        views.schedule(record['id']);updated=runs.get(record['id']);self.assertEqual(updated['state'],'COMPLETED');self.assertEqual(updated['presentation']['status'],'FAILED');self.assertIn('不会自动连接服务器',updated['presentation']['error'])
+    def test_source_renderer_uses_actual_ssh_argument_contract(self):
+        from contextlib import nullcontext
+        self.package();record=self.execute();view=record['presentation'];dest=views.root(record['id'])/view['id'];record.update(remote_dir='/remote/original',runtime={'python':'/remote/python','alias':'fixture'})
+        def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None):return {'exit_code':1,'stdout':'','stderr':'simulated transport receipt'}
+        with patch.object(ex,'ssh',side_effect=ssh),patch('backend.analysis_queue.slot',return_value=nullcontext()):
+            with self.assertRaisesRegex(ValueError,'simulated transport receipt'):views.remote_generate(record,view,dest,'scripts/view.py',{'source_dir':'unused'})
+
     def test_protocol_keeps_old_packages_and_bounds_optional_assets(self):
         manifest=p.inspect_package(BASE/'extension-templates/structure-statistics')['manifest'];self.assertNotIn('presentation',manifest)
         with self.assertRaisesRegex(ValueError,'10 MiB'):views.validate({'schema':'fpilot.extension-presentation.v1','entry_html':'view.html','assets':[{'path':'view.html','media_type':'text/html'}]},self.root,{'view.html':artifacts.MAX_PULL_BYTES+1})

@@ -528,14 +528,14 @@ def preview(payload):
     if location=='local':
         key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
         p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':{'ready':True}})
-        return {'preview_id':key,'ready':True,'runtime':runtime,'reason':'使用选定本地解释器，在独立目录运行'}
+        return {'preview_id':key,'ready':True,'runtime':runtime,'options':copy.deepcopy(options),'reason':'使用选定本地解释器，在独立目录运行'}
     if any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
     resources={'ready':True}
     if not resources['ready']:return resources
     key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
     p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':resources})
     text=remote.script(runtime,(runtime['config'].get('remote_workspace_root') or '$HOME').rstrip('/')+'/analyses/analysis-preview',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
-    return {'preview_id':key,'ready':True,'resources':resources,'runtime':runtime,'script':text,'reason':'将在独立 analyses 目录执行 doctor、check、run；来源文件只读'}
+    return {'preview_id':key,'ready':True,'resources':resources,'runtime':runtime,'script':text,'reason':'将在独立 analyses 目录执行 doctor、check、run；来源文件只读','options':copy.deepcopy(options)}
 
 
 def stop_local(key):

@@ -108,7 +108,11 @@ TB2J 独立包见 [使用指南](../../resources/extensions/tb2j/README.md)，�
 
 请求标识 `fpilot.extension-presentation-request.v1`，包含 analysis_id、source_dir（已有输出只读）、output_dir（本次独立展示版本）。stdout 返回 `fpilot.extension-presentation.v1`、entry_html、assets（path/media_type），可附 data_schema。assets 必须是输出目录中的普通文件，最多 1000 项，每个不超过 10 MiB；扩展自行分片。数据含义与科学算法由包负责，宿主不解析扩展格式。
 
-首次完成可用冻结包自动生成；旧记录或手动更新采用当前启用包，保存新的展示包副本和版本，沿用原分析冻结 Python 与服务器。远端原始大数据留在原主机，宿主仅上传展示包、执行整理 CLI 并受控回传小文件，不调用分析 run。失败保留原结果及下载；并发请求共用同一生成记录。停用/卸载不能破坏已保存展示。上版保存的展示设置随更新继承，旧版本仍保留。
+首次完成可用冻结包自动生成；旧记录或手动更新采用当前启用包，保存新的展示包副本和版本，缺省沿用原分析冻结 Python 与服务器。远端原始大数据留在原主机，宿主仅上传展示包、执行整理 CLI 并受控回传小文件，不调用分析 run。失败保留原结果及下载；并发请求共用同一生成记录。停用/卸载不能破坏已保存展示。上版保存的展示设置随更新继承，旧版本仍保留。
+
+可选 `presentation.location` 为 `source`（缺省）或 `local`。`local` 必须声明 `presentation.inputs`：最多 64 项 `{path, required?}`，required 缺省 true。路径相对原分析 outputs，只接受安全的普通文件；宿主仅从已回传本机文件独立复制，每个不超过 10 MiB，绝不因缺失自动连接服务器。整理使用当前本地扩展 Python，展示快照单独冻结实际位置、解释器、包版本和输入副本；原分析的 Python、服务器、参数和产物不变。源位置模式仍按旧规则执行。
+
+通用表单支持包自定义 `ui:groups`（title/fields/collapsed），按声明顺序展示常用区和折叠区；`ui:visibility` 按同表单字段值条件显示，source_spinors 仅在 auto 模式兼容冻结来源的 spinors。`ui:preview` 指定预览需突出显示的参数；预览 API 返回对应冻结 `options`。这些只改变展示，不跳过原 schema 校验；未声明的扩展保持旧表单。数组操作使用可辨认文字，固定长度数组可在原 ui:options 禁用添加/删除/排序。
 
 HTML 内联脚本、样式和绘图库，以无同源权的 iframe sandbox 隔离，禁止外部连接；普通运行不依赖网络或主体组件。页面与宿主使用 `fpilot.extension-view.v1` postMessage：read-file 只读清单内 JSON，read-state/save-state 保存最大 64 KiB 有限 JSON，resize 调整高度，failed 回退基础结果，download 交付本机生成的 CSV/JSON/文本/PNG（有限内容、简单文件名，最多 64 MiB）。每条 RPC 带字符串 id，宿主验证消息来源为当前 iframe，返回 kind=response、同 id 和 value/error。扩展不调用工作台 API，也不读取宿主 DOM；原生单位、映射与计算规则不进入宿主。
 

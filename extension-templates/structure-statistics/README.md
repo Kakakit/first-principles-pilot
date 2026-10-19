@@ -21,3 +21,7 @@ CLI 用法：`python scripts/cli.py check --request /absolute/request.json`，`r
 
 
 可选交互展示：清单添加 `presentation:{"entrypoint":"scripts/presentation.py"}`，独立实现 `render --request`。读取 source_dir 已有结果，只向本次 output_dir 写入 HTML 与数据分片，返回 `fpilot.extension-presentation.v1` 文件清单；schema 位于 protocol/presentation.schema.json。HTML 内联所需资源，通过通用 postMessage 读取清单 JSON、保存独立设置或下载，不导入主体组件。详见主体协议“可选独立交互展示”；TB2J 的 scripts/presentation.py 与 viewer/ 是实际示例。无需交互的扩展继续使用现有 table/curve，不必实现此入口。
+
+### 可选本机结果展示
+
+支持在 presentation 声明 `location: "local"` 和 `inputs: [{path: "elements.csv"}]`。宿主只复制已回传的小文件，以本地扩展 Python 调用独立 render；缺失或超限给出错误，不自动连接服务器。缺省 source 保持旧行为。展示包、解释器及输入副本单独记录，原分析冻结配置不变。常用/高级分区可通过 ui_schema 的 ui:groups 声明，详见通用协议。

@@ -892,3 +892,9 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .band-edge-summary h4{margin:0 0 12px}.band-edge-values{display:flex;flex-wrap:wrap;gap:18px 36px}
 .band-edge-values>div{display:flex;flex-direction:column;gap:4px}.band-edge-values strong{font-size:24px;font-variant-numeric:tabular-nums}
 .server-registration-actions{display:grid;gap:12px;margin-top:12px}.server-registration-actions details{overflow-wrap:anywhere}
+
+/* Generic extension forms: package-defined groups, visible actions and inline help. */
+.extension-field-explained{display:grid;grid-template-columns:minmax(180px,1fr) minmax(220px,1fr);gap:16px;align-items:start;max-width:1050px}
+.extension-field-explained aside{padding:8px 12px;border-left:3px solid var(--color-border);color:var(--color-muted-text);line-height:1.65;font-size:var(--font-secondary)}
+.extension-field-explained aside p{margin:0}.extension-advanced{margin:20px 0;padding:14px;border:1px solid var(--color-border);border-radius:9px}.extension-advanced>summary{cursor:pointer;font-weight:600}.extension-array-action{margin:4px 6px 4px 0;min-height:32px}.extension-options input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--color-accent)}
+@media(max-width:800px){.extension-field-explained{grid-template-columns:1fr;gap:6px}}
