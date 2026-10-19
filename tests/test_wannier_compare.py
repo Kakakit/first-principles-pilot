@@ -13,6 +13,35 @@ FIXTURE = Path(__file__).resolve().parents[1] / 'resources/extensions/electronic
 
 
 class WannierCompareTest(unittest.TestCase):
+    def test_repeated_generate_shares_running_and_completed_operation(self):
+        from backend import analysis_queue
+        pending=[]
+        class Executor:
+            def submit(self,work):pending.append(work)
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);identifier='c'*32;calls=[]
+            def generate(**options):
+                calls.append(options)
+                directory=root/identifier;directory.mkdir()
+                result={'id':identifier,'project_id':'project'}
+                (directory/'record.json').write_text(json.dumps(result))
+                options['on_plot_ready'](result)
+                return result
+            with patch.object(compare,'ROOT_COMPARE',root),patch.object(compare,'JOBS',{}), \
+                 patch.object(analysis_queue,'executor',Executor()),patch.object(compare,'run',side_effect=generate), \
+                 patch.object(compare.execution,'get',side_effect=lambda key:{'id':key}), \
+                 patch.object(compare.recycle,'assert_available'):
+                options={'project_id':'project','wannier_attempt_id':'model','band_attempt_id':'band'}
+                first=compare.start(**options);second=compare.start(**options)
+                self.assertEqual(first['id'],second['id'])
+                self.assertEqual(len(pending),1)
+                pending.pop()()
+                cached=compare.start(**options)
+                self.assertTrue(cached['cached'])
+                self.assertEqual(cached['result']['id'],identifier)
+                self.assertEqual(len(calls),1)
+                self.assertTrue(cached['plot_ready'])
+
     def test_two_panel_fixture_saves_local_figure_and_curves_without_suggestions(self):
         records = {
             'wannier': {'id': 'wannier', 'kind': 'wannier90', 'state': 'COMPLETED',
@@ -38,6 +67,15 @@ class WannierCompareTest(unittest.TestCase):
             self.assertIn(name, names[identifier])
             return source(name).read_bytes(), {}
 
+        ready=[]
+        def shown(record):
+            self.assertTrue(Path(record['local_path'],'comparison.png').is_file())
+            ready.append(record['id'])
+
+        def failed_native(directory,record,*args):
+            self.assertEqual(ready,[record['id']])
+            return {'status':'FAILED','reason':'isolated diagnostic failure'}
+
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / 'wannier-bundles').mkdir()
@@ -52,14 +90,16 @@ class WannierCompareTest(unittest.TestCase):
                  patch.object(compare.execution, 'bundle', return_value=({'stage': 'bands'}, {})), \
                  patch.object(compare.artifacts, 'refresh', side_effect=listing), \
                  patch.object(compare.artifacts, 'pull', side_effect=pull), \
-                 patch.object(compare.wannier_bands, 'recheck'), \
-                 patch.object(compare, '_pyw90_diagnostic', return_value={'status': 'NOT_APPLICABLE'}):
-                result = compare.run('project', 'wannier', 'bands')
+                 patch.object(compare.wannier_bands, 'recheck'),patch.object(compare.diagnostics,'native',side_effect=failed_native):
+                result = compare.run('project', 'wannier', 'bands',diagnostic=True,on_plot_ready=shown)
                 self.assertEqual(len(result['sources']), 6)
                 self.assertEqual(result['seed'], 'wannier90.1')
                 self.assertTrue(compare.output('project', result['id'], 'comparison.png').startswith(b'\x89PNG'))
                 self.assertIn(b'DFT', compare.output('project', result['id'], 'curves.csv'))
                 self.assertEqual(compare.saved('project')[0]['id'], result['id'])
+                self.assertEqual(result['pyw90_diagnostic']['status'],'FAILED')
+                self.assertIn('groups',result['diagnostics'])
+                self.assertEqual(json.loads(compare.output('project',result['id'],'diagnostics.json'))['pyw90_diagnostic']['status'],'FAILED')
 
 
 if __name__ == '__main__':

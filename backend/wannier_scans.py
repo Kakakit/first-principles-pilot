@@ -310,7 +310,7 @@ def compare(batch, project_id, case_ids, band_attempt_id, dft_band_offset):
         rec=ex.get(case['attempt_id']);recycle.assert_available('attempts',rec['id'],rec)
         if rec['state']!='COMPLETED' or not rec.get('evidence',{}).get('wannier_all_done'):raise ValueError('case 缺少程序完成证据')
         # run() validates exact SCF lineage, source host/spin, full path and points.
-        comparison=wannier_compare.run(project_id,rec['id'],band_attempt_id,*batch['search']['target'],diagnostic=False)
+        comparison=wannier_compare.run(project_id,rec['id'],band_attempt_id,*batch['search']['target'],diagnostic=False,dft_band_start=dft_band_offset+1)
         directory=wannier_compare.ROOT_COMPARE/comparison['id']
         request={'curves_csv':str(directory/'curves.csv'),'target_relative_eV':batch['search']['target'],'dft_band_offset':dft_band_offset}
         from .inputs import put_file

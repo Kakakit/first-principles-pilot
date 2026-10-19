@@ -97,11 +97,11 @@ def remap_channel_to_ticks(source: BandChannel, target: BandChannel) -> list[np.
     return mapped
 
 
-def plot_compare(dft: list[BandChannel], wannier: list[BandChannel], output: Path, emin: float, emax: float, formats: list[str], title: str | None = None, title_font=None) -> list[Path]:
+def plot_compare(dft: list[BandChannel], wannier: list[BandChannel], output: Path, emin: float, emax: float, formats: list[str], title: str | None = None, title_font=None, summary_lines=None) -> list[Path]:
     if len(dft) != len(wannier):
         raise ValueError("DFT and Wannier channel counts differ")
     apply_style()
-    fig, axes = plt.subplots(1, len(dft), figsize=(5.2 * len(dft), 4.2), sharey=True, squeeze=False)
+    fig, axes = plt.subplots(1, len(dft), figsize=(5.2 * len(dft)+(3 if summary_lines else 0), 4.6 if summary_lines else 4.2), sharey=True, squeeze=False)
     for i, (ax, dch, wch) in enumerate(zip(axes[0], dft, wannier)):
         mapped = remap_channel_to_ticks(wch, dch)
         first_dft = first_w = True
@@ -123,7 +123,10 @@ def plot_compare(dft: list[BandChannel], wannier: list[BandChannel], output: Pat
             ax.set_ylabel("")
     if title:
         fig.suptitle(title, fontproperties=title_font)
-    fig.tight_layout()
+    if summary_lines:
+        fig.tight_layout(rect=(0,0,.68,1))
+        fig.text(.70,.86,'\n'.join(summary_lines),va='top',fontsize=9,linespacing=1.6)
+    else:fig.tight_layout()
     return save_figure(fig, output, formats)
 
 

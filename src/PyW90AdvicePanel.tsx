@@ -3,7 +3,7 @@ import {attemptLabel} from './humanLabels';
 import {useEffect,useRef,useState} from 'react';
 import type {Project} from './model';
 import {requestJson,errorMessage} from './apiClient';
-import {candidateWindows,draftWindows,windowTags,type Advice,type Candidate,type Diagnostic,type Gap,type MeshReport,type WindowCheck,type Windows} from './pyw90Advice';
+import {candidateWindows,draftWindows,draftProjections,windowTags,type AdviceResult,type Candidate,type Diagnostic,type Gap,type MeshReport,type WindowCheck,type Windows} from './pyw90Advice';
 import './pyw90-advice.css';
 
 type EnergyReference={fermi_eV:number;outcar_sha256:string};
@@ -25,6 +25,16 @@ function Summary({report}:{report:MeshReport}){
     <div className="pyw90-metric"><span>完整冻结窗最多态数</span><strong className="pyw90-metric-value">{current.frozen?.max??'未启用'}</strong><span>{current.frozen?`${current.frozen.max<=basis.num_wann?'满足':'不满足'} ≤ ${basis.num_wann} · k #${current.frozen.max_kpoint}`:'没有冻结态约束'}</span></div>
     <div className="pyw90-metric"><span>分析下界 / 当前外窗下界</span><strong className="pyw90-metric-classification">{report.analysis_lower.classification==='crossing'?'分析下界穿带':'分析下界未穿带'}</strong><span>当前外窗：{lowerDescription[report.outer_lower.classification]||report.outer_lower.classification}</span></div>
   </div><p className={`pyw90-constraint ${current.valid?'passed':'failed'}`} role="status">{current.valid?'窗口约束通过':'窗口约束未通过'} · 来自完整 .eig 采样网格；拟合质量需另做能带对比。</p><WindowSummary windows={current.relative_windows_eV}/></>;
+}
+
+function AnalysisSummary({item}:{item:AdviceResult}){
+  const report=item.interface,counts=report.analysis_counts;
+  return <section aria-label="填写分析区间的诊断"><h4>本次填写的分析区间</h4><div className="pyw90-summary">
+    <div className="pyw90-metric"><span>分析下界 · E−E_F / eV</span><strong className="pyw90-metric-value">{number(item.relative_range_eV[0])}</strong></div>
+    <div className="pyw90-metric"><span>分析上界 · E−E_F / eV</span><strong className="pyw90-metric-value">{number(item.relative_range_eV[1])}</strong></div>
+    <div className="pyw90-metric"><span>分析区间最少态数 / k 点</span><strong className="pyw90-metric-value">{counts.min}</strong><span>接口完整 .eig · k #{counts.min_kpoint}</span></div>
+    <div className="pyw90-metric"><span>分析区间最多态数 / k 点</span><strong className="pyw90-metric-value">{counts.max}</strong><span>接口完整 .eig · k #{counts.max_kpoint}</span></div>
+  </div><LowerView value={report.analysis_lower} fermi={report.fermi_eV} label="分析区间下界"/><p>以上态数只对应本次分析区间。该区间用于生成建议；采用前再核对合并后的四个实际窗口边界。</p></section>;
 }
 
 function CountsView({value}:{value:WindowCheck}){
@@ -72,24 +82,25 @@ function FrozenBoundaryView({report,onBoundary}:{report:MeshReport;onBoundary?:(
 
 function Report({report,onGap,onBoundary}:{report:MeshReport;onGap?:(gap:Gap)=>void;onBoundary?:(values:Windows)=>void}){
   return <div className="pyw90-report"><Summary report={report}/><p>检查范围：{report.nkpts} 个 k 点 · {report.nbands} 条能带。以下能量为 E−E_F，单位 eV；带号与 k 点号从 1 开始。</p>
-    <FrozenBoundaryView report={report} onBoundary={onBoundary}/>
+    <details><summary>边界、带间隙与检查方法</summary><FrozenBoundaryView report={report} onBoundary={onBoundary}/>
     <LowerView label="分析下界" value={report.analysis_lower} fermi={report.fermi_eV}/><LowerView label="当前外窗下界" value={report.outer_lower} fermi={report.fermi_eV}/>
     <p>分析范围逐 k 点态数：{report.analysis_counts.min} ～ {report.analysis_counts.max}。</p><CountsView value={report.current}/>
     <details><summary>检查方法、当前投影与绝对能量</summary><p>判断来自接口 .eig 的全部已提供 k 点；高对称路径图与完整布里渊区可能不同。</p><p>当前投影：{report.basis.projections.join('；')||'无显式 projections'}{report.basis.exclude_bands&&<> · exclude_bands：{report.basis.exclude_bands}</>}</p><div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr><th>当前检查窗口</th><th>E−E_F / eV</th><th>绝对能量 / eV</th></tr></thead><tbody>{windowTags.map(tag=><tr key={tag}><td>{tag}</td><td>{number(report.current.relative_windows_eV[tag])}</td><td>{number(report.current.absolute_windows_eV[tag])}</td></tr>)}</tbody></table></div></details>
-    <details><summary>全部全局带间隙 · {report.gaps.length} 个（阈值 0.004 eV）</summary>{report.gaps.length?report.gaps.map(gap=><p key={gap.lower_band}><GapView gap={gap} fermi={report.fermi_eV}/> {onGap&&<button className="button" onClick={()=>onGap(gap)}>预览作为外窗下界</button>}</p>):<p>当前网格没有检测到满足阈值的相邻带间隙；仍可手动设置窗口并检查态数。</p>}</details>
+    <details><summary>全部全局带间隙 · {report.gaps.length} 个（阈值 0.004 eV）</summary>{report.gaps.length?report.gaps.map(gap=><p key={gap.lower_band}><GapView gap={gap} fermi={report.fermi_eV}/> {onGap&&<button className="button" onClick={()=>onGap(gap)}>预览作为外窗下界</button>}</p>):<p>当前网格没有检测到满足阈值的相邻带间隙；仍可手动设置窗口并检查态数。</p>}</details></details>
   </div>;
 }
 
 export default function PyW90AdvicePanel(props:Props){
   const {project,nodeId,parentId,alias,seed,sourceReady,energyReference,parameters,win,dosChoices,onAdopt}=props;
   const [emin,setEmin]=useState('-4'),[emax,setEmax]=useState('4'),[dosId,setDosId]=useState('');
-  const [advice,setAdvice]=useState<Partial<Record<'eig'|'pre',Advice>>>({}),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [advice,setAdvice]=useState<Partial<Record<'eig'|'pre',AdviceResult>>>({}),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [tab,setTab]=useState<'check'|'eig'|'pre'>('check'),[integration,setIntegration]=useState('spline'),[projectionSelection,setProjectionSelection]=useState('');
   const [manual,setManual]=useState<{report:MeshReport;fingerprint:string}|null>(null);
   const [preview,setPreview]=useState<{report:MeshReport;values:Windows;before:Windows;fingerprint:string}|null>(null);
   const mounted=useRef(true);
   const previewElement=useRef<HTMLElement|null>(null);
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
-  const fingerprint=JSON.stringify([parameters,win,emin,emax,dosId,energyReference]);
+  const fingerprint=JSON.stringify([parameters,win,emin,emax,dosId,energyReference,integration,projectionSelection]);
   const currentFingerprint=useRef(fingerprint);currentFingerprint.current=fingerprint;
   useEffect(()=>{setPreview(null);},[fingerprint]);
   useEffect(()=>{if(preview)previewElement.current?.scrollIntoView({block:'nearest',behavior:'smooth'});},[preview]);
@@ -104,8 +115,8 @@ export default function PyW90AdvicePanel(props:Props){
         const report:MeshReport=await requestJson('/api/wannier90/pyw90-window-check',payload(windows));
         if(mounted.current&&started===currentFingerprint.current)setManual({report,fingerprint:started});
       }else{
-        const result:Advice=await requestJson('/api/wannier90/pyw90-advice',{...payload(windows),mode,dos_attempt_id:mode==='pre'&&dosId?dosId:null});
-        if(mounted.current&&started===currentFingerprint.current){setAdvice(old=>({...old,[mode]:result}));setManual({report:{...result.interface,source_hashes:result.interface_source_hashes},fingerprint:started});}
+        const result:AdviceResult=await requestJson('/api/wannier90/pyw90-advice',{...payload(windows),mode,dos_attempt_id:mode==='pre'&&dosId?dosId:null,integration_method:integration,projection_lines:draftProjections(win),projection_selection:projectionSelection});
+        if(mounted.current&&started===currentFingerprint.current)setAdvice(old=>({...old,[mode]:{...result,ui_fingerprint:started}}));
       }
     }catch(caught){if(mounted.current)setError(errorMessage(caught));}finally{if(mounted.current)setBusy(false);}
   };
@@ -118,24 +129,30 @@ export default function PyW90AdvicePanel(props:Props){
       if(mounted.current&&started===currentFingerprint.current)setPreview({report,values:selected,before,fingerprint:started});
     }catch(caught){if(mounted.current)setError(errorMessage(caught));}finally{if(mounted.current)setBusy(false);}
   };
-  const candidates=(item:Advice,group:'outer'|'frozen')=>{
-    const columns=group==='outer'?['dis_win_min','dis_win_max','i_max','i+1_min','Nleast','Nmost']:item.mode==='pre'?['dis_froz_min','dis_froz_max','N','pdos','tdos','percent']:['dis_froz_min','dis_froz_max','N'];
+  const candidates=(item:AdviceResult,group:'outer'|'frozen')=>{
+    const columns=group==='outer'?['dis_win_min','dis_win_max']:item.mode==='pre'?['dis_froz_min','dis_froz_max','percent']:['dis_froz_min','dis_froz_max'];
     return <div><h5>{group==='outer'?'外窗候选':'冻结窗候选'} · {item.advice[group].length} 组</h5>
-      <details className="pyw90-method"><summary>候选来源与计数含义</summary><p>{group==='outer'?'下界来自费米能级以下的全局间隙中点；按间隙上边缘筛选，不是最近位置或拟合最优排序。Nleast／Nmost 的区间为候选下界到 E_F，Nmost 为能带范围交叠计数。原生筛选要求 Nmost<num_wann，假设还要拟合费米能级以上的带。':'原生 N 按能带范围交叠计数，可能偏保守；完整窗口另用接口逐 k 点计数核对。'}{item.mode==='pre'&&group==='frozen'&&' pdos／tdos 使用下方自动选轨道模型；比例不是拟合误差，排序也不代表拟合质量。'}</p></details>
-      {item.advice[group].length?<div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr>{columns.map(col=><th key={col}>{col==='percent'?'所选轨道贡献比例':['N','Nleast','Nmost'].includes(col)?`原生 ${col}`:col}<small>{windowTags.includes(col as typeof windowTags[number])?'E−E_F / eV':['i_max','i+1_min'].includes(col)?'间隙边缘 · E−E_F / eV':''}</small></th>)}<th>完整窗口逐 k 点</th><th>操作</th></tr></thead><tbody>{item.advice[group].map((row:Candidate,i)=><tr key={i}>{columns.map(col=><td key={col} className={windowTags.includes(col as typeof windowTags[number])?'pyw90-window-cell':['N','Nleast','Nmost'].includes(col)?'pyw90-native-count':undefined}>{typeof row[col]!=='number'?'—':col==='percent'?`${((row[col] as number)*100).toFixed(2)}%`:['N','Nleast','Nmost'].includes(col)?row[col] as number:number(row[col] as number)}</td>)}<td>{row.check.gap&&<><GapView gap={row.check.gap} fermi={item.fermi_eV}/><br/></>}<div className="pyw90-full-counts">完整 .eig：外窗最少 <strong>{row.check.outer.min}</strong>；冻结窗最多 <strong>{row.check.frozen?.max??'未启用'}</strong></div><span className={row.check.valid?'pyw90-valid':'structure-error'}>{row.check.valid?'窗口约束通过':'窗口约束未通过'}</span>{row.check.errors.map(e=><p className="structure-error" key={e}>{e}</p>)}</td><td><button className="button" disabled={!enabled} onClick={()=>void select(row,item.interface_source_hashes)}>预览这组建议</button></td></tr>)}</tbody></table></div>:<p>未生成候选。候选为空不等于当前冻结窗无效；可以检查当前草稿。</p>}
+      <details className="pyw90-method"><summary>候选来源与原始计数</summary><p>{group==='outer'?'下界来自费米能级以下的全局间隙中点；按间隙上边缘筛选，不是最近位置或拟合最优排序。Nleast／Nmost 的区间为候选下界到 E_F，Nmost 为能带范围交叠计数。原生筛选要求 Nmost<num_wann，假设还要拟合费米能级以上的带。':'候选来自原生能带极值，边界不保证落在填写的分析范围内。原生 N 可能偏保守，默认显示完整接口逐 k 点计数；原始数值保留在完整输出中。'}{item.mode==='pre'&&group==='frozen'&&' pdos／tdos 使用本次明确显示的轨道集合；比例不是拟合误差。'}</p></details>
+      {item.advice[group].length?<div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr>{columns.map(col=><th key={col}>{({dis_win_min:'外窗下界',dis_win_max:'外窗上界',dis_froz_min:'冻窗下界',dis_froz_max:'冻窗上界',percent:'所选轨道贡献比例'} as Record<string,string>)[col]||col}<small>{windowTags.includes(col as typeof windowTags[number])?'E−E_F / eV':['i_max','i+1_min'].includes(col)?'间隙边缘 · E−E_F / eV':''}</small></th>)}<th>完整窗口逐 k 点</th><th>操作</th></tr></thead><tbody>{item.advice[group].map((row:Candidate,i)=><tr key={i}>{columns.map(col=><td key={col} className={windowTags.includes(col as typeof windowTags[number])?'pyw90-window-cell':['N','Nleast','Nmost'].includes(col)?'pyw90-native-count':undefined}>{typeof row[col]!=='number'?'—':col==='percent'?`${((row[col] as number)*100).toFixed(2)}%`:['N','Nleast','Nmost'].includes(col)?row[col] as number:number(row[col] as number)}</td>)}<td>{row.check.gap&&<><GapView gap={row.check.gap} fermi={item.fermi_eV}/><br/></>}<div className="pyw90-full-counts">完整 .eig：外窗最少 <strong>{row.check.outer.min}</strong>；冻结窗最多 <strong>{row.check.frozen?.max??'未启用'}</strong></div><span className={row.check.valid?'pyw90-valid':'structure-error'}>{row.check.valid?'窗口约束通过':'窗口约束未通过'}</span>{row.check.errors.map(e=><p className="structure-error" key={e}>{e}</p>)}</td><td><button className="button" disabled={!enabled||item.ui_fingerprint!==fingerprint} onClick={()=>void select(row,item.interface_source_hashes)}>预览这组建议</button></td></tr>)}</tbody></table></div>:<p>未生成候选。候选为空不等于当前冻结窗无效；可以检查当前草稿。</p>}
     </div>;
   };
-  return <section className="input-submit-card pyw90-advice"><h3>PyW90 手动调窗辅助</h3><p>分析、选取候选、检查完整窗口，再填入参数草稿。实际拟合效果请结合 DFT／Wannier 能带对比。</p>
+  return <section className="input-submit-card pyw90-advice"><h3>能窗诊断</h3><p>分析范围用于生成候选；当前窗口始终按参数草稿检查。</p>
     <div className="parameter-grid"><label className="field">分析范围下界 / E−E_F (eV)<input type="number" value={emin} onChange={e=>setEmin(e.target.value)}/></label><label className="field">分析范围上界 / E−E_F (eV)<input type="number" value={emax} onChange={e=>setEmax(e.target.value)}/></label><label className="field">pre dos 来源<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">当前 VASP-Wannier attempt</option>{dosChoices.map(item=><option value={item.id} key={item.id}>{attemptLabel(item,project)}</option>)}</select></label></div>
-    <div className="pyw90-actions"><button className="button" disabled={!enabled} onClick={()=>void run('check')}>检查当前草稿窗口与下界</button><button className="button" disabled={!enabled} onClick={()=>void run('eig')}>远端 eig：外窗候选</button><button className="button" disabled={!enabled} onClick={()=>void run('pre')}>远端 pre dos：投影与冻结窗候选</button></div>
+    <div className="pyw90-actions" role="tablist" aria-label="能窗诊断方式">{([['check','检查当前窗口'],['eig','外窗候选'],['pre','冻窗候选']] as const).map(([key,label])=><button type="button" role="tab" aria-selected={tab===key} className={tab===key?'button primary':'button'} key={key} onClick={()=>setTab(key)}>{label}</button>)}</div>
+    {tab==='pre'&&<details><summary>轨道集合与积分方式</summary><label className="field">DOS 积分<select value={integration} onChange={e=>setIntegration(e.target.value)}><option value="spline">三次样条直接积分</option><option value="gauss300">300 点高斯积分（试验对照）</option></select></label><label className="field">手动 PDOS 轨道（可选）<textarea value={projectionSelection} onChange={e=>setProjectionSelection(e.target.value)} placeholder={'Fe:d\nCr:d\nO:p'} rows={3}/></label><p>留空使用当前 .win 投影；可用元素:轨道或元素@站点:轨道，站点从 0 开始。</p></details>}
+    <button className="button" disabled={!enabled} onClick={()=>void run(tab)}>{tab==='check'?'检查当前窗口':tab==='eig'?'分析外窗候选':'分析冻窗候选'}</button>
     {busy&&<p role="status">正在只读核对远端文件与采样网格…</p>}{error&&<p role="alert" className="structure-error">{error}</p>}
-    {manual&&<><h4>下界与完整窗口诊断</h4>{manual.fingerprint!==fingerprint&&<p className="handoff-warning">草稿或分析设置已变化；以下为上次检查结果，请重新检查。</p>}<Report report={manual.report} onGap={enabled?gap=>void select({dis_win_min:gap.midpoint_eV-manual.report.fermi_eV},manual.report.source_hashes):undefined} onBoundary={enabled&&manual.fingerprint===fingerprint?values=>void select(values,manual.report.source_hashes):undefined}/></>}
-    {(['eig','pre'] as const).map(mode=>{const item=advice[mode];if(!item)return null;const selection=item.advice.dos_selection;return <div key={mode} className="pyw90-result"><h4>{mode==='eig'?'eig suggest':'pre dos'} · {item.seed}</h4><p className="pyw90-reference">E_F {number(item.fermi_eV)} eV · 分析范围 {item.relative_range_eV.join(' 至 ')} eV · PyW90 {item.pyw90_version}</p><p>{item.note}</p>
-      {selection&&<PyW90ProjectionDiagnostic selection={selection} projections={item.advice.projections||[]} numWann={item.interface.basis.num_wann}/>}
-      {item.advice.eigenval&&<p>DOS EIGENVAL：{item.advice.eigenval.spinors?'SOC／非共线单通道':channel(item.advice.eigenval.channel)} · {item.advice.eigenval.nkpts} 个 k 点 · {item.advice.eigenval.nbands} 条带。候选最终按接口 .eig 核对。</p>}
+    {tab==='check'&&manual&&<section aria-label="当前草稿窗口检查"><h4>当前草稿窗口检查 · 来自参数表／.win</h4>{manual.fingerprint!==fingerprint&&<p className="handoff-warning">草稿或分析设置已变化；以下为上次检查结果，请重新检查。</p>}<Report report={manual.report} onGap={enabled&&manual.fingerprint===fingerprint?gap=>void select({dis_win_min:gap.midpoint_eV-manual.report.fermi_eV},manual.report.source_hashes):undefined} onBoundary={enabled&&manual.fingerprint===fingerprint?values=>void select(values,manual.report.source_hashes):undefined}/></section>}
+    {(['eig','pre'] as const).map(mode=>{const item=advice[mode];if(!item||tab!==mode)return null;const selection=item.advice.dos_selection;return <div key={mode} className="pyw90-result"><h4>{mode==='eig'?'外窗候选':'冻窗候选'} · {item.seed}</h4>{item.ui_fingerprint!==fingerprint&&<p className="handoff-warning">设置已变化；以下为上次结果，请重新分析后采用。</p>}<p className="pyw90-reference">E_F {number(item.fermi_eV)} eV · PyW90 {item.pyw90_version}</p><p>分析范围 {item.relative_range_eV.join(' ～ ')} eV · 当前 num_wann={item.interface.basis.num_wann}</p>
+      {item.advice.numerics&&<p>{item.advice.numerics.method==='gauss300'?'300 点高斯积分':'三次样条直接积分'}</p>}
+      {item.advice.projection_basis&&<p className={item.advice.projection_basis.status==='READY'?'':'handoff-warning'}>{item.advice.projection_basis.status==='READY'?`本次 PDOS 轨道：${item.advice.projection_basis.lines.join('；')}`:item.advice.projection_basis.reason}</p>}
+      {item.advice.current_dos&&<section><h5>当前手动冻窗</h5><p>{number(item.advice.current_dos.dis_froz_min)} ～ {number(item.advice.current_dos.dis_froz_max)} eV · 轨道贡献 {item.advice.current_dos.percent==null?'不可计算':`${(item.advice.current_dos.percent*100).toFixed(3)}%`}</p>{item.advice.current_dos.warning&&<p className="handoff-warning">{item.advice.current_dos.warning}</p>}</section>}
+      <details><summary>分析区间与自动投影建议</summary><AnalysisSummary item={item}/><p>{item.note}</p>
+      {selection&&<PyW90ProjectionDiagnostic selection={selection} projections={item.advice.projections||[]} numWann={item.interface.basis.num_wann} ratioBasis={item.advice.projection_basis?.source==='manual'?'manual':'current_model'}/>}
+      </details>{item.advice.eigenval&&<p>DOS EIGENVAL：{item.advice.eigenval.spinors?'SOC／非共线单通道':channel(item.advice.eigenval.channel)} · {item.advice.eigenval.nkpts} 个 k 点 · {item.advice.eigenval.nbands} 条带。候选最终按接口 .eig 核对。</p>}
       {item.advice.eigenval?.spinors&&<p>SOC／非共线 PDOS 使用总电荷密度；三个磁化分量不作为上下自旋能带。每个空间轨道对应两个 spinor 投影，不假设能带二重简并。</p>}
-      {item.advice.minimum_outer_max!==undefined&&<p>保持分析下界时，PyW90 给出的外窗上界至少为 <strong className="pyw90-key-number">{number(item.advice.minimum_outer_max)} eV</strong>；下界穿带时此算法可能偏保守。 <button className="button" disabled={!enabled} onClick={()=>void select({dis_win_min:item.relative_range_eV[0],dis_win_max:item.advice.minimum_outer_max},item.interface_source_hashes)}>预览此固定下界外窗</button></p>}
-      {candidates(item,'outer')}{candidates(item,'frozen')}
+      {item.advice.minimum_outer_max!==undefined&&<p>保持分析下界时，PyW90 给出的外窗上界至少为 <strong className="pyw90-key-number">{number(item.advice.minimum_outer_max)} eV</strong>；下界穿带时此算法可能偏保守。 <button className="button" disabled={!enabled||item.ui_fingerprint!==fingerprint} onClick={()=>void select({dis_win_min:item.relative_range_eV[0],dis_win_max:item.advice.minimum_outer_max},item.interface_source_hashes)}>预览此固定下界外窗</button></p>}
+      {candidates(item,mode==='eig'?'outer':'frozen')}
       <details><summary>原始命令、完整输出、警告与来源身份</summary><p>使用进程内适配器，不修改服务器安装包或研究文件。命令中的 -e 为绝对能量。</p>{item.runs.map((run,i)=><div key={i}><pre className="input-text">{run.arguments.join(' ')}</pre><pre className="input-text">{run.stdout}</pre><pre className="input-text">{run.stderr||'stderr：无输出'}</pre></div>)}<pre className="input-text">{JSON.stringify({source_attempt_id:item.source_attempt_id,interface:item.interface_source_hashes,analysis:item.source_hashes},null,2)}</pre></details>
     </div>;})}
     {preview&&preview.fingerprint===fingerprint&&<section ref={previewElement} className="pyw90-preview" aria-label="采用窗口建议前预览"><h4>采用前预览 · num_wann={preview.report.basis.num_wann}</h4><WindowSummary windows={preview.report.current.relative_windows_eV} changed={Object.keys(preview.values)}/><p>将改变 {Object.keys(preview.values).join('、')}；其余边界沿用当前草稿。确认后再点击“应用参数到 .win”。</p><div className="pyw90-table-scroll"><table className="pyw90-table"><thead><tr><th>参数</th><th>当前草稿 E−E_F / eV</th><th>采用后 E−E_F / eV</th></tr></thead><tbody>{windowTags.map(tag=><tr key={tag}><td>{tag}</td><td>{preview.before[tag]===undefined?'沿用默认 / 未启用':number(preview.before[tag])}</td><td className={Object.hasOwn(preview.values,tag)?'pyw90-window-cell changed':'pyw90-window-cell'}>{number(preview.report.current.relative_windows_eV[tag])}</td></tr>)}</tbody></table></div><details><summary>采用后绝对能量 / eV</summary><dl>{windowTags.map(tag=><div key={tag}><dt>{tag}</dt><dd>{number(preview.report.current.absolute_windows_eV[tag])}</dd></div>)}</dl></details><CountsView value={preview.report.current}/><button className="button primary" disabled={busy||!preview.report.current.valid} onClick={()=>{onAdopt(preview.values as Record<string,number>);setPreview(null);}}>确认填入参数草稿</button><button className="button" onClick={()=>setPreview(null)}>取消</button></section>}

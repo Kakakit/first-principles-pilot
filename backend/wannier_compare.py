@@ -8,7 +8,6 @@ import hashlib
 import json
 import math
 import re
-import shlex
 import shutil
 import sys
 import uuid
@@ -18,8 +17,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import artifacts, execution, pyw90_remote, remote_paths, wannier_bands, wannier_execution
+from . import artifacts, execution, remote_paths, wannier_bands, wannier_execution
 from . import compact_plots, safe_files, remote_transport, recycle
+from . import wannier_diagnostics as diagnostics
 from .recycle import is_recycled
 from .storage import ROOT
 
@@ -68,66 +68,6 @@ def _same_path(kpoints_file, proposal):
                 if isinstance(exc, ValueError) and '坐标不同' in str(exc):
                     raise
                 raise ValueError('DFT 或 Wannier90 路径坐标无效') from exc
-
-
-def _pyw90_diagnostic(band, w90, output_record, seed, fermi, sources, spinors):
-    """Keep pre band/cmp artifacts remote; only return bounded diagnostics."""
-    alias = w90['config']['alias']
-    if not pyw90_remote.available(alias):
-        return {'status': 'UNAVAILABLE', 'reason': '该服务器未登记 PyW90 运行时'}
-    if str(spinors).strip().lower() in ('.true.', 'true', 't'):
-        return {'status': 'NOT_APPLICABLE', 'reason': 'SOC spinor 不套用 PyW90 共线 cmp；本机叠图独立生成'}
-    band_path = execution.attempt_path(band)['shell']
-    output_path = execution.attempt_path(output_record)['shell']
-    model_path = execution.attempt_path(w90)['shell']
-    expected = {(item['attempt_id'], item.get('path', item.get('name'))): item['sha256']
-                for item in sources if item.get('sha256')}
-    checks = []
-    guards = []
-    for record, path, names in ((band, band_path, ('EIGENVAL', 'KPOINTS', 'POSCAR')),
-                                (output_record, output_path, (seed + '_band.dat', seed + '_band.labelinfo.dat'))):
-        for name in names:
-            digest = expected.get((record['id'], name))
-            if not digest:
-                return {'status': 'SOURCE_CHANGED', 'reason': name + ' 缺少叠图来源身份'}
-            file_path = remote_paths.shell_path(path + '/' + name)
-            guards.append('test "$(sha256sum -- '+file_path+' | cut -d\' \' -f1)" = '+shlex.quote(digest))
-            checks.append({'attempt_id': record['id'], 'name': name, 'sha256': digest})
-    py = shlex.quote(pyw90_remote.runtime(alias)['python'])
-    package = remote_paths.shell_path(pyw90_remote.runtime(alias)['package']) if pyw90_remote.runtime(alias).get('package') else "''"
-    from . import servers
-    scratch_root = remote_paths.shell_path(servers.scratch_root(alias,'pyw90-band-compare'))
-    pre = 'pre band --path .' + (' --spin-down' if seed.endswith('.2') else '')
-    command = 'set -e\n' + '\n'.join(guards) + '\n' + f'''
-band_dir={remote_paths.shell_path(band_path)}
-plot_dir={remote_paths.shell_path(output_path)}
-model_dir={remote_paths.shell_path(model_path)}
-scratch_root={scratch_root}
-mkdir -p "$scratch_root"
-scratch=$(mktemp -d "$scratch_root/run.XXXXXX")
-trap 'rm -rf -- "$scratch"' EXIT
-for name in EIGENVAL KPOINTS POSCAR; do ln -s "$band_dir/$name" "$scratch/$name"; done
-for name in {shlex.quote(seed + '_band.dat')} {shlex.quote(seed + '_band.labelinfo.dat')}; do ln -s "$plot_dir/$name" "$scratch/$name"; done
-ln -s "$model_dir/{seed}.wout" "$scratch/{seed}.wout"
-cd "$scratch"
-PYTHONPATH={package} MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' {pre} > pre.log 2>&1
-test -s bnd.dat
-printf 'FPILOT_PRE_BAND_BYTES=%s\n' "$(wc -c < bnd.dat)"
-PYTHONPATH={package} MPLBACKEND=Agg timeout 180 {py} -c 'from pyw90.pyw90_cli import main_cli; main_cli()' cmp FPilot --path . --seedname {shlex.quote(seed)} --vasp bnd.dat --efermi {fermi:.12g} > cmp.log 2>&1
-grep -E 'Final Quality|Quality|Error' cmp.log | tail -8
-'''
-    from .analysis_queue import slot,environment
-    with slot(alias):receipt = remote_transport.run(alias,environment(pyw90_remote.runtime(alias).get('cores'))+command,timeout=420,stdout_limit=5000,lane='analysis')
-    if receipt['exit_code'] != 0 or receipt.get('stdout_truncated'):
-        return {'status': 'FAILED', 'reason': (receipt.get('stderr') or receipt.get('stdout') or 'PyW90 pre band/cmp 失败')[-500:],
-                'source_hashes': checks}
-    size = re.search(r'^FPILOT_PRE_BAND_BYTES=(\d+)$', receipt['stdout'], re.M)
-    quality = re.search(r'Final Quality\s+([0-9.Ee+-]+)\s*(meV|eV)?', receipt['stdout'])
-    return {'status': 'COMPLETED', 'pre_band_bytes': int(size.group(1)) if size else None,
-            'quality_value': float(quality.group(1)) if quality else None,
-            'quality_unit': quality.group(2) if quality else None,
-            'summary': receipt['stdout'][-1500:], 'source_hashes': checks,
-            'note': 'PyW90 数值仅作诊断，不替代本机曲线叠图或科学验证。'}
 
 
 def _w90(record):
@@ -187,9 +127,13 @@ def _pull(record, name, directory):
             'size_bytes': len(raw)}
 
 
-def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagnostic=False, title=None):
+def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagnostic=False, title=None,
+        metric_emin=None,metric_emax=None,group_size=6,dft_band_start=None,on_plot_ready=None):
     if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in (emin, emax)) or not -100 <= emin < emax <= 100:
         raise ValueError('能量范围无效')
+    metric_window=[emin if metric_emin is None else metric_emin,emax if metric_emax is None else metric_emax]
+    if not all(isinstance(v,(int,float)) and math.isfinite(v) for v in metric_window) or not -100<=metric_window[0]<metric_window[1]<=100:
+        raise ValueError('评价范围无效')
     w90 = execution.get(wannier_attempt_id)
     if w90.get('project_id') != project_id:
         raise ValueError('Wannier90 attempt 不属于当前项目')
@@ -252,12 +196,12 @@ def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagno
         if normalize(wannier.labels) != normalize(dft[index].labels):
             raise ValueError('DFT 与 Wannier90 的高对称路径标签不一致，不能叠加')
         mapped = remap_channel_to_ticks(wannier, dft[index])
-        from matplotlib import font_manager
-        available={font.name for font in font_manager.fontManager.ttflist}
-        family=next((name for name in ('PingFang SC','Noto Sans CJK SC','Microsoft YaHei','Arial Unicode MS','SimHei','WenQuanYi Zen Hei') if name in available),None)
-        title_font=font_manager.FontProperties(family=family) if family else None
-        plot_compare([dft[index]], [wannier], directory / 'comparison', emin, emax,
-                     ['.png', '.svg'], title.strip() if title else 'DFT–Wannier band comparison',title_font=title_font)
+        report=diagnostics.evaluate(ROOT_COMPARE,{'project_id':project_id,'band_attempt_id':band_attempt_id,'seed':seed},
+                                    dft[index],wannier,metric_window,group_size,dft_band_start)
+        diagnostics.save_tables(directory,report)
+        diagnostics.atomic(directory/'score-input.json',{
+            'dft_x':dft[index].x.tolist(),'dft_energy':(dft[index].energies+fermi).tolist(),
+            'wannier_x':wannier.x.tolist(),'wannier_energy':(wannier.energies+fermi).tolist()})
         with (directory / 'curves.csv').open('w', newline='') as stream:
             writer = csv.writer(stream)
             writer.writerow(['method', 'spin', 'band', 'k_index', 'path_x_A^-1', 'energy_relative_eV'])
@@ -272,26 +216,30 @@ def run(project_id, wannier_attempt_id, band_attempt_id, emin=-4, emax=4, diagno
                 for b in range(channel.energies.shape[1]):
                     for k in range(channel.energies.shape[0]):
                         writer.writerow([method, seed, b + 1, k + 1, float(axis[k]), float(channel.energies[k, b])])
-        try:
-            pyw90 = _pyw90_diagnostic(band, w90, output_record, seed, fermi, sources, bundle.get('spinors')) if diagnostic else {'status':'NOT_REQUESTED'}
-        except (ValueError, OSError) as exc:
-            pyw90 = {'status': 'FAILED', 'reason': str(exc)[:500]}
+        pyw90={'status':'PENDING' if diagnostic else 'NOT_REQUESTED'}
+        window_meta=wannier_execution.window_metadata(bundle)
         receipt = {'schema': 'fpilot.wannier-band-comparison.v1', 'id': identifier,
                    'project_id': project_id, 'title':title.strip() if title else None, 'wannier_attempt_id': wannier_attempt_id,
                    'wannier_plot_attempt_id': output_record['id'] if output_record['id'] != wannier_attempt_id else None,
                    'band_attempt_id': band_attempt_id, 'scf_attempt_id': scf_id,
                    'seed': seed, 'fermi_eV': fermi, 'energy_window_eV': [emin, emax],
-                   **wannier_execution.window_metadata(bundle),
+                   **window_meta,'plot_relative_windows':{tag:value-fermi for tag,value in window_meta['absolute_windows'].items()},
                    'energy_reference':bundle.get('energy_reference',{}),'win_sha256':bundle.get('win_sha256'),'input_reason':bundle.get('input_reason'),
-                   'sources': sources, 'files': ['comparison.png', 'comparison.svg', 'curves.csv'],
+                   'sources': sources, 'files': ['comparison.png', 'comparison.svg', 'curves.csv','diagnostics.json','per_band.csv','groups.csv'],
+                   'diagnostics':report,
                    'pyw90_diagnostic': pyw90,'prepare_seconds':prepare_seconds,
                    'remote_requests':sum(e.get('ssh_requests',0) for e in timings),'timings':timings,
                    'local_path': str(directory), 'created_at': datetime.now(timezone.utc).isoformat(),
                    'note': '同源采样路径的叠加对比；不代表插值质量或物理模型已验证。'}
-        (directory / 'record.json').write_text(json.dumps(receipt, ensure_ascii=False, indent=2))
+        receipt['diagnostic_input_sha256']=hashlib.sha256((directory/'score-input.json').read_bytes()).hexdigest()
+        diagnostics.atomic(directory/'diagnostics.json',{**report,'pyw90_diagnostic':pyw90,'plot_relative_windows':receipt['plot_relative_windows']})
+        _render(directory,receipt,dft[index],wannier)
+        diagnostics.atomic(directory/'record.json',receipt)
+        if on_plot_ready:on_plot_ready(receipt)
+        if diagnostic:receipt=_augment(receipt,bundle.get('spinors'))
         return receipt
     except Exception:
-        shutil.rmtree(directory, ignore_errors=True)
+        if not (directory/'record.json').is_file():shutil.rmtree(directory, ignore_errors=True)
         raise
 
 
@@ -308,7 +256,7 @@ def saved(project_id):
 
 
 def output(project_id, identifier, filename):
-    if filename not in ('comparison.png', 'comparison.svg', 'curves.csv') or not re.fullmatch(r'[a-f0-9]{32}', identifier):
+    if filename not in ('comparison.png', 'comparison.svg', 'curves.csv','diagnostics.json','per_band.csv','groups.csv') or not re.fullmatch(r'[a-f0-9]{32}', identifier):
         raise ValueError('对比图文件名无效')
     directory = ROOT_COMPARE / identifier
     record = json.loads((directory / 'record.json').read_text())
@@ -346,10 +294,17 @@ def start(**options):
     with JOB_LOCK:
         old=JOBS.get(key)
         if old and old['state']=='RUNNING':return dict(old)
+        if old and old['state']=='READY' and (ROOT_COMPARE/old['result']['id']/'record.json').is_file():
+            recycle.assert_available('comparisons',old['result']['id'],old['result'])
+            for name in ('wannier_attempt_id','band_attempt_id'):
+                record=execution.get(options[name]);recycle.assert_available('attempts',record['id'],record)
+            return {**old,'cached':True}
         job={'id':key,'state':'RUNNING','step':'准备来源并生成叠图','started_at':time.time()};JOBS[key]=job
     def work():
         try:
-            result=run(**options)
+            def ready(record):
+                with JOB_LOCK:job.update(plot_ready=True,comparison_id=record['id'],result=record,step='叠图已生成，正在补充原生评分')
+            result=run(**options,diagnostic=True,on_plot_ready=ready)
             with JOB_LOCK:job.update(state='READY',result=result,seconds=time.time()-job['started_at'])
         except Exception as exc:
             with JOB_LOCK:job.update(state='FAILED',error=str(exc)[:1000])
@@ -377,16 +332,56 @@ def start_diagnostic(project_id, identifier):
     def work():
         try:
             w90=execution.get(record['wannier_attempt_id']);bundle,_=_w90(w90)
-            band=execution.get(record['band_attempt_id'])
-            output_record=execution.get(record.get('wannier_plot_attempt_id') or w90['id'])
-            for item in (w90, band, output_record):recycle.assert_available('attempts',item['id'],item)
-            with remote_transport.operation('pyw90-diagnostic') as scope:
-                result=_pyw90_diagnostic(band,w90,output_record,record['seed'],record['fermi_eV'],record['sources'],bundle.get('spinors'))
             recycle.assert_available('comparisons',identifier,record)
-            record.update(pyw90_diagnostic=result,diagnostic_timings=scope['events'])
-            temporary=path.with_suffix('.part');temporary.write_text(json.dumps(record,ensure_ascii=False,indent=2));temporary.replace(path)
+            result=_augment(record,bundle.get('spinors'))
             with JOB_LOCK:job.update(state='READY',result=result,seconds=time.time()-job['started_at'])
         except Exception as exc:
             with JOB_LOCK:job.update(state='FAILED',error=str(exc)[:1000])
     from .analysis_queue import executor
     executor.submit(work);return dict(job)
+
+
+def _render(directory,record,dft=None,wannier=None):
+    if dft is None:
+        channels,_=vasp_band_channels_from_eigenval(directory/'dft/EIGENVAL',directory/'dft/KPOINTS',directory/'dft/POSCAR','auto',record['fermi_eV'])
+        dft=channels[1 if record['seed'].endswith('.2') else 0]
+        wannier=wannier_channel(directory/'wannier'/(record['seed']+'_band.dat'),directory/'wannier'/(record['seed']+'_band.labelinfo.dat'),record['fermi_eV'],record['seed'])
+    from matplotlib import font_manager
+    available={font.name for font in font_manager.fontManager.ttflist}
+    family=next((name for name in ('PingFang SC','Noto Sans CJK SC','Microsoft YaHei','Arial Unicode MS','SimHei','WenQuanYi Zen Hei') if name in available),None)
+    font=font_manager.FontProperties(family=family) if family else None
+    plot_compare([dft],[wannier],directory/'comparison',*record['energy_window_eV'],['.png','.svg'],
+                 record.get('title') or 'DFT–Wannier band comparison',title_font=font,summary_lines=diagnostics.summary_lines(record))
+
+
+def _augment(record,spinors):
+    from filelock import FileLock
+    directory=ROOT_COMPARE/record['id']
+    with FileLock(str(directory/'diagnostic.lock'),timeout=65):
+        current=json.loads((directory/'record.json').read_text()) if (directory/'record.json').is_file() else record
+        if (current.get('pyw90_diagnostic') or {}).get('status') in ('COMPLETED','NOT_APPLICABLE'):
+            return current
+        return _augment_locked(current,spinors)
+
+
+def _augment_locked(record,spinors):
+    directory=ROOT_COMPARE/record['id']
+    if not record.get('diagnostics') or not (directory/'score-input.json').is_file():
+        result={'status':'UNAVAILABLE','reason':'旧记录没有固定评价基准；请生成一份新的叠图，原图保留'}
+    else:
+        try:
+            digest=hashlib.sha256((directory/'score-input.json').read_bytes()).hexdigest()
+            if digest!=record.get('diagnostic_input_sha256'):raise ValueError('本机诊断输入已变化；原图保留，请重新生成新的叠图')
+            result=diagnostics.native(directory,record,execution.get(record['wannier_attempt_id'])['config']['alias'],str(spinors).strip().lower() in ('.true.','true','t'))
+        except Exception as exc:result={'status':'FAILED','reason':str(exc)[-600:]}
+    previous=record.get('pyw90_diagnostic') or {}
+    if previous.get('status') in ('FAILED','UNAVAILABLE','SOURCE_CHANGED'):
+        record.setdefault('native_history',[]).append(previous)
+    record['pyw90_diagnostic']=result
+    diagnostics.atomic(directory/'record.json',record)
+    if record.get('diagnostics'):
+        diagnostics.atomic(directory/'diagnostics.json',{**record['diagnostics'],'pyw90_diagnostic':result,
+                           'native_history':record.get('native_history',[]),'plot_relative_windows':record.get('plot_relative_windows',{})})
+        try:_render(directory,record)
+        except Exception as exc:record['annotation_error']=str(exc)[-600:];diagnostics.atomic(directory/'record.json',record)
+    return record

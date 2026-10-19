@@ -55,6 +55,7 @@ def _run(alias, path, arguments, input_names):
     invocation = ' '.join(map(shlex.quote, arguments))
     adapter = Path(__file__).with_name('pyw90_adapter.py').read_text(encoding='utf-8')
     checker = Path(__file__).with_name('pyw90_window_check.py').read_text(encoding='utf-8')
+    numerics = Path(__file__).with_name('pyw90_dos.py').read_text(encoding='utf-8')
     links = '\n'.join('ln -s "$source_dir"/' + shlex.quote(name) +
                       ' "$scratch"/' + shlex.quote(name) for name in input_names)
     command = ('set -e\ncd ' + remote_paths.shell_path(path) + '\n'
@@ -66,7 +67,7 @@ def _run(alias, path, arguments, input_names):
                + links + '\ncd "$scratch"\n'
                'PYTHONPATH=' + package + ' MPLBACKEND=Agg timeout 180 '
                + shlex.quote(tool['python'])
-               + ' -c ' + shlex.quote(checker + '\n' + adapter + '\nmain()\n') + ' '
+               + ' -c ' + shlex.quote(checker + '\n' + numerics + '\n' + adapter + '\nmain()\n') + ' '
                + invocation + '\n')
     from .analysis_queue import slot,environment
     with slot(alias):receipt = execution.ssh(alias,environment(tool.get('cores'))+command,timeout=210,stdout_limit=524288,lane='analysis')
@@ -140,17 +141,11 @@ def _absolute_windows(relative_windows, fermi):
     return {tag: value + fermi for tag, value in relative_windows.items()}
 
 
-def _dos_projection(alias, path, emin, emax, channel):
-    args = ['pre','dos','--path','.', '-e',str(emin),str(emax)]
-    if channel == 'down': args.append('--spin-down')
-    # The no --extra branch is DOS-only. EIGENVAL is used by the separate
-    # native frozen-window branch, never by projection selection.
-    run = _run(alias,path,args,('vasprun.xml',))
-    first = run['stdout']
-    projection = re.search(r'Wannier90 Projection:\s*\n(.*?)\n\s*pyw90 --extra input:',first,re.S)
-    selected = re.search(r'pyw90 --extra input:\s*\n([^\n]+)',first)
-    return {'projections':projection.group(1).strip().splitlines() if projection else [],
-            'dos_selection':_marker(first,'FPILOT_DOS_SELECTION')}, run, args, selected
+def _dos_projection(alias, path, emin, emax, channel, integration_method='spline'):
+    args=['dos-report',json.dumps({'absolute_range':[emin,emax],'channel':channel,
+                                  'integration_method':integration_method},allow_nan=False)]
+    run=_run(alias,path,args,('vasprun.xml',))
+    return _marker(run['stdout'],'FPILOT_DOS_REPORT'),run,args,None
 
 
 def pre_dos_sources(project, node_id):
@@ -186,7 +181,9 @@ def pre_dos_sources(project, node_id):
     return result
 
 
-def pre_dos(project, node_id, source_attempt_id, channel='auto', emin=-4, emax=4):
+def pre_dos(project, node_id, source_attempt_id, channel='auto', emin=-4, emax=4,integration_method='spline'):
+    from .pyw90_dos import DOS_METHODS
+    if integration_method not in DOS_METHODS:raise ValueError('积分方式无效')
     if not all(isinstance(v,(int,float)) and math.isfinite(v) for v in (emin,emax)) or not -100 <= emin < emax <= 100:
         raise ValueError('请填写有限且递增的相对费米能量范围')
     choices = pre_dos_sources(project,node_id)
@@ -201,7 +198,7 @@ def pre_dos(project, node_id, source_attempt_id, channel='auto', emin=-4, emax=4
     alias, path = source['config']['alias'], execution.attempt_path(source)['shell']
     hashes = _file_hashes(alias,path,('OUTCAR','vasprun.xml'))
     if hashes['OUTCAR'] != energy['outcar_sha256']: raise ValueError('能量参考来源已变化，请重新分析')
-    result, run, _, _ = _dos_projection(alias,path,emin+energy['fermi_eV'],emax+energy['fermi_eV'],channel)
+    result, run, _, _ = _dos_projection(alias,path,emin+energy['fermi_eV'],emax+energy['fermi_eV'],channel,integration_method)
     actual = result['dos_selection']
     if actual.get('channel') != channel or bool(actual.get('spinors')) != (channels == ['charge']):
         raise ValueError('vasprun.xml 与来源实际输入的自旋模型不一致，请核查来源')
@@ -249,7 +246,13 @@ def check(project, node_id, parent_id, alias, seed, emin, emax, energy_reference
 
 
 def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
-              energy_reference, dos_attempt_id=None, relative_windows=None):
+              energy_reference, dos_attempt_id=None, relative_windows=None,
+              integration_method='spline',projection_lines=None,projection_selection=''):
+    from .pyw90_dos import DOS_METHODS
+    if integration_method not in DOS_METHODS:raise ValueError('积分方式无效')
+    if (projection_lines is not None and (not isinstance(projection_lines,list) or len(projection_lines)>256 or
+            any(not isinstance(line,str) or len(line)>500 for line in projection_lines))):raise ValueError('投影集合无效')
+    if not isinstance(projection_selection,str) or len(projection_selection)>10000:raise ValueError('PDOS 轨道选择无效')
     if mode not in ('eig', 'pre') or not all(isinstance(v, (int, float)) and math.isfinite(v)
                                               for v in (emin, emax)) or not -100 <= emin < emax <= 100:
         raise ValueError('请选择 eig/pre 和有限的相对费米能量范围')
@@ -286,22 +289,14 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
             dos_path = parent_path
             source_id = parent_id
         source_hashes = _file_hashes(alias, dos_path, ('vasprun.xml', 'EIGENVAL'))
-        # pre dos has no --efermi option. Use the parent OUTCAR's absolute
-        # range so a separate DOS source cannot silently shift the reference.
-        projection_result, first_run, args, selected = _dos_projection(alias,dos_path,emin+fermi,emax+fermi,'down' if seed.endswith('.2') else 'auto')
-        runs.append(first_run)
-        result = {**projection_result,'frozen': [], 'outer': []}
-        if selected and selected.group(1).strip():
-            second_run = _run(alias, dos_path, [*args, '--extra', selected.group(1).strip(),
-                                             '--fpilot-num-wann', str(nwann)],
-                          ('vasprun.xml', 'EIGENVAL'))
-            runs.append(second_run)
-            second = second_run['stdout']
-            result['eigenval'] = _marker(second, 'FPILOT_EIGENVAL')
-            result['frozen'] = _table(second, ('dis_froz_min', 'dis_froz_max', 'N', 'pdos', 'tdos', 'percent'))
-            match = re.search(r'Lowest `dis_win_max` for [^:]+:\s*(' + NUMBER + ')', second)
-            if match and 'There is no enough states' not in second:
-                result['minimum_outer_max'] = float(match.group(1))
+        if projection_lines is None:
+            basis=_interface_check(alias,parent_path,seed,win_name,fermi,emin,emax,relative_windows)
+            projection_lines=basis['basis'].get('projections',[])
+        request={'absolute_range':[emin+fermi,emax+fermi],'channel':'down' if seed.endswith('.2') else 'auto',
+                 'num_wann':nwann,'integration_method':integration_method,'projection_lines':projection_lines,
+                 'projection_selection':projection_selection,'absolute_windows':_absolute_windows(relative_windows,fermi)}
+        run=_run(alias,dos_path,['dos-report',json.dumps(request,allow_nan=False)],('vasprun.xml','EIGENVAL'))
+        runs.append(run);result=_marker(run['stdout'],'FPILOT_DOS_REPORT')
         if _file_hashes(alias, dos_path, ('vasprun.xml', 'EIGENVAL')) != source_hashes:
             raise ValueError('PyW90 分析期间 DOS 输入发生变化，请刷新来源后重新分析')
     mesh = _interface_check(alias, parent_path, seed, win_name, fermi, emin, emax, relative_windows,
@@ -319,6 +314,8 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
             row['check'] = checked
     if 'minimum_outer_max' in result:
         result['minimum_outer_max'] = round(result['minimum_outer_max'] - fermi, 10)
+    if result.get('current_dos'):
+        for tag in ('dis_froz_min','dis_froz_max'):result['current_dos'][tag]-=fermi
     note = '候选数值由 PyW90 命令行给出；未自动写入 .win，也不代表局域化质量合格。'
     if mode == 'pre' and not result['frozen']:
         note = '分析已完成，但当前范围未生成冻结窗候选；请核对分析范围与投影选择。' + note

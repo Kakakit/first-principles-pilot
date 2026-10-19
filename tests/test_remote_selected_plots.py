@@ -35,13 +35,21 @@ class SelectedProjectionTests(unittest.TestCase):
 
 
 class SupplementaryDiagnosticTests(unittest.TestCase):
-    def test_hash_guards_and_diagnostic_use_one_request_with_compact_source_names(self):
-        from backend import wannier_compare as compare
-        band={'id':'band','config':{'alias':'jutai-1'}};model={'id':'model','config':{'alias':'jutai-1'}}
-        sources=[{'attempt_id':record,'name':name,'sha256':'a'*64} for record,names in [('band',['EIGENVAL','KPOINTS','POSCAR']),('model',['wannier90.1_band.dat','wannier90.1_band.labelinfo.dat'])] for name in names]
-        receipt={'exit_code':0,'stdout':'FPILOT_PRE_BAND_BYTES=100\nFinal Quality 2.0 meV','stderr':''}
-        with patch.object(compare.pyw90_remote,'runtime',return_value={'python':'/configured/python','package':'/configured/pyw90'}),patch.object(execution,'attempt_path',return_value={'shell':'/home/u/230269265lht/test'}),patch.object(compare.remote_transport,'run',return_value=receipt) as request,patch.object(compare.pyw90_remote,'_file_hashes') as old_hash:
-            result=compare._pyw90_diagnostic(band,model,model,'wannier90.1',0,sources,None)
-            self.assertEqual(result['status'],'COMPLETED');self.assertEqual(request.call_count,1);old_hash.assert_not_called()
-            self.assertEqual(request.call_args.args[1].count('sha256sum --'),5)
-            self.assertEqual(request.call_args.kwargs['lane'],'analysis')
+    def test_native_fallback_consumes_cached_arrays_without_remote_input_scans(self):
+        from backend import wannier_diagnostics as diagnostics,pyw90_remote,remote_transport,remote_health
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'score-input.json').write_text('{}')
+            record={'diagnostics':{'metric_window_relative_eV':[-2,3]},'fermi_eV':5}
+            missing=SimpleNamespace(returncode=0,stdout='FPILOT_PYW90_SCORE={"status":"UNAVAILABLE"}',stderr='')
+            receipt={'exit_code':0,'stdout':'FPILOT_PYW90_SCORE={"status":"COMPLETED","quality_value":2.0}','stderr':''}
+            with patch.object(remote_cache,'ROOT',root),patch.object(remote_health,'ROOT',root),patch.object(remote_health,'status',return_value=[]),patch.object(pyw90_remote,'available',return_value=True),patch.object(pyw90_remote,'runtime',return_value={'python':'/configured/python','package':'/configured/pyw90'}),patch.object(diagnostics.subprocess,'run',return_value=missing),patch.object(remote_transport,'run',return_value=receipt) as wire:
+                result=diagnostics.native(root,record,'fixture',False)
+                self.assertEqual(result['quality_value'],2)
+                self.assertEqual(diagnostics.native(root,record,'fixture',False)['quality_value'],2)
+                self.assertEqual(wire.call_count,1)
+                command=wire.call_args.args[1]
+                for forbidden in ('sha256sum','mktemp','pre band','main_cli','qsub'):
+                    self.assertNotIn(forbidden,command)
+                self.assertEqual(wire.call_args.kwargs['lane'],'analysis')
+                self.assertEqual(json.loads(wire.call_args.kwargs['data'])['fermi_eV'],5)

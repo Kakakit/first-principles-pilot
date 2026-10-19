@@ -1585,61 +1585,10 @@ def _reference_window_metrics(
     samples; every corresponding residual remains in the score.
     """
 
-    np = compare.np
-    max_offset = dft.shape[1] - w90.shape[1]
-    if max_offset < 0:
-        raise InputError("Wannier band count exceeds DFT band count")
-    offsets = range(max_offset + 1) if requested_offset == "auto" else [int(requested_offset)]
-    candidates: list[dict[str, object]] = []
-    for offset in offsets:
-        if offset > max_offset:
-            raise InputError(f"DFT band offset {offset} exceeds maximum {max_offset}")
-        selected = dft[:, offset : offset + w90.shape[1]]
-        mask = (selected - fermi >= window[0]) & (selected - fermi <= window[1])
-        if not np.any(mask):
-            continue
-        residual = (w90 - selected)[mask]
-        candidates.append(
-            {
-                "offset": offset,
-                "paired_values": int(residual.size),
-                "reference_values": int(residual.size),
-                "sample_selector": "dft_reference_energy",
-                "mae_meV": float(np.mean(np.abs(residual)) * 1000.0),
-                "rmse_meV": float(np.sqrt(np.mean(residual**2)) * 1000.0),
-                "max_abs_diff_meV": float(np.max(np.abs(residual)) * 1000.0),
-            }
-        )
-    if not candidates:
-        raise InputError("no reference DFT energies lie in the requested ranking window")
-    selected_metric = min(candidates, key=lambda item: (item["rmse_meV"], item["offset"]))
-    offset = int(selected_metric["offset"])
-    selected = dft[:, offset : offset + w90.shape[1]]
-    per_band: list[dict[str, object]] = []
-    for band in range(w90.shape[1]):
-        mask = (
-            (selected[:, band] - fermi >= window[0])
-            & (selected[:, band] - fermi <= window[1])
-        )
-        if not np.any(mask):
-            continue
-        residual = w90[mask, band] - selected[mask, band]
-        per_band.append(
-            {
-                "wannier_band_1_based": band + 1,
-                "dft_band_1_based": band + offset + 1,
-                "paired_points": int(residual.size),
-                "reference_points": int(residual.size),
-                "mae_meV": float(np.mean(np.abs(residual)) * 1000.0),
-                "rmse_meV": float(np.sqrt(np.mean(residual**2)) * 1000.0),
-                "max_abs_diff_meV": float(np.max(np.abs(residual)) * 1000.0),
-            }
-        )
-    return {
-        **selected_metric,
-        "selection": "minimum RMSE over order-preserving offsets using fixed DFT-reference samples",
-        "per_band": per_band,
-    }
+    spec=importlib.util.spec_from_file_location("fpilot_shared_comparison_metrics",Path(__file__).with_name("comparison_metrics.py"))
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    try:return module.scan_reference_metrics(dft,w90,fermi,window,requested_offset)
+    except ValueError as exc:raise InputError(str(exc)) from exc
 
 
 def _shape_jump_metrics(

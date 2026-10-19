@@ -2,6 +2,7 @@
 .pyw90-advice h4{font-size:20px;margin-top:1.5rem}
 .pyw90-advice h5{font-size:18px;margin:.9rem 0 .4rem}
 .pyw90-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.pyw90-status{min-height:1.6em;font-variant-numeric:tabular-nums}
 .pyw90-report,.pyw90-result,.pyw90-preview{padding:1rem;margin-top:1rem;border:1px solid var(--color-border);border-radius:10px;background:var(--color-surface)}
 .pyw90-preview{border:2px solid var(--color-accent)}
 .pyw90-summary,.pyw90-window-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:.75rem;margin:.75rem 0}

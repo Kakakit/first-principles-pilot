@@ -10,7 +10,16 @@ export type FrozenBoundary={nearby_bands:(BandExtrema & {roles:string[]})[];uppe
 export type WindowCheck={absolute_windows_eV:Record<WindowTag,number|null>;relative_windows_eV:Record<WindowTag,number|null>;outer:Counts;frozen:Counts|null;valid:boolean;errors:string[];analysis_range_covered:boolean;defaulted_tags:WindowTag[];gap?:Gap|null};
 export type MeshReport={basis:{num_wann:number;spinors:boolean;channel:string;projections:string[];exclude_bands:string};nkpts:number;nbands:number;fermi_eV:number;analysis_counts:Counts;gaps:Gap[];analysis_lower:Diagnostic;outer_lower:Diagnostic;current:WindowCheck;source_hashes?:Record<string,string>;frozen_boundary?:FrozenBoundary|null};
 export type Candidate=Windows & {check:WindowCheck;[key:string]:unknown};
+export type DosNumerics={method:'spline'|'gauss300';order:number|null;revision:string;spline_fits?:number};
+export type ProjectionBasis={status:string;source:string;lines:string[];keys?:string[];reason?:string};
+export type DosMeasure=Windows & {pdos:number|null;tdos:number|null;percent:number|null;warning?:string};
 export type Advice={mode:'eig'|'pre';seed:string;source_attempt_id:string;source_hashes:Record<string,string>;interface_source_hashes:Record<string,string>;fermi_eV:number;relative_range_eV:number[];pyw90_version:string;interface:MeshReport;runs:{arguments:string[];stdout:string;stderr:string;exit_code:number}[];advice:{outer:Candidate[];frozen:Candidate[];projections?:string[];minimum_outer_max?:number;eigenval?:{channel:string;spinors?:boolean;nkpts:number;nbands:number;suggested_num_wann?:number;window_num_wann?:number};dos_selection?:{lb:number;threshold:number;spatial_orbitals:number;suggested_num_wann:number;orbitals:{species:string;structure_id:number;orb_name:string;dos:number;selected:boolean}[]}};note:string};
+export type AdviceResult=Advice & {ui_fingerprint?:string;advice:Advice['advice'] & {numerics?:DosNumerics;projection_basis?:ProjectionBasis;current_dos?:DosMeasure}};
+
+export function draftProjections(win:string):string[]{
+ const block=win.match(/begin\s+projections\s*\n([\s\S]*?)\n\s*end\s+projections/i);
+ return block?block[1].split('\n').map(line=>line.split(/[!#]/)[0].trim()).filter(Boolean):[];
+}
 
 export function candidateWindows(row:Windows):Windows{
   return Object.fromEntries(windowTags.filter(tag=>typeof row[tag]==='number'&&Number.isFinite(row[tag])).map(tag=>[tag,row[tag]]));

@@ -605,6 +605,9 @@ class PyW90Advice(BaseModel):
     energy_reference: dict
     dos_attempt_id: Optional[str] = None
     relative_windows: Optional[dict[str, float]] = None
+    integration_method: Literal['spline','gauss300'] = 'spline'
+    projection_lines: Optional[list[str]] = None
+    projection_selection: str = ''
 
 
 class PyW90PreDosSources(BaseModel):
@@ -617,6 +620,7 @@ class PyW90PreDos(PyW90PreDosSources):
     channel: Literal['auto','single','up','down','charge'] = 'auto'
     emin: float = -4
     emax: float = 4
+    integration_method: Literal['spline','gauss300'] = 'spline'
 
 
 @app.post('/api/inputs/pyw90-pre-dos-sources')
@@ -663,6 +667,10 @@ class WannierCompareRequest(BaseModel):
     band_attempt_id: str
     emin: float = -4
     emax: float = 4
+    metric_emin: Optional[float] = None
+    metric_emax: Optional[float] = None
+    group_size: int = 6
+    dft_band_start: Optional[int] = None
 
 
 @app.get('/api/wannier90/comparison-candidates')
@@ -679,7 +687,7 @@ def wannier_comparison_candidates(project_id: str, wannier_attempt_id: str):
 
 @app.post('/api/wannier90/comparisons')
 def wannier_comparison_run(payload: WannierCompareRequest):
-    try:return wannier_compare.run(**payload.model_dump())
+    try:return wannier_compare.run(**payload.model_dump(),diagnostic=True)
     except (ValueError, OSError, KeyError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
@@ -709,7 +717,7 @@ def wannier_comparison_diagnostic(identifier: str, payload: ScanAction):
 def wannier_comparison_file(identifier: str, filename: str, project_id: str):
     from fastapi.responses import Response
     try:return Response(wannier_compare.output(project_id, identifier, filename),
-                        media_type={'comparison.png':'image/png','comparison.svg':'image/svg+xml','curves.csv':'text/csv'}[filename])
+                        media_type='image/png' if filename.endswith('.png') else 'image/svg+xml' if filename.endswith('.svg') else 'application/json' if filename.endswith('.json') else 'text/csv')
     except (ValueError, OSError, KeyError) as exc:raise HTTPException(422,str(exc)) from exc
 
 

@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-REVISION = 'fpilot.pyw90-manual.v3'
+REVISION = 'fpilot.pyw90-manual.v4'
 
 
 def validate_layout(path):
@@ -34,7 +34,7 @@ def validate_layout(path):
             raise ValueError('EIGENVAL 包含超出声明数量的数据')
 
 
-def install(spin_down=False, nwann_override=None):
+def install(spin_down=False, nwann_override=None, integration_method='spline'):
     import numpy as np
     import pandas as pd
     from pymatgen.electronic_structure.core import Spin
@@ -42,6 +42,10 @@ def install(spin_down=False, nwann_override=None):
     from pyw90.lib.w90 import W90
     from pyw90.lib.dos import DOS
     from pyw90 import pre_w90_tool
+    integrator_class=globals().get('DosIntegrator')
+    if integrator_class is None:from .pyw90_dos import DosIntegrator as integrator_class
+    integrator=integrator_class(integration_method)
+    DOS.get_dos_integral=staticmethod(integrator)
 
     # Keep each numerical table in one block for the SSH receipt parser.
     pd.set_option('display.expand_frame_repr', False)
@@ -54,12 +58,22 @@ def install(spin_down=False, nwann_override=None):
     original_features = pre_w90_tool.main_features
     original_vasprun = pre_w90_tool.Vasprun
     original_analysis = DOS.get_dos_analysis_df
-    original_frame = DOS.get_dos_df
     context = {'spinors': False, 'channels': None}
+    parsed_xml={};parsed_eigenvalues={}
+
+    def load_vasprun(*positional, **keywords):
+        key=repr((positional,sorted(keywords.items())))
+        if key not in parsed_xml:parsed_xml[key]=original_vasprun(*positional, **keywords)
+        parsed=parsed_xml[key]
+        context['spinors']=bool(parsed.parameters.get('LSORBIT') or parsed.parameters.get('LNONCOLLINEAR'))
+        context['channels']=1 if context['spinors'] else len(parsed.tdos.densities)
+        if (context['spinors'] and spin_down) or spin not in parsed.tdos.densities:
+            raise ValueError('所选 DOS 为单通道（含 SOC/非共线），不能选择 spin-down')
+        return parsed
 
     def features(args):
         def vasprun(*positional, **keywords):
-            parsed = original_vasprun(*positional, **keywords)
+            parsed = load_vasprun(*positional, **keywords)
             context['spinors'] = bool(parsed.parameters.get('LSORBIT') or
                                       parsed.parameters.get('LNONCOLLINEAR'))
             # Noncollinear XML has charge, mx, my, mz sets. Older pymatgen
@@ -83,8 +97,9 @@ def install(spin_down=False, nwann_override=None):
         if self.eig.endswith('.eig'):
             return original(self)
         path = os.path.join(self.path, self.eig)
-        validate_layout(path)
-        data = Eigenval(path)
+        if path not in parsed_eigenvalues:
+            validate_layout(path);parsed_eigenvalues[path]=Eigenval(path)
+        data = parsed_eigenvalues[path]
         if context['channels'] is not None and data.ispin != context['channels']:
             raise ValueError('DOS 与 EIGENVAL 自旋通道数不一致')
         if context['spinors'] and data.ispin != 1:
@@ -124,11 +139,16 @@ def install(spin_down=False, nwann_override=None):
             'suggested_num_wann': suggested, 'window_num_wann': self.nwann}))
 
     def dos_frame(cls, complete_dos, left, right, spin=Spin.up):
-        frame = original_frame(complete_dos, left, right, spin=spin)
-        # Native output has already divided by the largest orbital integral.
-        # Retain the unnormalised integrals using the same native integrator.
-        frame['integral'] = [cls.get_dos_given_site_orb(complete_dos, (left,right), key, spin=spin)
-                             for key in frame['key_string']]
+        rows=[]
+        for index,site in enumerate(complete_dos.structure):
+            for orbital,densities in sorted(complete_dos.pdos.get(site,{}).items(),key=lambda item:item[0].value):
+                if spin not in densities:continue
+                value=integrator(complete_dos.energies,densities[spin],(left,right))
+                species=site.species_string
+                rows.append({'species':species,'structure_id':index,'orb_id':orbital.value,'orb_name':orbital.name,
+                             'key_string':f'{species}_{index}_{orbital.name}','integral':value,'dos':value})
+        if not rows or max(row['integral'] for row in rows)<=0:raise ValueError('当前 DOS 范围没有可归一化的轨道积分；请核对投影数据和能量范围')
+        frame=pd.DataFrame(rows);frame['dos']=frame['dos']/frame['integral'].max()
         return frame
 
     def dos_analysis(cls, frame, lb=0.1):
@@ -157,9 +177,67 @@ def install(spin_down=False, nwann_override=None):
     DOS.get_dos_df = classmethod(dos_frame)
     DOS.get_dos_analysis_df = classmethod(dos_analysis)
     pre_w90_tool.main_features = features
+    return {'load':load_vasprun,'context':context,'integrator':integrator}
+
+
+def dos_report(request):
+    """One XML parse for projection suggestion, fixed-model candidates and manual window."""
+    import io
+    from contextlib import redirect_stdout
+    import numpy as np
+    from pymatgen.electronic_structure.core import Spin
+    from pyw90.lib.dos import DOS
+    from pyw90.lib.w90 import W90
+    keys_for=globals().get('projection_keys');ratio_for=globals().get('dos_ratio')
+    if keys_for is None:from .pyw90_dos import projection_keys as keys_for,dos_ratio as ratio_for
+    down=request.get('channel')=='down';spin=Spin.down if down else Spin.up
+    state=install(down,request.get('num_wann'),request.get('integration_method','spline'))
+    parsed=state['load']('vasprun.xml',parse_eigen=False,parse_projected_eigen=False,parse_potcar_file=False)
+    complete=parsed.complete_dos;lo,hi=request['absolute_range']
+    output=io.StringIO()
+    with redirect_stdout(output):
+        frame=DOS.get_dos_df(complete,lo,hi,spin=spin)
+        _,simple=DOS.get_dos_analysis_df(frame)
+    marker=next(line.split('=',1)[1] for line in output.getvalue().splitlines() if line.startswith('FPILOT_DOS_SELECTION='))
+    selection=json.loads(marker)
+    result={'projections':DOS.get_projections_w90_str(simple,complete.structure).strip().splitlines(),
+            'dos_selection':selection,'frozen':[],'outer':[],'numerics':state['integrator'].metadata()}
+    if request.get('num_wann') is None:return result
+    manual=request.get('projection_selection','').strip()
+    lines=[s.strip() for s in manual.splitlines() if s.strip()] if manual else request.get('projection_lines',[])
+    try:keys=keys_for(lines,frame)
+    except ValueError as exc:
+        result['projection_basis']={'status':'UNAVAILABLE','source':'manual' if manual else 'current_model','reason':str(exc),'lines':lines}
+        return result
+    result['projection_basis']={'status':'READY','source':'manual' if manual else 'current_model','lines':lines,'keys':keys}
+    # Parsing and validating EIGENVAL happens once; full interface .eig checks remain separate.
+    with redirect_stdout(output):obj=W90(eig='EIGENVAL',path='.',nwann=request['num_wann'])
+    eigen_marker=next(line.split('=',1)[1] for line in output.getvalue().splitlines() if line.startswith('FPILOT_EIGENVAL='))
+    result['eigenval']=json.loads(eigen_marker)
+    def measure(left,right):
+        pi=float(DOS.get_dos_from_selected(complete,(left,right),keys))
+        ti=float(DOS.get_dos_integral(parsed.tdos.energies,parsed.tdos.densities[spin],(left,right)))
+        return ratio_for(pi,ti)
+    with redirect_stdout(output):candidates=obj.get_dis_froz_df((lo,hi))
+    for row in candidates.to_dict(orient='records'):
+        result['frozen'].append({**row,**measure(row['dis_froz_min'],row['dis_froz_max'])})
+    result['frozen'].sort(key=lambda row:-(row['percent'] if row['percent'] is not None else -float('inf')))
+    windows=request.get('absolute_windows') or {}
+    if all(tag in windows for tag in ('dis_froz_min','dis_froz_max')):
+        result['current_dos']={'dis_froz_min':windows['dis_froz_min'],'dis_froz_max':windows['dis_froz_max'],
+                               **(measure(windows['dis_froz_min'],windows['dis_froz_max']) if windows['dis_froz_min']<windows['dis_froz_max'] else
+                                  {'pdos':None,'tdos':None,'percent':None,'warning':'当前冻窗上下界无效；候选仍可独立查看'})}
+    with redirect_stdout(output):upper=obj.suggest_win_max(lo)
+    if upper is not None and np.isfinite(upper) and upper>lo and np.min(np.sum((obj.ir_ebands[0]>=lo)&(obj.ir_ebands[0]<=upper),axis=1))>=request['num_wann']:
+        result['minimum_outer_max']=float(upper)
+    result['numerics']=state['integrator'].metadata()
+    return result
 
 
 def main():
+    if sys.argv[1]=='dos-report':
+        print('FPILOT_DOS_REPORT='+json.dumps(dos_report(json.loads(sys.argv[2])),allow_nan=False))
+        return
     if sys.argv[1] == 'window-check':
         print('FPILOT_WINDOW_CHECK=' + json.dumps(window_check(json.loads(sys.argv[2])), allow_nan=False))
         return

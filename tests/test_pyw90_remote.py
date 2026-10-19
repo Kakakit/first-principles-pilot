@@ -1,5 +1,6 @@
 """Remote PyW90 advice stays in an isolated scratch directory."""
 import unittest
+import json
 from unittest.mock import patch
 
 from backend import pyw90_remote
@@ -7,7 +8,7 @@ from backend import pyw90_remote
 
 class Pyw90RemoteTest(unittest.TestCase):
     def test_projection_only_links_xml_and_never_requests_eigenvalues(self):
-        out='FPILOT_DOS_SELECTION={"channel":"charge","spinors":true}\nWannier90 Projection:\nFe:d\npyw90 --extra input:\nFe,0,4-8\n'
+        out='FPILOT_DOS_REPORT='+json.dumps({'dos_selection':{'channel':'charge','spinors':True},'projections':['Fe:d']})
         with patch.object(pyw90_remote,'_run',return_value={'stdout':out}) as run:
             result, _, args, _ = pyw90_remote._dos_projection('jutai-1','/actual/source',-2,3,'charge')
         self.assertEqual(run.call_args.args[3],('vasprun.xml',))
@@ -51,11 +52,10 @@ class PreAdviceContractTest(unittest.TestCase):
         from contextlib import ExitStack
         parent = {'id': 'parent'}
         hashes = {'vasprun.xml': 'xml', 'EIGENVAL': 'eig'}
-        second = ('FPILOT_EIGENVAL={"channel":"down","nkpts":2,"nbands":3}\n'
-                  'dis_froz_min dis_froz_max N pdos tdos percent\n0 1.0 2.0 2 1.5 3.0 0.5\n'
-                  'Lowest `dis_win_max` for 1: 4.0\n')
-        if insufficient:
-            second += 'There is no enough states for 1 with 9 WFs!\n'
+        report={'dos_selection':{'suggested_num_wann':3},'eigenval':{'channel':'down','nkpts':2,'nbands':3},
+                'frozen':[{'dis_froz_min':1.0,'dis_froz_max':2.0,'N':2,'pdos':1.5,'tdos':3.0,'percent':.5}],
+                'outer':[],'projection_basis':{'status':'READY','lines':['Fe:d']}}
+        if not insufficient:report['minimum_outer_max']=4.0
         with ExitStack() as stack:
             stack.enter_context(patch.object(pyw90_remote.wannier_execution, '_parent', return_value=(parent, {})))
             stack.enter_context(patch.object(pyw90_remote.execution, 'attempt_path', return_value={'shell': '/parent'}))
@@ -64,15 +64,15 @@ class PreAdviceContractTest(unittest.TestCase):
                 {'OUTCAR': 'outcar'}, hashes, {**hashes, 'EIGENVAL': 'changed'} if changed else hashes, {'OUTCAR':'outcar'}]))
             stack.enter_context(patch.object(pyw90_remote, '_interface_check', return_value={
                 'basis':{'num_wann':2,'spinors':False}, 'candidates':{'outer':[],'frozen':[{'valid':True}]}}))
-            run = stack.enter_context(patch.object(pyw90_remote, '_run', side_effect=[
-                {'stdout':'FPILOT_DOS_SELECTION={"suggested_num_wann":3}\nWannier90 Projection:\nFe:d\npyw90 --extra input:\nFe,0,0\n','stderr':'warning'}, {'stdout':second,'stderr':''}]))
+            run = stack.enter_context(patch.object(pyw90_remote, '_run', return_value={
+                'stdout':'FPILOT_DOS_REPORT='+json.dumps(report),'stderr':'warning'}))
             result = pyw90_remote.recommend({'id': 'p'}, 'w', 'parent', 'jutai-1', 'wannier90.2',
-                                            'pre', -2, 3, {'fermi_eV': 2.5, 'outcar_sha256': 'outcar'})
-            args = run.call_args_list[0].args[2]
-            self.assertNotIn('--rm-fermi', args)
-            self.assertEqual(args[args.index('-e') + 1:args.index('-e') + 3], ['0.5', '5.5'])
-            self.assertIn('--spin-down', args)
-            self.assertIn('--fpilot-num-wann',run.call_args_list[1].args[2])
+                                            'pre', -2, 3, {'fermi_eV': 2.5, 'outcar_sha256': 'outcar'},projection_lines=['Fe:d'])
+            self.assertEqual(run.call_count,1)
+            args=run.call_args.args[2];self.assertEqual(args[0],'dos-report')
+            request=json.loads(args[1]);self.assertEqual(request['absolute_range'],[.5,5.5])
+            self.assertEqual(request['channel'],'down');self.assertEqual(request['num_wann'],2)
+            self.assertEqual(request['projection_lines'],['Fe:d'])
             return result
 
     def test_pre_uses_parent_absolute_reference_and_keeps_channel_receipt(self):
