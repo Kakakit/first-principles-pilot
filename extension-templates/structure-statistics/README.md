@@ -1,5 +1,7 @@
 # 可运行扩展模板：结构体积与元素统计
 
+> 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
+
 独立 Python CLI，仅依赖标准库，Python >=3.9。不导入主体模块、不访问数据库、不提交任务。
 
 1. 复制本目录；修改 `extension.manifest.json` 中的 `id`、名称、版本与说明。

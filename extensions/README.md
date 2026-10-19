@@ -1,5 +1,7 @@
 # 扩展统一发布目录
 
+> 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
+
 这里集中管理现有 9 个扩展的版本、可下载 ZIP 和 SHA256。源码统一维护在 [`resources/extensions/`](../resources/extensions/)，本目录由 `scripts/package-extensions.py` 生成，不手工改 ZIP。
 
 | 扩展 | 版本 | 接口 | 下载 | 源码与说明 |

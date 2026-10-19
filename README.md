@@ -1,5 +1,7 @@
 # First Principles Pilot
 
+> 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
+
 个人第一性原理计算工作台：结构、完整流程画布、计算配置、运行监控与结果后处理。支持 VASP、Wannier90、链与参数迭代，保留五套主题和扩展。程序完成、数值收敛和科学结论分别记录。
 
 ## 源码与更新

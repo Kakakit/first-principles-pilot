@@ -1,5 +1,7 @@
 # GitHub 源码与更新
 
+> 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
+
 私有仓库：https://github.com/Kakakit/first-principles-pilot 。仅获授权账号可访问。首个源码提交包含当前完整业务代码、长期回归用例、扩展、必要说明和跨平台打包入口；没有导入旧开发 Git 历史。
 
 2026-10-05 的源码更新包含默认脚本方式服务器配置、提交页脚本选择和编辑保留节点；使用与验收见 [本轮记录](submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)。已有运行 ZIP 不会自动随源码更新，其他设备更新后按下面步骤重新构建/打包。

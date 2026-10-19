@@ -1,5 +1,7 @@
 # First-principles extensions
 
+> 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
+
 统一下载、版本索引和安装说明见 [`extensions/`](../../extensions/README.md)。新版工作台安装包与旧版 CLI 在目录中明确区分。
 
 This directory contains reusable analysis or calculation extensions. New packages use `extension.manifest.json` and an independent doctor/check/run CLI: see the [v2 protocol](../../docs/extensions-b/PROTOCOL.md) and `extension-templates/structure-statistics`. TB2J v2 supports installation, enable/disable and removal, and defaults to direct CLI execution on the source server.

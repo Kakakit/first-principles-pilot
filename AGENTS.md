@@ -10,3 +10,10 @@
 - 一次性验收脚本与旧截图归档在开发区之外。源码结构、同步排除及平台打包见 docs/DEVELOPMENT.md 和 docs/GITHUB.md。
 
 - New attempts use the configured project/workspace root and flows/main/stages/.../attempts/... layout. Keep historical paths unchanged.
+
+## 扩展开发分支
+
+- 扩展开发、独立测试和 ZIP 分发的唯一入口是同仓库 extensions 分支；main 仅维护主体与通用协议。
+- main 中原扩展目录保留为旧内置功能兼容快照，不在本目录继续开发扩展或自动同步扩展源码。
+- 只改扩展时仅验证扩展；协议变化另在 main 单独处理并保持兼容。不得将整个 extensions 分支合并到 main。
+- 详细边界与独立目录操作见 docs/extensions-b/DEVELOPMENT_BRANCH.md。
