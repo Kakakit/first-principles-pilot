@@ -13,8 +13,8 @@ from . import artifacts, execution, remote_paths, servers
 from .recycle import is_recycled
 from .storage import ROOT
 
-SCRIPT = Path(__file__).resolve().parents[1] / 'resources/extensions/electronic-structure-characterization/src/banddos.py'
-EXTRACTOR = Path(__file__).resolve().parents[1] / 'resources/extensions/electronic-structure-characterization/scripts/extract_bounded.py'
+SCRIPT = Path(__file__).with_name('builtin_analysis') / 'banddos.py'
+EXTRACTOR = Path(__file__).with_name('builtin_analysis') / 'extract_bounded.py'
 SAFE_SELECTOR = re.compile(r'^(?:all|[0-9]+(?:[-,][0-9]+)*)$')
 SAFE_ORBITALS = re.compile(r'^[A-Za-z0-9_,+-]{1,120}$')
 

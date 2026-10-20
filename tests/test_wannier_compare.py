@@ -9,7 +9,7 @@ from unittest.mock import patch
 from backend import wannier_compare as compare
 
 
-FIXTURE = Path(__file__).resolve().parents[1] / 'resources/extensions/electronic-structure-characterization/fixtures/minimal'
+FIXTURE = Path(__file__).resolve().parents[1] / 'tests/fixtures/banddos'
 
 
 class WannierCompareTest(unittest.TestCase):

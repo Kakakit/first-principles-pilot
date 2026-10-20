@@ -1,0 +1,98 @@
+{
+  "source_commit": "44ab56c82c244ba9c2880a4cdf6a5a21a129e06f",
+  "maintenance": "host-owned; no automatic extension sync",
+  "files": {
+    "backend/builtin_analysis/banddos_core/plotting.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/plotting.py",
+      "source_blob": "697bf4dc534f7263b83f5cffe93c06f9dbb6fb1c"
+    },
+    "backend/builtin_analysis/banddos_core/__init__.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/__init__.py",
+      "source_blob": "3dc1f76bc69e3f559bee6253b24fc93acee9e1f9"
+    },
+    "backend/builtin_analysis/banddos_core/wannier.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/wannier.py",
+      "source_blob": "508efd2ae768cfa5836483aebd7a450bef29b1c9"
+    },
+    "backend/builtin_analysis/banddos_core/model.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/model.py",
+      "source_blob": "3e318eb605cf0b886327a1015bec0c28ff88a397"
+    },
+    "backend/builtin_analysis/banddos_core/cli.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/cli.py",
+      "source_blob": "ba5d73860efba258918bd90806393c0cd28e3338"
+    },
+    "backend/builtin_analysis/banddos_core/common.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/common.py",
+      "source_blob": "21f94cc3d1f1ed588bdce79b0c9f6981fd40114f"
+    },
+    "backend/builtin_analysis/banddos_core/vasp.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/vasp.py",
+      "source_blob": "e639364a4dd777324de64b9bf62f0e746f66f5a3"
+    },
+    "backend/builtin_analysis/banddos_core/processed.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos_core/processed.py",
+      "source_blob": "4a7d06e2314987f4f2f17182d8574190f182bdd4"
+    },
+    "backend/builtin_analysis/banddos.py": {
+      "source": "resources/extensions/electronic-structure-characterization/src/banddos.py",
+      "source_blob": "80a1a7ca693bb081ccf77eebd40dfa45829ca084"
+    },
+    "backend/builtin_analysis/extract_bounded.py": {
+      "source": "resources/extensions/electronic-structure-characterization/scripts/extract_bounded.py",
+      "source_blob": "6706cd49ffe7e1f60031c28d7796589b33a3ac8d"
+    },
+    "backend/builtin_analysis/comparison_metrics.py": {
+      "source": "resources/extensions/pyw90/scripts/comparison_metrics.py",
+      "source_blob": "87f3fd34cbd22860c16915533fbcd7f91592b6fc"
+    },
+    "backend/builtin_analysis/legacy/structure-symmetry/extension.sdk.json": {
+      "source": "resources/extensions/structure-symmetry/extension.sdk.json",
+      "source_blob": "59eaf2029c405f2e109004ae4e41bc8dc5bad54e"
+    },
+    "backend/builtin_analysis/legacy/structure-symmetry/scripts/symmetry.py": {
+      "source": "resources/extensions/structure-symmetry/scripts/symmetry.py",
+      "source_blob": "68e7faa6b6d6cd73663ff831a923ad21c04abc98"
+    },
+    "backend/builtin_analysis/legacy/structure-symmetry/fixtures/Si.POSCAR": {
+      "source": "resources/extensions/structure-symmetry/fixtures/Si.POSCAR",
+      "source_blob": "cfe94ddbf4532066d4ccd726feaaf9c0791c9617"
+    },
+    "backend/builtin_analysis/legacy/crystal-structure-distortion-analysis/extension.sdk.json": {
+      "source": "resources/extensions/crystal-structure-distortion-analysis/extension.sdk.json",
+      "source_blob": "431b3dbf0ca63c3adbcd23faf0c8fb7cc71f1c03"
+    },
+    "backend/builtin_analysis/legacy/crystal-structure-distortion-analysis/src/crystal_distortion.py": {
+      "source": "resources/extensions/crystal-structure-distortion-analysis/src/crystal_distortion.py",
+      "source_blob": "0968effc76c97fe280d93451b0e26e25307aec73"
+    },
+    "backend/builtin_analysis/legacy/crystal-structure-distortion-analysis/fixtures/ideal_fecr_polyhedra/POSCAR": {
+      "source": "resources/extensions/crystal-structure-distortion-analysis/fixtures/ideal_fecr_polyhedra/POSCAR",
+      "source_blob": "15ea057a20e7b2fdcde27ae68f92c3256701403f"
+    },
+    "backend/builtin_analysis/legacy/crystal-structure-distortion-analysis/extension.json": {
+      "source": "resources/extensions/crystal-structure-distortion-analysis/extension.json",
+      "source_blob": "7bb744995409e1f709edf629ed010b3e800675d7"
+    },
+    "backend/builtin_analysis/legacy/lcalcpol-polarization-analysis/extension.sdk.json": {
+      "source": "resources/extensions/lcalcpol-polarization-analysis/extension.sdk.json",
+      "source_blob": "fcf23e8d1078f91b4d1c5f9527dbd643fb0fd1ff"
+    },
+    "backend/builtin_analysis/legacy/lcalcpol-polarization-analysis/scripts/calc_lcalcpol.py": {
+      "source": "resources/extensions/lcalcpol-polarization-analysis/scripts/calc_lcalcpol.py",
+      "source_blob": "c2dadb3276e4fe2cb67b7f0ae3fa42c9085d6b13"
+    },
+    "backend/builtin_analysis/legacy/lcalcpol-polarization-analysis/tests/fixtures/POSCAR": {
+      "source": "resources/extensions/lcalcpol-polarization-analysis/tests/fixtures/POSCAR",
+      "source_blob": "72788c7adf6b6a0d73a768aa394c8c5043fe4c8f"
+    },
+    "backend/builtin_analysis/legacy/lcalcpol-polarization-analysis/tests/fixtures/OUTCAR": {
+      "source": "resources/extensions/lcalcpol-polarization-analysis/tests/fixtures/OUTCAR",
+      "source_blob": "63861861ca013f962f77be6338bb37a786015938"
+    },
+    "backend/builtin_analysis/legacy/lcalcpol-polarization-analysis/extension.json": {
+      "source": "resources/extensions/lcalcpol-polarization-analysis/extension.json",
+      "source_blob": "3fae28f54310f9a37410e739653fa27252d9d8fa"
+    }
+  }
+}

@@ -13,10 +13,9 @@ from . import artifacts, execution, extension_sdk
 from .recycle import is_recycled
 from .storage import ROOT
 
-EXTENSIONS = Path(__file__).resolve().parents[1] / 'resources' / 'extensions'
 def _manifest(bundle_id):
     receipt = extension_sdk.status(bundle_id)
-    root = EXTENSIONS / bundle_id
+    root = receipt['root']
     if (root / 'extension.json').is_file():
         value = json.loads((root / 'extension.json').read_text(encoding='utf-8'))
         row = {key: value.get(key) for key in ('name', 'version', 'status', 'domain', 'description', 'module_type', 'requires', 'provides')}

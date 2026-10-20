@@ -10,7 +10,7 @@ from backend import extension_sdk, postprocessing
 
 
 ROOT = Path(__file__).parents[1]
-SCRIPT = ROOT / 'resources/extensions/structure-symmetry/scripts/symmetry.py'
+SCRIPT = extension_sdk.BUNDLES / 'structure-symmetry/scripts/symmetry.py'
 SI = (ROOT / 'tests/fixtures/Si.POSCAR').read_bytes()
 
 
@@ -34,7 +34,7 @@ class ExtensionSDKTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             package = Path(temp) / 'test-extension'
             package.mkdir()
-            source = json.loads((ROOT / 'resources/extensions/structure-symmetry/extension.sdk.json').read_text())
+            source = json.loads((extension_sdk.BUNDLES / 'structure-symmetry/extension.sdk.json').read_text())
             source['id'] = package.name
             source['side_effects'] = ['local_read', 'remote_submit']
             (package / 'extension.sdk.json').write_text(json.dumps(source))

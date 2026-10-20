@@ -290,8 +290,8 @@ def adopt(batch, project_id, case_id):
 
 
 def compare(batch, project_id, case_ids, band_attempt_id, dft_band_offset):
-    import subprocess
     from . import wannier_compare
+    from .builtin_analysis.comparison_metrics import measure_curves
     if not is_window(batch) or batch['project_id']!=project_id:raise ValueError('批次不属于当前项目')
     recycle.assert_available('scans',batch['id'],batch)
     if type(dft_band_offset) is not int or dft_band_offset<0:raise ValueError('请指定本轮共同的 DFT 起始能带（从 1 计数）')
@@ -301,8 +301,6 @@ def compare(batch, project_id, case_ids, band_attempt_id, dft_band_offset):
     contract_file=ROOT/'window-comparisons'/(batch['campaign_id']+'.json')
     if contract_file.exists() and json.loads(contract_file.read_text()) != contract:
         raise ValueError('同一能窗方案已绑定 DFT 参考、目标范围与共同能带对应关系，不能更换')
-    tool=Path(__file__).resolve().parents[1]/'resources/extensions/pyw90/scripts/pyw90_window_scan.py'
-    if not tool.is_file():raise ValueError('能带误差分析工具未安装；窗口计算与人工选择仍可使用')
     rows=[]
     for case_id in case_ids:
         case=next((c for c in batch['cases'] if c['id']==case_id),None)
@@ -315,9 +313,7 @@ def compare(batch, project_id, case_ids, band_attempt_id, dft_band_offset):
         request={'curves_csv':str(directory/'curves.csv'),'target_relative_eV':batch['search']['target'],'dft_band_offset':dft_band_offset}
         from .inputs import put_file
         request_file=directory/'window-metric-request.json';put_file(request_file,scans.packed(request).encode())
-        run=subprocess.run([str(w90.REGISTERED_PYTHON),str(tool),'measure','--request',str(request_file)],capture_output=True,text=True,timeout=120)
-        if run.returncode:raise ValueError('能带误差分析失败：'+(run.stdout or run.stderr)[-500:])
-        metric=json.loads(run.stdout)
+        metric=measure_curves(request)
         if metric.get('status')!='MEASURED':raise ValueError('误差分析回执不完整')
         rows.append({'case_id':case_id,'attempt_id':rec['id'],'comparison_id':comparison['id'],'metrics':metric})
     if len({r['metrics']['reference_values'] for r in rows})!=1:raise ValueError('共同参考取样数不一致，不排序')

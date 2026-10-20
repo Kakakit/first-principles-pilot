@@ -1,0 +1,47 @@
+{
+  "schema": "fpilot.extension-sdk.v1",
+  "id": "crystal-structure-distortion-analysis",
+  "name": "局域配位多面体畸变",
+  "version": "1.0.0",
+  "description": "已打包旧扩展，使用受控宿主适配器运行。",
+  "adapter": "legacy-distortion",
+  "input_selectors": [
+    {
+      "id": "structure",
+      "artifact_names": [
+        "POSCAR",
+        "CONTCAR"
+      ],
+      "max_bytes": 10485760
+    }
+  ],
+  "applicability": {
+    "result_schema": "fpilot.extension-applicability.v1"
+  },
+  "outputs": {
+    "schema": "fpilot.distortion-result.v1",
+    "files": [
+      "polyhedral_distortion.csv",
+      "polyhedral_distortion.json",
+      "polyhedral_distortion.md"
+    ]
+  },
+  "dependencies": {
+    "python_modules": [
+      "numpy",
+      "scipy"
+    ]
+  },
+  "runtime": {
+    "interpreter": "registered-python",
+    "timeout_seconds": 300
+  },
+  "side_effects": [
+    "local_read",
+    "local_write"
+  ],
+  "fixtures": [
+    "fixtures/ideal_fecr_polyhedra/POSCAR"
+  ],
+  "entrypoint": "src/crystal_distortion.py"
+}

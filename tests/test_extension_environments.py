@@ -28,7 +28,7 @@ class ExtensionEnvironmentTests(unittest.TestCase):
         self.stack.enter_context(patch.dict(os.environ,{'FPILOT_ENV_TRACE':str(self.root/'trace.jsonl')}))
         self.addCleanup(self.stack.close);self.addCleanup(self.temp.cleanup)
         p._cache.clear();p._doctor_cache.clear()
-        package=self.root/'template';shutil.copytree(BASE/'extension-templates/structure-statistics',package)
+        package=self.root/'template';shutil.copytree(BASE/'tests/fixtures/extension-package',package)
         manifest=json.loads((package/'extension.manifest.json').read_text());manifest['id']=KEY;p.atomic_json(package/'extension.manifest.json',manifest)
         cli=package/'scripts/cli.py'
         cli.write_text("import os,sys,json\nfrom pathlib import Path\nif os.environ.get('FPILOT_ENV_TRACE'):\n with Path(os.environ['FPILOT_ENV_TRACE']).open('a') as trace: trace.write(json.dumps({'phase':sys.argv[1],'python':sys.executable,'prefix':sys.prefix})+'\\n')\n"+cli.read_text())
@@ -90,7 +90,7 @@ class ExtensionEnvironmentTests(unittest.TestCase):
         self.assertTrue(finished['runtime_doctor']['python_version'])
     def test_dependency_failure_is_specific_to_selected_environment(self):
         second,_=self.second()
-        package=self.root/'dependency';shutil.copytree(BASE/'extension-templates/structure-statistics',package)
+        package=self.root/'dependency';shutil.copytree(BASE/'tests/fixtures/extension-package',package)
         manifest=json.loads((package/'extension.manifest.json').read_text());manifest.update(id='dependency-fixture',dependencies=['jsonschema']);p.atomic_json(package/'extension.manifest.json',manifest)
         p.install_directory(package);self.assertTrue(env.check('dependency-fixture')['doctor']['ready'])
         env.save_override('dependency-fixture',{'scope':'local','python':second})

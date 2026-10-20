@@ -64,7 +64,7 @@ class PresentationHostTests(unittest.TestCase):
         self.stack.enter_context(patch.object(ex,'ssh',side_effect=AssertionError('real SSH forbidden')))
         self.addCleanup(self.stack.close);self.addCleanup(self.temp.cleanup);p._cache.clear();p._doctor_cache.clear()
     def package(self,bad=False):
-        package=self.root/'package';shutil.copytree(BASE/'extension-templates/structure-statistics',package)
+        package=self.root/'package';shutil.copytree(BASE/'tests/fixtures/extension-package',package)
         manifest=json.loads((package/'extension.manifest.json').read_text());manifest.update(id='different-viewer-name',presentation={'entrypoint':'scripts/view.py'});p.atomic_json(package/'extension.manifest.json',manifest)
         script="import json,pathlib,sys\nr=json.load(open(sys.argv[-1]));p=pathlib.Path(r['output_dir']);p.mkdir(exist_ok=True);(p/'view.html').write_text('<html><head></head><body>independent</body></html>');(p/'data.json').write_text('{}');print(json.dumps({'schema':'fpilot.extension-presentation.v1','entry_html':'view.html','assets':[{'path':'view.html','media_type':'text/html'},{'path':'data.json','media_type':'application/json'}]}))\n"
         if bad:script="raise ValueError('presentation fixture failure')\n"
@@ -104,7 +104,7 @@ class PresentationHostTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'simulated transport receipt'):views.remote_generate(record,view,dest,'scripts/view.py',{'source_dir':'unused'})
 
     def test_protocol_keeps_old_packages_and_bounds_optional_assets(self):
-        manifest=p.inspect_package(BASE/'extension-templates/structure-statistics')['manifest'];self.assertNotIn('presentation',manifest)
+        manifest=p.inspect_package(BASE/'tests/fixtures/extension-package')['manifest'];self.assertNotIn('presentation',manifest)
         with self.assertRaisesRegex(ValueError,'10 MiB'):views.validate({'schema':'fpilot.extension-presentation.v1','entry_html':'view.html','assets':[{'path':'view.html','media_type':'text/html'}]},self.root,{'view.html':artifacts.MAX_PULL_BYTES+1})
 
 

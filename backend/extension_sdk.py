@@ -1,6 +1,6 @@
-"""Bundled extension contract, validation, and explicit install/enable registry.
+"""Legacy built-in analysis contract and its explicit install/enable registry.
 
-The SDK describes local adapters only. Remote artifacts remain under the
+The fixed host-owned implementations describe local adapters only. Artifacts remain under the
 attempt-bound pull policy in postprocessing; enabling never starts a run.
 """
 import hashlib
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from .storage import ROOT
 
-BUNDLES = Path(__file__).resolve().parents[1] / 'resources' / 'extensions'
+BUNDLES = Path(__file__).with_name('builtin_analysis') / 'legacy'
 SCHEMA = 'fpilot.extension-sdk.v1'
 REGISTRY_SCHEMA = 'fpilot.extension-registry.v1'
 ID = re.compile(r'[a-z][a-z0-9-]{1,79}')

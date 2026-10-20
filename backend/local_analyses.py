@@ -13,7 +13,7 @@ from . import artifacts, execution, remote_paths
 from .recycle import is_recycled
 from .storage import ROOT, validate_workspace
 
-EXTENSION = Path(__file__).resolve().parents[1] / 'resources/extensions/lcalcpol-polarization-analysis/scripts/calc_lcalcpol.py'
+EXTENSION = Path(__file__).with_name('builtin_analysis') / 'legacy/lcalcpol-polarization-analysis/scripts/calc_lcalcpol.py'
 
 
 def _source(attempt_id, project_id, node_id, directory, prefix):

@@ -22,7 +22,6 @@ from jsonschema import Draft7Validator
 from .storage import ROOT
 
 MAX_SOURCES = 64
-BUNDLES = Path(__file__).resolve().parents[1] / 'resources/extensions'
 PROTOCOL = 'fpilot.extension.v2'
 REQUEST = 'fpilot.extension-request.v2'
 RESULT = 'fpilot.extension-result.v2'
@@ -204,7 +203,8 @@ def doctor_result(result,python):
 
 
 def bundle_ids():
-    return sorted(p.name for p in BUNDLES.iterdir() if p.is_dir() and ID.fullmatch(p.name) and (p/'extension.manifest.json').is_file())
+    """Compatibility for older callers; optional packages are imported explicitly."""
+    return []
 
 
 def installed(key):
@@ -224,9 +224,6 @@ def public(receipt, item=None):
 
 def catalog():
     rows = {}
-    for key in bundle_ids():
-        try: rows[key] = public(inspect_package(BUNDLES/key))
-        except Exception as exc: rows[key] = {'id':key,'name':key,'installed':False,'enabled':False,'error':str(exc)}
     for key, item in registry()['installed'].items():
         try: rows[key] = public(installed(key),item)
         except Exception as exc: rows[key] = {'id':key,'name':key,'installed':True,'enabled':False,'error':str(exc)}
@@ -255,8 +252,9 @@ def install_directory(path):
 
 
 def install_builtin(key):
-    if key not in bundle_ids(): raise ValueError('没有此内置扩展')
-    return install_directory(BUNDLES/key)
+    # Keep the old endpoint actionable for stale clients without implicitly
+    # installing an archived source snapshot or changing an existing package.
+    raise ValueError('请从 extensions 分支下载扩展 ZIP，或选择独立扩展目录导入')
 
 
 def import_zip(encoded):

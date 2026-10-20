@@ -1,7 +1,6 @@
 """Manual comparison diagnostics: local reference snapshots, cached arrays and bounded native scoring."""
 import csv
 import hashlib
-import importlib.util
 import json
 import os
 import shlex
@@ -12,9 +11,7 @@ from pathlib import Path
 from filelock import FileLock
 import numpy as np
 
-_path=Path(__file__).resolve().parents[1]/'resources/extensions/pyw90/scripts/comparison_metrics.py'
-_spec=importlib.util.spec_from_file_location('fpilot_comparison_metrics',_path)
-metrics=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(metrics)
+from .builtin_analysis import comparison_metrics as metrics
 NATIVE_SESSION=uuid.uuid4().hex
 
 

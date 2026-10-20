@@ -23,13 +23,10 @@ from . import wannier_diagnostics as diagnostics
 from .recycle import is_recycled
 from .storage import ROOT
 
-EXT_SOURCE = Path(__file__).resolve().parents[1] / 'resources/extensions/electronic-structure-characterization/src'
-if str(EXT_SOURCE) not in sys.path:
-    sys.path.insert(0, str(EXT_SOURCE))
-from banddos_core.common import read_fermi_from_outcar  # noqa: E402
-from banddos_core.plotting import plot_compare, remap_channel_to_ticks  # noqa: E402
-from banddos_core.vasp import vasp_band_channels_from_eigenval  # noqa: E402
-from banddos_core.wannier import wannier_channel  # noqa: E402
+from .builtin_analysis.banddos_core.common import read_fermi_from_outcar
+from .builtin_analysis.banddos_core.plotting import plot_compare, remap_channel_to_ticks
+from .builtin_analysis.banddos_core.vasp import vasp_band_channels_from_eigenval
+from .builtin_analysis.banddos_core.wannier import wannier_channel
 
 ROOT_COMPARE = ROOT / 'wannier-comparisons'
 

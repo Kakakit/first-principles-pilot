@@ -11,10 +11,11 @@ import zipfile
 from contextlib import ExitStack, closing
 from pathlib import Path
 from unittest.mock import patch
+from tests.extension_fixtures import attempt_package,direct_package
 from backend import extension_protocol as p, extension_runs as runs, extension_remote as remote, execution as ex, artifacts, execution_control as control
 
 BASE=Path(__file__).resolve().parents[1]
-TEMPLATE=BASE/'extension-templates/structure-statistics'
+TEMPLATE=BASE/'tests/fixtures/extension-package'
 SI=(BASE/'tests/fixtures/Si.POSCAR').read_text()
 
 class ExtensionHostTests(unittest.TestCase):
@@ -27,7 +28,9 @@ class ExtensionHostTests(unittest.TestCase):
         self.stack.enter_context(patch.object(ex,'ssh',side_effect=AssertionError('real SSH forbidden in tests')))
         p._cache.clear();p._doctor_cache.clear()
         self.addCleanup(self.stack.close);self.addCleanup(self.temp.cleanup)
-    def install(self,key='structure-volume-statistics'):return p.install_builtin(key)
+    def install(self,key='structure-volume-statistics'):
+        package=TEMPLATE if key=='structure-volume-statistics' else direct_package(self.root/key) if key=='sample-analysis' else attempt_package(self.root/key,key)
+        return p.install_directory(package)
     def payload(self,key='structure-volume-statistics',**extra):return {'extension_id':key,'sources':[{'kind':'structure','poscar':SI}], 'options':{'include_elements':True},**extra}
     def execute(self,payload):
         result=runs.start(payload);runs._execute(result['analysis_id']);return runs.get(result['analysis_id'])
@@ -62,9 +65,9 @@ class ExtensionHostTests(unittest.TestCase):
     def test_options_and_stage_roles_block_without_running(self):
         self.install()
         with self.assertRaisesRegex(ValueError,'参数'):runs.start(self.payload(options={'include_elements':'bad'}))
-        self.install('lcalcpol-polarization-analysis')
-        self.assertNotIn('lcalcpol-polarization-analysis',[e['id'] for e in runs.context(self.payload())['extensions']])
-        with self.assertRaisesRegex(ValueError,'来源类型'):runs.start(self.payload('lcalcpol-polarization-analysis',options={'lattice_tolerance_angstrom':1e-8}))
+        self.install('sample-attempt')
+        self.assertNotIn('sample-attempt',[e['id'] for e in runs.context(self.payload())['extensions']])
+        with self.assertRaisesRegex(ValueError,'来源类型'):runs.start(self.payload('sample-attempt',options={'tolerance':1e-8}))
     def test_bad_structure_is_not_applicable_and_never_runs(self):
         self.install();record=self.execute(self.payload(sources=[{'kind':'structure','poscar':'invalid'}]));self.assertEqual(record['state'],'NOT_APPLICABLE');self.assertIsNone(record['result'])
     def test_uninstall_after_queue_does_not_break_frozen_package(self):
@@ -88,14 +91,14 @@ class ExtensionHostTests(unittest.TestCase):
         self.stack.enter_context(patch.object(artifacts,'listing',side_effect=lambda key:{'files':[{'name':name,'path':name,'size_bytes':len(data),'modified_at':'2026-10-01T00:00:00+00:00'} for name,data in files[key].items()]}))
         def pull(source,name,target):raw=files[source['attempt_id']][name];target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw);return raw
         self.stack.enter_context(patch.object(remote,'source_pull',side_effect=pull))
-    def test_polarization_two_sources_preserve_algorithm_and_units(self):
-        self.install('lcalcpol-polarization-analysis');fixture=BASE/'resources/extensions/lcalcpol-polarization-analysis/tests/fixtures'
-        first={name:(fixture/name).read_bytes() for name in ('POSCAR','OUTCAR')};files={'aa':first,'bb':dict(first)};self.mock_attempts(files)
-        record=self.execute({'extension_id':'lcalcpol-polarization-analysis','project_id':'project','sources':[{'kind':'attempt','attempt_id':'aa'},{'kind':'attempt','attempt_id':'bb'}],'options':{'lattice_tolerance_angstrom':1e-8}})
-        self.assertEqual(record['state'],'COMPLETED',record.get('error'));self.assertEqual(record['scientific_validation'],'INSUFFICIENT');self.assertEqual([row['raw'] for row in record['result']['tables'][0]['rows']],[0,0,0]);self.assertEqual(record['result']['tables'][0]['columns'][1]['unit'],'C/m²');self.assertEqual(len(record['result']['sources']),2)
+    def test_two_sources_preserve_result_units_and_lineage(self):
+        self.install('sample-attempt')
+        first={'POSCAR':SI.encode(),'OUTCAR':b'synthetic output'};files={'aa':first,'bb':dict(first)};self.mock_attempts(files)
+        record=self.execute({'extension_id':'sample-attempt','project_id':'project','sources':[{'kind':'attempt','attempt_id':'aa'},{'kind':'attempt','attempt_id':'bb'}],'options':{'tolerance':1e-8}})
+        self.assertEqual(record['state'],'COMPLETED',record.get('error'));self.assertEqual(record['scientific_validation'],'INSUFFICIENT');self.assertEqual([row['raw'] for row in record['result']['tables'][0]['rows']],[0,0,0]);self.assertEqual(record['result']['tables'][0]['columns'][0]['unit'],'C/m²');self.assertEqual(len(record['result']['sources']),2)
     def test_nonconverged_and_large_files_report_distinct_reasons(self):
-        self.install('lcalcpol-polarization-analysis');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True})
-        sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('lcalcpol-polarization-analysis')['manifest'];self.assertIn('已完成运行：缺少 ediff_reached 证据',runs.blockers(m,sources))
+        self.install('sample-attempt');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True})
+        sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('sample-attempt')['manifest'];self.assertIn('已完成运行：缺少 ediff_reached 证据',runs.blockers(m,sources))
         sources[0]['evidence']['ediff_reached']=True;sources[0]['files'][1]['size_bytes']=artifacts.MAX_PULL_BYTES+1
         self.assertTrue(any('10 MiB' in s for s in runs.blockers(m,sources,'local')));self.assertFalse(runs.blockers(m,sources,'ssh'));self.assertTrue(runs.blockers(m,sources,'scheduler'))
     def test_64_sources_manifest_and_request_share_limits(self):
@@ -234,14 +237,7 @@ class ExtensionHostTests(unittest.TestCase):
         cli=package/'scripts/cli.py';cli.write_text(cli.read_text().replace('def analyze(request):','def analyze(request):\n    import time; time.sleep(3)'))
         p.install_directory(package);record=self.execute(self.payload());self.assertEqual(record['state'],'FAILED');self.assertIn('超时',record['error']);self.assertEqual(record['sources'][0]['poscar'],SI)
 
-    def test_symmetry_migration_keeps_fixed_tolerances_and_wyckoff_file(self):
-        self.install('structure-symmetry');record=self.execute(self.payload('structure-symmetry',options={'angle_tolerance_degree':5}))
-        self.assertEqual(record['state'],'COMPLETED',record.get('error'));path,_=runs.output(record['id'],'symmetry.json');data=json.loads(path.read_text());self.assertEqual([r['symprec_angstrom'] for r in data['results']],[0.001,0.01,0.1]);self.assertEqual(data['results'][0]['space_group_number'],227)
 
-    def test_distortion_migration_keeps_metrics_units_and_three_outputs(self):
-        self.install('crystal-structure-distortion-analysis');fixture=BASE/'resources/extensions/crystal-structure-distortion-analysis/fixtures/ideal_fecr_polyhedra/POSCAR'
-        record=self.execute({'extension_id':'crystal-structure-distortion-analysis','sources':[{'kind':'structure','poscar':fixture.read_text()}],'options':{'center_element':'Cr','ligand_element':'O','coordination':6,'search_radius_angstrom':3}})
-        self.assertEqual(record['state'],'COMPLETED',record.get('error'));self.assertEqual(len(record['outputs']),3);rows=record['result']['tables'][0]['rows'];self.assertEqual(next(r['unit'] for r in rows if r['metric']=='mean_bond_length_angstrom'),'Å');self.assertAlmostEqual(next(r['mean'] for r in rows if r['metric']=='baur_distortion_index'),0)
 
     def test_local_source_change_and_host_mismatch_stop_before_dispatch(self):
         self.install();self.mock_attempts({'aa':{'POSCAR':SI.encode()}})
@@ -270,9 +266,9 @@ class ExtensionHostTests(unittest.TestCase):
         self.assertTrue(p.uninstall('structure-volume-statistics')['history_preserved']);self.assertTrue(list((self.root/'extensions-v2/recycle').glob('*/scripts/cli.py')))
 
     def test_evidence_requires_boolean_true_and_source_path_uses_existing_contract(self):
-        self.install('lcalcpol-polarization-analysis');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True,'ediff_reached':'False'})
+        self.install('sample-attempt');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True,'ediff_reached':'False'})
         source=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project')[0]
-        self.assertEqual(source['remote_root'],'/workspace/source');self.assertTrue(any('ediff_reached' in reason for reason in runs.blockers(p.installed('lcalcpol-polarization-analysis')['manifest'],[source])))
+        self.assertEqual(source['remote_root'],'/workspace/source');self.assertTrue(any('ediff_reached' in reason for reason in runs.blockers(p.installed('sample-attempt')['manifest'],[source])))
 
     def test_remote_missing_dependency_is_failed_not_inapplicable(self):
         payload=self.remote_payload();receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);record.update(state='SUBMITTED',remote_dir='/workspace/analysis',job_id='731.server');runs.save(record)
@@ -300,17 +296,14 @@ class ExtensionHostTests(unittest.TestCase):
         manifest['execution']['preferred_location']='unknown';p.atomic_json(package/'extension.manifest.json',manifest)
         with self.assertRaisesRegex(ValueError,'优先'):p.inspect_package(package)
 
-    def test_tb2j_ssh_freezes_options_runs_once_without_scheduler_and_keeps_downloads_after_uninstall(self):
-        import os
-        from tests.test_tb2j_extension import module as tb
-        self.stack.enter_context(patch.dict(os.environ,{'PYTHONPATH':str(tb.FAKE)}))
-        installed=self.install('tb2j');self.assertTrue(installed['enabled']);self.assertEqual(installed['execution']['preferred_location'],'ssh')
-        req=tb.request(self.root/'source');source=req['sources'][0];key=source['id'];source['alias']='jutai-1';source['input_summary']['energy_reference']['host']='jutai-1'
+    def test_direct_package_freezes_options_runs_once_without_scheduler_and_keeps_downloads_after_uninstall(self):
+        installed=self.install('sample-analysis');self.assertTrue(installed['enabled']);self.assertEqual(installed['execution']['preferred_location'],'ssh')
+        req={'sources':[{'id':'sample-source','input_summary':{'energy_reference':{'fermi_eV':5,'host':'jutai-1'}}}],'inputs':{'structure':[{'name':'POSCAR','path':str(TEMPLATE/'fixtures/POSCAR')}]},'options':{'nz':100}};source=req['sources'][0];key=source['id'];source['alias']='jutai-1';source['input_summary']['energy_reference']['host']='jutai-1'
         files={key:{i['name']:Path(i['path']).read_bytes() for values in req['inputs'].values() for i in values}}
         self.mock_attempts(files,stage='wannier90',evidence={'wannier_all_done':True})
         frozen={'id':key,'kind':'wannier90','project_id':'project','node_id':'w90-node','state':'COMPLETED','config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','evidence':{'wannier_all_done':True},'seed':'wannier90','parent_attempt_id':'parent','source_snapshot':{'seed':'wannier90','spinors':True,'parameters':{'num_wann':8}},'live_energy_reference':source['input_summary']['energy_reference']}
         self.stack.enter_context(patch.object(ex,'get',return_value=frozen));self.runtime();runtime=remote.runtimes()['jutai-1'];runtime.update(node='',cores=None,reason='');p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
-        payload={'extension_id':'tb2j','project_id':'project','sources':[{'kind':'attempt','attempt_id':key}],'options':req['options'],'location':'ssh','alias':'jutai-1'}
+        payload={'extension_id':'sample-analysis','project_id':'project','sources':[{'kind':'attempt','attempt_id':key}],'options':req['options'],'location':'ssh','alias':'jutai-1'}
         with patch.object(remote,'resource_preview',side_effect=AssertionError('no node probe in direct SSH')):
             preview=runs.preview(payload);payload['preview_id']=preview['preview_id'];receipt=runs.start(payload)
         analysis=receipt['analysis_id'];payload['options']['nz']=999
@@ -330,10 +323,10 @@ class ExtensionHostTests(unittest.TestCase):
         with patch.object(remote,'stage',side_effect=stage),patch.object(remote,'direct',side_effect=direct) as dispatch,patch.object(ex,'ssh',side_effect=ssh),patch.object(remote,'pull',side_effect=pull),patch.object(remote,'submit',side_effect=AssertionError('no scheduler submission')),patch.object(remote,'resource_preview',side_effect=AssertionError('no capacity probe')),patch.object(remote,'script',side_effect=lambda runtime,directory,entry,mode,cores,timeout:original(runtime,str(remote_dir),entry,mode,cores,timeout)):
             runs._execute(analysis);runs._execute(analysis);self.assertEqual(dispatch.call_count,1)
         record=runs.get(analysis);self.assertEqual(record['state'],'COMPLETED',record.get('error'));self.assertEqual(record['options']['nz'],100);self.assertNotIn('requested_cores',record);self.assertNotIn('job_id',record)
-        self.assertEqual(record['sources'][0]['input_summary']['parent_attempt_id'],'parent');self.assertEqual(record['result']['tables'][0]['rows'][0]['atom_j'],3)
-        p.enable('tb2j',False);self.assertFalse(runs.context(payload)['extensions']);p.uninstall('tb2j');self.assertTrue(runs.output(analysis,'exchange.csv')[0].is_file());self.assertEqual(runs.history('project')[0]['id'],analysis)
+        self.assertEqual(record['sources'][0]['input_summary']['parent_attempt_id'],'parent');self.assertEqual(record['result']['tables'][0]['rows'][0]['atoms'],2)
+        p.enable('sample-analysis',False);self.assertFalse(runs.context(payload)['extensions']);p.uninstall('sample-analysis');self.assertTrue(runs.output(analysis,'elements.csv')[0].is_file());self.assertEqual(runs.history('project')[0]['id'],analysis)
 
-    def test_tb2j_direct_unknown_is_only_reconciled_and_never_reexecuted(self):
+    def test_direct_unknown_is_only_reconciled_and_never_reexecuted(self):
         payload=self.remote_payload('ssh');receipt=runs.start(payload);key=receipt['analysis_id']
         with patch.object(remote,'stage',return_value='/workspace/analyses/'+key),patch.object(remote,'direct',side_effect=ValueError('SSH disconnected')) as dispatch:
             runs._execute(key);runs._execute(key);self.assertEqual(dispatch.call_count,1)

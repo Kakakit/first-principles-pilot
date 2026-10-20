@@ -25,7 +25,7 @@ class BoundedPlotTests(unittest.TestCase):
             self.assertEqual(lines[1:3],['-1 1 0.3','0 2 0.4'])
 
     def test_fixture_tables_generate_local_figures(self):
-        fixture = electronic_plots.SCRIPT.parents[1] / 'fixtures/minimal'
+        fixture = Path(__file__).parent / 'fixtures/banddos'
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             for kind, source, plot, extra in (

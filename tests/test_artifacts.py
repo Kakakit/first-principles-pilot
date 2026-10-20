@@ -69,7 +69,7 @@ class ArtifactTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'不适用'):postprocessing.run('a','crystal-structure-distortion-analysis',confirmed=True,options=options)
         self.assertEqual((self.attempt/'POSCAR').read_bytes(),before)
         self.assertFalse((self.base/'local/analyses').exists())
-        source=Path(__file__).parents[1]/'resources/extensions/crystal-structure-distortion-analysis/fixtures/ideal_fecr_polyhedra/POSCAR'
+        source=extension_sdk.BUNDLES/'crystal-structure-distortion-analysis/fixtures/ideal_fecr_polyhedra/POSCAR'
         (self.attempt/'POSCAR').write_bytes(source.read_bytes());before=source.read_bytes()
         with patch.object(execution,'ssh',side_effect=self.local_ssh), patch.object(artifacts,'pull',side_effect=local_pull):
             check=postprocessing.check_applicability('a','crystal-structure-distortion-analysis',options)
@@ -116,7 +116,7 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual((self.attempt/'POSCAR').read_bytes(),source)
 
     def test_lcalcpol_legacy_adapter_still_runs(self):
-        fixture=Path(__file__).parents[1]/'resources/extensions/lcalcpol-polarization-analysis/tests/fixtures'
+        fixture=extension_sdk.BUNDLES/'lcalcpol-polarization-analysis/tests/fixtures'
         for name in ('POSCAR','OUTCAR'):
             (self.attempt/name).write_bytes((fixture/name).read_bytes())
         before={name:(self.attempt/name).read_bytes() for name in ('POSCAR','OUTCAR')}

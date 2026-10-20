@@ -24,13 +24,11 @@ def resource(path):
     parts=path.relative_to(ROOT).parts
     if '__pycache__' in parts or '.DS_Store' in parts or path.suffix=='.pyc':return False
     if parts[:2]==('resources','templates'):return False
+    if parts[:2]==('resources','extensions'):return False
     if parts[:3]==('resources','jobs','wannier90'):return False
-    # Historical source copies have been kept in development backups. The
-    # independent extension CLI implementations and their fixtures are shipped.
+    # Optional extension sources and development templates are distributed
+    # separately; built-in compatibility code belongs to backend/.
     if 'source' in parts and path.name.startswith('original_'):return False
-    # Legacy SDK installation still validates tests/fixtures. They are runtime
-    # examples, even though their directory name contains "tests".
-    if parts[1]=='extensions' and 'tests' in parts and 'fixtures' not in parts and parts[2]!='_template':return False
     return True
 
 
@@ -69,9 +67,10 @@ def build(output,platform):
     spec=PLATFORMS[platform]
     selected=[(ROOT/path,Path(name)) for path,name in {**FILES,**spec['files']}.items()]
     runtime=sorted((ROOT/'backend').glob('*.py'))
+    runtime += sorted(p for p in (ROOT/'backend/builtin_analysis').rglob('*')
+                      if p.is_file() and '__pycache__' not in p.parts and p.suffix!='.pyc' and p.name!='.DS_Store')
     runtime += [p for p in (ROOT/'dist').rglob('*') if p.is_file()]
     runtime += [p for p in (ROOT/'resources').rglob('*') if p.is_file() and resource(p)]
-    runtime += [p for p in (ROOT/'extension-templates').rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.name!='.DS_Store']
     runtime += [ROOT/'docs/extensions-b/PROTOCOL.md']
     selected += [(p,p.relative_to(ROOT)) for p in runtime]
     for source,name in selected:
@@ -90,7 +89,7 @@ def build(output,platform):
     (dest/'resources/templates').mkdir(parents=True,exist_ok=True)
     (dest/'resources/templates/README.md').write_text('Import your own PBS/Slurm scripts in Settings and save defaults per server/program.\n',encoding='utf-8')
     (dest/'examples').mkdir()
-    shutil.copyfile(ROOT/'resources/extensions/structure-symmetry/fixtures/Si.POSCAR',dest/'examples/Si.POSCAR')
+    shutil.copyfile(ROOT/'backend/builtin_analysis/legacy/structure-symmetry/fixtures/Si.POSCAR',dest/'examples/Si.POSCAR')
     licenses(dest)
     names={};records=[]
     for path in sorted(dest.rglob('*')):
