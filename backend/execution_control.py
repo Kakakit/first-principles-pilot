@@ -9,21 +9,31 @@ from . import execution as ex
 
 ACTIVE = ('COMMAND_RUNNING','DISPATCHING','SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN')
 DEFAULT = {'max_inflight_total':None, 'max_inflight_per_host':None, 'max_cores_per_host':None}
+WORKER_INTERVAL_DEFAULT = 300
 
 
 def settings():
     path = ex.ROOT / 'execution-settings.json'
-    return validate_settings(json.loads(path.read_text())) if path.exists() else dict(DEFAULT)
+    return validate_settings(json.loads(path.read_text())) if path.exists() else {**DEFAULT, 'worker_interval_seconds':WORKER_INTERVAL_DEFAULT}
+
+
+def validate_interval(value):
+    if type(value) is not int or not 1 <= value <= 9007199254740991:
+        raise ValueError('worker 周期须为正整数秒')
+    return value
 
 
 def validate_settings(value):
-    if not isinstance(value,dict) or set(value) != set(DEFAULT):
+    if not isinstance(value,dict) or not set(DEFAULT) <= set(value) or set(value) - set(DEFAULT) - {'worker_interval_seconds'}:
         raise ValueError('需要总在途上限、每主机在途上限和每主机核数上限')
     for key, item in value.items():
+        if key == 'worker_interval_seconds':
+            validate_interval(item)
+            continue
         if item is None: continue
         if type(item) is not int or item < 1 or item > (100000 if key == 'max_cores_per_host' else 1000):
             raise ValueError(key+' 必须为正整数；各项可为 null 表示不额外限制')
-    return dict(value)
+    return {**value, 'worker_interval_seconds':value.get('worker_interval_seconds',WORKER_INTERVAL_DEFAULT)}
 
 
 def write_json(path, value):
@@ -41,7 +51,10 @@ def write_json(path, value):
 
 
 def save_settings(value):
+    supplied_interval = 'worker_interval_seconds' in value if isinstance(value,dict) else False
     value=validate_settings(value)
+    if not supplied_interval:
+        value['worker_interval_seconds']=settings()['worker_interval_seconds']
     write_json(ex.ROOT/'execution-settings.json',value)
     return value
 

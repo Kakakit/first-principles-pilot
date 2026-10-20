@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {defaults,analysisLabel,runningAnalysis,preferredLocation,sourceRuntime,sourceOptionsSchema,readableSource,formAvailability,executionCategories,runtimeChoice,environmentVersion} from '../src/extensionModel';
+import {defaults,analysisLabel,runningAnalysis,preferredLocation,supportedLocation,sourceRuntime,sourceOptionsSchema,readableSource,formAvailability,executionCategories,runtimeChoice,environmentVersion} from '../src/extensionModel';
 test('schema defaults retain false/zero and only declared nested fields',()=>{const schema={type:'object',properties:{visible:{type:'boolean',default:false},count:{type:'integer',default:0},missing:{type:'string'},nested:{type:'object',properties:{level:{default:2}}}}};assert.deepEqual(defaults(schema),{visible:false,count:0,nested:{level:2}});const first=defaults(schema);first.nested.level=5;assert.equal(defaults(schema).nested.level,2);});
 test('UNKNOWN requires explicit reconciliation and cannot look completed',()=>{assert.equal(runningAnalysis('UNKNOWN'),false);assert.equal(analysisLabel('UNKNOWN'),'状态待核对');assert.equal(runningAnalysis('WAIT_RESOURCE'),true);assert.equal(analysisLabel('COMPLETED'),'分析程序完成');});
 
@@ -14,6 +14,17 @@ test('default runtime follows source server and never silently picks another hos
  assert.equal(sourceRuntime('source-host',{'other':{},'source-host':{}}),'source-host');
  assert.equal(sourceRuntime('missing',{'other':{}}),'');
  assert.equal(sourceRuntime(undefined,{'other':{}}),'other');
+});
+test('switching packages keeps a supported user location ahead of the package preference',()=>{
+ const both={execution:{locations:['local','ssh'],preferred_location:'ssh',timeout_seconds:300}};
+ assert.equal(supportedLocation(both,'local'),'local');
+ assert.equal(supportedLocation(both,'ssh'),'ssh');
+ const remote={execution:{locations:['ssh'],timeout_seconds:300}};
+ assert.equal(supportedLocation(remote,'local'),'ssh');
+ assert.equal(supportedLocation({execution:{locations:['local'],timeout_seconds:300}},'ssh'),'local');
+ assert.equal(supportedLocation({} as any,'local'),'local');
+ // A forced fallback must not replace the caller's preference on the next package.
+ assert.equal(supportedLocation(both,'local'),'local');
 });
 
 test('missing runtime or files blocks actions while the options stay editable',()=>{

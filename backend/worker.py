@@ -108,7 +108,29 @@ def notify_terminal(key):
     record=ex.get(key);record['notification']={'returncode':result.returncode,'stderr':result.stderr[:500]};ex.save(record)
 
 
-def run(interval=300, once=False):
+def interval_seconds(override=None):
+    return control.validate_interval(override) if override is not None else control.settings()['worker_interval_seconds']
+
+
+def wait_for_cycle(stop, heartbeat, override=None, parent=None):
+    from . import remote_health
+    started=time.monotonic()
+    retry_times=[r['next_retry_at'] for r in remote_health.status() if r['state']=='COOLDOWN' and r.get('next_retry_at')]
+    retry_deadline=started+max(1,min(retry_times)-time.time()) if retry_times else float('inf')
+    while not stop.is_set():
+        if parent and not process_alive(int(parent)):stop.set();break
+        path=os.environ.get('FPILOT_STOP_FILE')
+        if path and __import__('pathlib').Path(path).exists():stop.set();break
+        interval=interval_seconds(override)
+        if heartbeat['interval_seconds'] != interval:
+            heartbeat['interval_seconds']=interval
+            control.write_json(ex.ROOT/'worker-state.json',heartbeat)
+        remaining=min(started+interval,retry_deadline)-time.monotonic()
+        if remaining <= 0:break
+        stop.wait(min(1,remaining))
+
+
+def run(interval=None, once=False):
     # The platform file lock is released by the OS after a crash.
     ex.ROOT.mkdir(parents=True,exist_ok=True)
     with exclusive_lock(ex.ROOT/'worker.lock') as owned:
@@ -117,35 +139,31 @@ def run(interval=300, once=False):
         def quit_worker(*_):stop.set()
         signal.signal(signal.SIGTERM,quit_worker);signal.signal(signal.SIGINT,quit_worker)
         started=ex.now()
+        heartbeat=dict(pid=os.getpid(),running=True,started_at=started,interval_seconds=interval_seconds(interval),interval_source='settings' if interval is None else 'command-line')
         try:
             while not stop.is_set():
                 parent=os.environ.get('FPILOT_LAUNCHER_PID')
                 if parent and not process_alive(int(parent)):break
-                heartbeat=dict(pid=os.getpid(),running=True,started_at=started,heartbeat_epoch=time.time(),interval_seconds=interval)
+                heartbeat.update(heartbeat_epoch=time.time(),interval_seconds=interval_seconds(interval))
                 control.write_json(ex.ROOT/'worker-state.json',heartbeat)
                 result=tick(notify=os.environ.get('FPILOT_NOTIFICATIONS','1')!='0')
-                control.write_json(ex.ROOT/'worker-state.json',dict(heartbeat,heartbeat_epoch=time.time(),last_cycle=result))
+                heartbeat.update(heartbeat_epoch=time.time(),last_cycle=result)
+                control.write_json(ex.ROOT/'worker-state.json',heartbeat)
                 if once:break
-                from . import remote_health
-                retry_times=[r['next_retry_at'] for r in remote_health.status() if r['state']=='COOLDOWN' and r.get('next_retry_at')]
-                delay=min(interval,max(1,min(retry_times)-time.time())) if retry_times else interval
-                deadline=time.monotonic()+delay
-                while not stop.is_set() and time.monotonic()<deadline:
-                    if parent and not process_alive(int(parent)):stop.set();break
-                    path=os.environ.get('FPILOT_STOP_FILE')
-                    if path and __import__('pathlib').Path(path).exists():stop.set();break
-                    stop.wait(min(1,max(0,deadline-time.monotonic())))
+                wait_for_cycle(stop,heartbeat,interval,parent)
         finally:
-            control.write_json(ex.ROOT/'worker-state.json',dict(pid=os.getpid(),running=False,started_at=started,heartbeat_epoch=time.time(),interval_seconds=interval))
+            control.write_json(ex.ROOT/'worker-state.json',dict(heartbeat,running=False,heartbeat_epoch=time.time()))
     return 0
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once',action='store_true')
-    parser.add_argument('--interval',type=int,default=300)
+    parser.add_argument('--interval',type=int,default=None,help='Override the saved worker period in seconds')
     args=parser.parse_args()
-    if args.interval<1:parser.error('interval must be positive')
+    if args.interval is not None:
+        try:control.validate_interval(args.interval)
+        except ValueError as error:parser.error(str(error))
     return run(args.interval,args.once)
 
 if __name__=='__main__':raise SystemExit(main())

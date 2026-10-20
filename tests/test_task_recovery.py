@@ -134,7 +134,7 @@ class TaskRecoveryTests(unittest.TestCase):
         send.assert_not_called()
 
     def test_optional_limits_and_released_unknown(self):
-        self.assertEqual(control.settings(),{'max_inflight_total':None,'max_inflight_per_host':None,'max_cores_per_host':None})
+        self.assertEqual(control.settings(),{'max_inflight_total':None,'max_inflight_per_host':None,'max_cores_per_host':None,'worker_interval_seconds':300})
         self.assertEqual(control.validate_settings({'max_inflight_total':None,'max_inflight_per_host':1,'max_cores_per_host':None})['max_inflight_per_host'],1)
         b=self.batch();old=self.record(b,0,'UNKNOWN');recovery.release_quota('p',old['id'])
         control.save_settings({'max_inflight_total':1,'max_inflight_per_host':1,'max_cores_per_host':48})

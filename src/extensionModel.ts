@@ -28,6 +28,9 @@ export function preferredLocation(manifest:Pick<ExtensionManifest,'execution'>):
  const locations=declared.filter(mode=>mode==='local'||mode==='ssh');
  return preferred_location&&locations.some(mode=>mode===preferred_location)?preferred_location:locations.includes('local')?'local':locations[0];
 }
+export function supportedLocation(manifest:Pick<ExtensionManifest,'execution'>,choice:string):string {
+ return manifest.execution?.locations?.includes(choice)&&['local','ssh'].includes(choice)?choice:preferredLocation(manifest)||choice;
+}
 export function environmentVersion(doctor:EnvironmentDoctor):string {
  return [doctor.python_version&&`Python ${doctor.python_version}`,doctor.version&&`版本 ${doctor.version}`,...Object.entries(doctor.versions||{}).map(([name,version])=>`${name} ${version}`)].filter(Boolean).join(' · ');
 }
