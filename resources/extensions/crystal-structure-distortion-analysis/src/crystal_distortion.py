@@ -23,7 +23,7 @@ import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.spatial import QhullError
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 DEFAULT_CONFIG = {
     "centers": {
         "Cr": {"coordination": 6, "ligand": "O", "geometry": "octahedron"},
@@ -433,8 +433,8 @@ def analyze_site(
     candidates = ligand_neighbors(structure, site_index, ligand, radius)
     if len(candidates) < coordination:
         raise AnalysisError(
-            f"Site {site_index + 1} ({center}) has only {len(candidates)} {ligand} neighbors "
-            f"within {radius:.3f} Å; expected {coordination}"
+            f"中心原子 {site_index + 1}（{center}）在 {radius:.3f} Å 内只有 "
+            f"{len(candidates)} 个 {ligand} 配体候选，需要 {coordination} 个；请核对配位类型和搜索半径"
         )
     selected = candidates[:coordination]
     warnings: list[str] = []
@@ -445,8 +445,9 @@ def analyze_site(
         shell_gap = next_neighbor_distance - selected[-1].distance
         if shell_gap < shell_gap_warning:
             message = (
-                f"Site {site_index + 1} ({center}): coordination-shell gap is only "
-                f"{shell_gap:.4f} Å ({selected[-1].distance:.4f} -> {next_neighbor_distance:.4f} Å)"
+                f"中心原子 {site_index + 1}（{center}）的配位壳层间隔仅 "
+                f"{shell_gap:.4f} Å（第 {coordination} 个：{selected[-1].distance:.4f} Å，"
+                f"下一个：{next_neighbor_distance:.4f} Å）；请核对配位模型"
             )
             if fail_on_ambiguous_shell:
                 raise AnalysisError(message)
@@ -476,7 +477,49 @@ def analyze_site(
             i, j = pair.pop("ligand_local_indices")
             pair["ligand_site_numbers"] = [selected[i].site_index + 1, selected[j].site_index + 1]
             pair["ligand_images"] = [list(selected[i].image), list(selected[j].image)]
+    # Additive detail records; all pre-existing scalar definitions stay unchanged.
+    center_cart = structure.cart_coords[site_index]
+    result.update(center_cartesian_angstrom=center_cart.tolist(),
+                  ligand_vectors_angstrom=vectors.tolist(),
+                  ligand_cartesian_angstrom=(center_cart + vectors).tolist(),
+                  faces=ConvexHull(vectors).simplices.tolist())
+    trans = {tuple(sorted(pair)) for pair in best_opposite_pairs(vectors)} if coordination == 6 else set()
+    result['angles'] = [dict(ligand_local_indices=[i,j],
+                            angle_degree=angle_degrees(vectors[i],vectors[j]),
+                            kind='trans' if (i,j) in trans else ('cis' if coordination==6 else 'tetrahedral'),
+                            reference_degree=180.0 if (i,j) in trans else IDEAL_ANGLE[coordination])
+                        for i,j in itertools.combinations(range(coordination),2)]
+    result['site_warnings'] = warnings
     return result, warnings
+
+
+def bridge_records(results, lattice):
+    """Shared selected ligand images; canonicalize only translation/reversal."""
+    incidences = {}
+    for site in results:
+        for index,(atom,image) in enumerate(zip(site['ligand_site_numbers'],site['ligand_images'])):
+            incidences.setdefault(atom,[]).append((site,index,tuple(image)))
+    rows = {}; lattice=np.asarray(lattice,dtype=float)
+    for ligand,group in incidences.items():
+        for (a,ia,ta),(b,ib,tb) in itertools.combinations(group,2):
+            translation=tuple(x-y for x,y in zip(ta,tb))
+            if a['site_number']==b['site_number'] and translation==(0,0,0):continue
+            forward=(a['site_number'],b['site_number'],translation,ligand,ta)
+            backward=(b['site_number'],a['site_number'],tuple(-v for v in translation),ligand,tb)
+            if forward>backward:
+                a,b,ia,ib,ta,tb=b,a,ib,ia,tb,ta
+                translation=tuple(-v for v in translation);forward=backward
+            if forward in rows:continue
+            va=np.asarray(a['ligand_vectors_angstrom'][ia]);vb=np.asarray(b['ligand_vectors_angstrom'][ib])
+            ca=np.asarray(a['center_cartesian_angstrom']);cb=np.asarray(b['center_cartesian_angstrom'])+np.asarray(translation)@lattice
+            rows[forward]=dict(center_i=a['site_number'],center_j=b['site_number'],
+                element_i=a['element'],element_j=b['element'],ligand=a['ligand'],ligand_site_number=ligand,
+                center_j_image=list(translation),ligand_image=list(ta),
+                center_i_cartesian_angstrom=ca.tolist(),center_j_cartesian_angstrom=cb.tolist(),
+                ligand_cartesian_angstrom=(ca+va).tolist(),
+                length_i_angstrom=float(np.linalg.norm(va)),length_j_angstrom=float(np.linalg.norm(vb)),
+                center_distance_angstrom=float(np.linalg.norm(cb-ca)),angle_degree=angle_degrees(va,vb))
+    return [dict(id=index,**row) for index,(_,row) in enumerate(sorted(rows.items()))]
 
 
 def mean_and_std(values: list[float]) -> dict[str, float]:
@@ -802,6 +845,8 @@ def main(argv: list[str] | None = None) -> int:
                 "volume_angstrom3": structure.volume,
             },
             "warnings": warnings,
+            "detail_schema": "fpilot.polyhedra-geometry.v1",
+            "bridges": bridge_records(results, structure.lattice),
             "site_results": results,
             "summary": summary,
         }

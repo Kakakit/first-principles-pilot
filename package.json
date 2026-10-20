@@ -7,7 +7,8 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "build:tb2j": "node resources/extensions/tb2j/viewer/build.mjs",
     "build:eos": "node resources/extensions/pressure-structure-eos/viewer/build.mjs",
-    "package": "python scripts/package-extensions.py"
+    "package": "python scripts/package-extensions.py",
+    "build:polyhedra": "node resources/extensions/crystal-structure-distortion-analysis/viewer/build.mjs"
   },
   "devDependencies": {
     "echarts": "6.1.0",

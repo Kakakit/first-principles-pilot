@@ -38,3 +38,11 @@ The program exits with status `2` and prints `ERROR: <message>` to stderr for ex
 
 Dry-run prints the resolved parsing/configuration payload to stdout and does
 not create or overwrite any output file.
+
+## Additive v2 2.1.0 geometry
+
+The existing schema_version=1.0 and scalar/CSV definitions stay unchanged. detail_schema=fpilot.polyhedra-geometry.v1 adds per-site Cartesian coordinates/vectors (Å), convex-hull faces, all internal angles and site warnings. Global atom numbers remain 1-based; ligand_local_indices and faces index the selected ligand arrays from 0.
+
+bridges uses only shared selected ligand incidences. The first center is in its original cell; center_j_image and ligand_image are integer lattice translations. Different ligand paths stay distinct; reverse/translation duplicates collapse. Identical source center numbers in different images are valid endpoints. Each path records two lengths, center distance, coordinates and angle, with no magnetic inference.
+
+New bonds.csv, angles.csv and bridges.csv have Chinese labels and units. Original distortion.csv stays compatible. Offline presentation excludes private provenance paths, shards geometry under the existing asset limit and never invokes analysis. Legacy files missing coordinates fail explicitly rather than borrowing a current draft.

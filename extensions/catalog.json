@@ -4,17 +4,17 @@
     {
       "id": "crystal-structure-distortion-analysis",
       "name": "配位多面体畸变",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "schema": "fpilot.extension.v2",
       "install_mode": "workbench-v2",
       "source": "resources/extensions/crystal-structure-distortion-analysis",
-      "package": "extensions/packages/crystal-structure-distortion-analysis-2.0.0.zip",
-      "sha256": "386536aa01205f2d4d16422223b65483094f3735eb6ac852e386d39bb71b35e6",
-      "size_bytes": 28947,
+      "package": "extensions/packages/crystal-structure-distortion-analysis-2.1.0.zip",
+      "sha256": "1408a16185993d4818ad51e5c5b2711caa15af663a31796095348f26a86789e0",
+      "size_bytes": 393294,
       "files": [
         {
           "path": "README.md",
-          "sha256": "12a195c047588812f4a2122d68893cbfd8e702b8852ca619eb32bdc37e652440"
+          "sha256": "08ae471fe0f66dbc8b7e7106b8a2245881333fc75429b370f3e440eb32c13f6d"
         },
         {
           "path": "config/default_fecr2o4.json",
@@ -22,11 +22,11 @@
         },
         {
           "path": "contracts/input.md",
-          "sha256": "3ea9cf06255d3be1aa20be839eb7c7a9274ce188bc12b2153541e429f901904d"
+          "sha256": "535ee1ac3c244ee4dabc3a7ff727f858ac9e6cb49861d9f4c318f9ef88b9ca4f"
         },
         {
           "path": "contracts/output.md",
-          "sha256": "429feefa6328026c77ecc9c89340bce29b9eb3561a061c12523efdc964547221"
+          "sha256": "8dd12eb01863aaa3563540e09564aad7331c376fec76c02b17ba4ebaa6e4dbec"
         },
         {
           "path": "extension.json",
@@ -34,7 +34,7 @@
         },
         {
           "path": "extension.manifest.json",
-          "sha256": "2967c1c813f07758b334281be1d77973ed043dbe2f6e04405fdaeb4430d3294d"
+          "sha256": "69b490e2f6bfa74be7cde3354be5cd18254ab2d21648868f50441bc4c04d3656"
         },
         {
           "path": "extension.sdk.json",
@@ -53,12 +53,24 @@
           "sha256": "6bd31e587c06276bf231cec25395b5d4a0b1e38c4d2b00813b2dd96aad14f17a"
         },
         {
+          "path": "scripts/build_formulas.py",
+          "sha256": "27d824d133fffdd87d04551cff1e3cc6d3aab8b1d69fd63854e80baa456e46b7"
+        },
+        {
           "path": "scripts/cli.py",
-          "sha256": "40b602516098e296a472048fd0b540813a307a26df599b856784bcbececfe4cf"
+          "sha256": "8fa0d21431e8d72c0390f44ae5e7b14552b24a7b9285aead3f47b0797f851747"
+        },
+        {
+          "path": "scripts/metrics.py",
+          "sha256": "bbfdd6006eebaa85ff6ecc869fb17647719e216ff4454069b1e257df5bad2ce0"
+        },
+        {
+          "path": "scripts/presentation.py",
+          "sha256": "332a0bee83d94a0b93594d66cf505058d2698425179da1e229ab59990b9c36f3"
         },
         {
           "path": "scripts/protocol_cli.py",
-          "sha256": "e0bff0c179fbfc98bc632c5707718d263dd6006d6e5f56c557f4c6b654abc826"
+          "sha256": "06316052d88471463cd49578a457fb30dec59948674a658c7570d94dfcdaf077"
         },
         {
           "path": "source/SOURCE.md",
@@ -70,15 +82,59 @@
         },
         {
           "path": "src/crystal_distortion.py",
-          "sha256": "3c2bce1b4312dd18d8841c8594b357c53c08e6e89435b5976f56843c5309e6a1"
+          "sha256": "97bcc1ba4f3cbe2da59b30f76fa2843f816e8ee369c56065cbb01eaa73daf8d1"
         },
         {
           "path": "tests/test_cli.py",
           "sha256": "bd75f3696dafb875a6b4a75f167fa730b248a3d919ae8f980066db21fb77af36"
         },
         {
+          "path": "tests/test_details.py",
+          "sha256": "14efe1114b67f24920ee38ea04fcc66f694c343f9b90c2808ea8828f2f041e7b"
+        },
+        {
           "path": "tests/test_geometry.py",
           "sha256": "e06f68bc25efdea6f2ab8117aa346c1a1cf8976a5d6c136c35651a33bff7630d"
+        },
+        {
+          "path": "viewer/build.mjs",
+          "sha256": "d2f525bbdb665879db83fb6b897d7f7723ea65fb65856dea96b6daba6db65002"
+        },
+        {
+          "path": "viewer/formulas.json",
+          "sha256": "b1c775244fb35c0d45110a2caabcbb044c85defca7b86489808f822558b32f0e"
+        },
+        {
+          "path": "viewer/main.js",
+          "sha256": "f31fe39571eb3471ae04a996ad15c305e0c77747a0f45d037e795c9820e1ee1d"
+        },
+        {
+          "path": "viewer/model.js",
+          "sha256": "f2bbec2bda0272a42a610fa533ebd409dd0438fbbf968d8086f76fd9fc3df6a9"
+        },
+        {
+          "path": "viewer/shell.html",
+          "sha256": "4cf35b0b9e3dc566dc5f9bd1b581a38489f1459d5abe0b8bd1cbc8d69832f6ca"
+        },
+        {
+          "path": "viewer/vendor/3DMOL-LICENSE.txt",
+          "sha256": "4c6eaaed856f3f28a3b1a98e74f4a8a71618de7d51ea4155c29f6f793bcef861"
+        },
+        {
+          "path": "viewer/vendor/3Dmol-2.5.3.min.js",
+          "sha256": "bcf422137a34b4e206413a8a83a67c24a1ace84e282bf3b164f6bda6aeb42a20"
+        },
+        {
+          "path": "viewer/vendor/3Dmol-min.js.LICENSE.txt",
+          "sha256": "a41d64fd6d7c5568b5b63589ba242a70b74bd7a6fc15187e6e08b8aa6cf345e7"
+        },
+        {
+          "path": "viewer/vendor/SOURCE.md",
+          "sha256": "713af454c91c4f890b10e6eb65c0a34b5025ef55abd78ce1c0f5ca828b337d7b"
+        },
+        {
+          "path": "viewer/viewer.html",
+          "sha256": "bc17bca7dfd267698b6d95d0c41107401798c17ff854ec61df8d8c13607800bc"
         }
       ]
     },

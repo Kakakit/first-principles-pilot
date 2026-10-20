@@ -1,5 +1,5 @@
 """Portable extension CLI helper; no workbench imports or database access."""
-import argparse,importlib.util,json,math,sys
+import argparse,importlib,json,math,sys
 from pathlib import Path
 
 def clean(value):
@@ -25,13 +25,14 @@ def main(check,analyze):
     args=parser.parse_args()
     manifest=json.loads((Path(__file__).resolve().parents[1]/'extension.manifest.json').read_text())
     if args.action=='doctor':
-        missing=[]
+        missing=[];versions={}
         for module in manifest['dependencies']:
             try:
-                if importlib.util.find_spec(module) is None: missing.append(module)
-            except (ModuleNotFoundError,ValueError): missing.append(module)
+                loaded=importlib.import_module(module)
+                versions[module]=str(getattr(loaded,'__version__',getattr(importlib.import_module(module.split('.')[0]),'__version__','unknown')))
+            except Exception: missing.append(module)
         ready=sys.version_info>=(3,9) and not missing
-        print(json.dumps({'schema':'fpilot.extension-doctor.v2','ready':ready,'missing':missing,'python':sys.version.split()[0],
+        print(json.dumps({'schema':'fpilot.extension-doctor.v2','ready':ready,'missing':missing,'python':sys.executable,'python_version':sys.version.split()[0],'versions':versions,
                           'reason':'环境满足' if ready else '需要 Python >=3.9 和列出的模块'},ensure_ascii=False));return 0
     request=None
     try:

@@ -32,3 +32,7 @@ Only coordination 4/tetrahedron and 6/octahedron are implemented. Distances are 
 3. If an `(n+1)`th ligand is also inside the search radius, the `n -> n+1` distance gap is recorded. Gaps below `shell_gap_warning_angstrom` produce a warning, or an error with `--fail-on-ambiguous-shell`.
 4. Site numbering is 1-based and follows POSCAR atom order.
 5. The structure must contain every configured center species to be analyzed; absent configured species are simply reported as zero sites in dry-run, while a file containing no configured centers fails full analysis.
+
+## v2 2.1 shorthand
+
+options.polyhedra accepts CrO6, FeO4, separated by ASCII/Chinese commas, semicolons or spaces. Each label has one center, one ligand and coordination 4 or 6; conflicting coordination for one center fails. search_radius_angstrom defaults to 3. No oxidation state or chemical coordination is inferred. Legacy center_element/ligand_element/coordination remains compatible; conflicting old/new declarations fail. Preferred execution is local with actual NumPy/SciPy imports; no automatic environment changes.

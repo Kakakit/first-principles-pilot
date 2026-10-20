@@ -4,7 +4,7 @@
 
 | 扩展 | 版本 | 接口 | 下载 | 源码与说明 |
 |---|---|---|---|---|
-| 配位多面体畸变 | 2.0.0 | 工作台 ZIP 导入 | [ZIP](packages/crystal-structure-distortion-analysis-2.0.0.zip) | [README](../resources/extensions/crystal-structure-distortion-analysis/README.md) |
+| 配位多面体畸变 | 2.1.0 | 工作台 ZIP 导入 | [ZIP](packages/crystal-structure-distortion-analysis-2.1.0.zip) | [README](../resources/extensions/crystal-structure-distortion-analysis/README.md) |
 | electronic-structure-characterization | 0.3.0 | 旧版 CLI | [ZIP](packages/electronic-structure-characterization-0.3.0.zip) | [README](../resources/extensions/electronic-structure-characterization/README.md) |
 | 形式极化与双结果比较 | 2.1.0 | 工作台 ZIP 导入 | [ZIP](packages/lcalcpol-polarization-analysis-2.1.0.zip) | [README](../resources/extensions/lcalcpol-polarization-analysis/README.md) |
 | local-crystal-field-analysis | 0.1.0 | 旧版 CLI | [ZIP](packages/local-crystal-field-analysis-0.1.0.zip) | [README](../resources/extensions/local-crystal-field-analysis/README.md) |
