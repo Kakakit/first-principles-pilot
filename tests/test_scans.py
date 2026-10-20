@@ -66,6 +66,52 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(tags['LDAUJ'],'0.5')
         self.assertEqual(json.dumps(self.project,sort_keys=True),original)
 
+    def test_value_lists_preserve_order_and_freeze_cartesian_inputs(self):
+        before = json.dumps(self.project, sort_keys=True)
+        dims = [{'kind':'incar','tag':'ENCUT','sampling':'list','values':['520', ' 4e2 ']},
+                {'kind':'incar','tag':'SIGMA','sampling':'list','values':['0.05', '0.1', '0.2']}]
+        report = scans.preview(self.project, 'scan', 'c', dims)
+        expected = [('520','0.05'), ('520','0.1'), ('520','0.2'),
+                    ('400','0.05'), ('400','0.1'), ('400','0.2')]
+        self.assertTrue(report['ready'])
+        self.assertEqual(report['case_count'], 6)
+        self.assertEqual([tuple(p['value'] for p in case['parameters']) for case in report['cases']], expected)
+        batch = scans.freeze(self.project, 'scan', 'c', dims, '', report['definition_hash'])
+        self.assertEqual(batch['dimensions'], dims)
+        for case, (encut, sigma) in zip(batch['cases'], expected):
+            files = ex.bundle(case['bundle_id'])[1]
+            self.assertIn(('ENCUT = '+encut).encode(), files['INCAR'])
+            self.assertIn(('SIGMA = '+sigma).encode(), files['INCAR'])
+        self.assertEqual(json.dumps(self.project, sort_keys=True), before)
+
+    def test_lists_combine_with_ranges_and_geometry(self):
+        dims = [{'kind':'incar','tag':'ENCUT','sampling':'list','values':['400', '520']},
+                {'kind':'poscar','mode':'volume_ratio','sampling':'list','values':['1', '1.1']},
+                {'kind':'incar','tag':'SIGMA','start':'0.05','end':'0.1','step':'0.05'}]
+        report = scans.preview(self.project, 'scan', 'c', dims)
+        self.assertTrue(report['ready'])
+        self.assertEqual(report['case_count'], 8)
+        for case, ratio in zip(report['cases'], [1,1,1.1,1.1]*2):
+            self.assertAlmostEqual(case['geometry']['volume_ratio'], ratio)
+        self.assertEqual(scans.axis({'kind':'u','element':'Si','sampling':'list','values':['0','2.5']}, 'scf'), ['0','2.5'])
+        self.assertEqual(scans.axis({'kind':'j','element':'Si','sampling':'list','values':['0']}, 'scf'), ['0'])
+
+    def test_lists_keep_numeric_validation_and_case_limits(self):
+        dim = {'kind':'incar','tag':'ENCUT','sampling':'list'}
+        for values in (None, '400,500', [], ['400']*65, [''], ['400',''],
+                       ['NaN'], ['Infinity'], ['1e13'], [400], ['4e2','400.0']):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                scans.axis({**dim, 'values':values}, 'scf')
+        for patch, values in (({'kind':'u','element':'Si'}, ['-1']),
+                              ({'kind':'poscar'}, ['0']),
+                              ({'kind':'incar','tag':'NSW'}, ['1.5'])):
+            with self.subTest(patch=patch), self.assertRaises(ValueError):
+                scans.axis({**dim, **patch, 'values':values}, 'scf')
+        with self.assertRaisesRegex(ValueError, '64'):
+            scans.preview(self.project, 'scan', 'c', [
+                {**dim,'values':[str(i) for i in range(400,409)]},
+                {'kind':'kmesh','meshes':[[i,i,i] for i in range(1,9)]}])
+
     def test_reject_duplicate_limit_and_invalid_grid(self):
         base={'kind':'incar','tag':'ENCUT','start':'400','end':'407','step':'1'}
         with self.assertRaisesRegex(ValueError,'重复'):scans.preview(self.project,'scan','c',[base,base])

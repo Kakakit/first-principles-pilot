@@ -58,26 +58,36 @@ def axis(dimension, stage):
                 raise ValueError('POSCAR 扫描方式无效')
         else:
             raise ValueError('扫描维度类型无效')
-        start, end = (decimal(dimension.get(k)) for k in ('start', 'end'))
         sampling = dimension.get('sampling', 'step')
-        if sampling == 'count':
-            if kind != 'poscar': raise ValueError('按点数取样目前仅用于 POSCAR')
-            count = dimension.get('point_count')
-            if type(count) is not int or not 2 <= count <= 64:
-                raise ValueError('取样点数须为 2–64 的整数（包含起点和终点）')
-            if start == end: raise ValueError('按点数取样的起点和终点不能相同')
-            # Compute each point independently; a rounded recurring step must
-            # never drop the endpoint or accumulate into an extra point.
-            grid = [start + (end-start)*Decimal(i)/Decimal(count-1) for i in range(count)]
-            grid[0], grid[-1] = start, end
-        elif sampling == 'step':
-            step = decimal(dimension.get('step'))
-            if step == 0 or (end-start)*step < 0: raise ValueError('扫描步长方向错误')
-            grid, current = [], start
-            while (current <= end if step > 0 else current >= end) and len(grid) <= 64:
-                grid.append(current)
-                current += step
-        else: raise ValueError('取样方式无效')
+        if sampling == 'list':
+            raw_values = dimension.get('values')
+            if not isinstance(raw_values, list) or not 1 <= len(raw_values) <= 64:
+                raise ValueError('数值列表须包含 1–64 个值，用逗号分隔')
+            grid = []
+            for index, value in enumerate(raw_values, 1):
+                try: grid.append(decimal(value))
+                except ValueError as error:
+                    raise ValueError(f'数值列表第 {index} 项：{error}') from error
+        else:
+            start, end = (decimal(dimension.get(k)) for k in ('start', 'end'))
+            if sampling == 'count':
+                if kind != 'poscar': raise ValueError('按点数取样目前仅用于 POSCAR')
+                count = dimension.get('point_count')
+                if type(count) is not int or not 2 <= count <= 64:
+                    raise ValueError('取样点数须为 2–64 的整数（包含起点和终点）')
+                if start == end: raise ValueError('按点数取样的起点和终点不能相同')
+                # Compute each point independently; a rounded recurring step must
+                # never drop the endpoint or accumulate into an extra point.
+                grid = [start + (end-start)*Decimal(i)/Decimal(count-1) for i in range(count)]
+                grid[0], grid[-1] = start, end
+            elif sampling == 'step':
+                step = decimal(dimension.get('step'))
+                if step == 0 or (end-start)*step < 0: raise ValueError('扫描步长方向错误')
+                grid, current = [], start
+                while (current <= end if step > 0 else current >= end) and len(grid) <= 64:
+                    grid.append(current)
+                    current += step
+            else: raise ValueError('取样方式无效')
         values = []
         for current in grid:
             value = format(current.normalize(), 'f')
