@@ -32,11 +32,11 @@ const fonts:ThemeFonts = {
   headingEnglish:['Inter','-apple-system','BlinkMacSystemFont','Segoe UI','sans-serif'],
   monospace:['SFMono-Regular','Menlo','Consolas','monospace'],
 };
-const metrics:ThemeMetrics = {fontSize:15,secondaryFontSize:13,radius:12};
+const metrics:ThemeMetrics = {fontSize:16,secondaryFontSize:14,radius:4};
 const light:ThemeColors = {
   background:'#f3f7f5',surface:'#ffffff',surfaceRaised:'#f5f9f7',
-  sidebar:'#ffffff',sidebarText:'#254b41',sidebarMuted:'#63786f',
-  text:'#263c34',mutedText:'#60756c',border:'#dce7e1',
+  sidebar:'#ffffff',sidebarText:'#254b41',sidebarMuted:'#53675d',
+  text:'#263c34',mutedText:'#52665c',border:'#dce7e1',
   accent:'#19816b',accentText:'#ffffff',accentSoft:'#f2fcf7',
   success:'#24714e',successSoft:'#eaf7ee',warning:'#8b5b16',warningSoft:'#fff4df',
   danger:'#b5414a',dangerSoft:'#fcecef',canvas:'#f5f9f6',canvasGrid:'#d4e4da',canvasEdge:'#7a9e8e',
@@ -136,6 +136,7 @@ export function applyTheme(theme:Theme,root:HTMLElement=document.documentElement
   root.style.setProperty('--font-body',fontStack(theme.fonts.english,theme.fonts.chinese));
   root.style.setProperty('--font-heading',fontStack(theme.fonts.headingEnglish,theme.fonts.headingChinese));
   root.style.setProperty('--font-code',fontStack(theme.fonts.monospace,theme.fonts.chinese.filter(name=>!['serif','sans-serif','monospace','system-ui'].includes(name))));
+  root.style.setProperty('--ui-title',theme.metrics.fontSize>=18?'24px':'20px');root.style.setProperty('--ui-caption',theme.metrics.secondaryFontSize>=16?'14px':'12px');
   root.style.setProperty('--font-size',`${theme.metrics.fontSize}px`);root.style.setProperty('--font-secondary',`${theme.metrics.secondaryFontSize}px`);root.style.setProperty('--radius',`${theme.metrics.radius}px`);
 }
 function notify(){applyTheme(selectedTheme());listeners.forEach(listener=>listener());window.dispatchEvent(new Event('fpilot:appearance-changed'));}

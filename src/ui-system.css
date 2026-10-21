@@ -1,0 +1,40 @@
+/* Internal tokens. Theme JSON v1 continues to use its existing hex fields. */
+:root{
+ --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-6:24px;--space-8:32px;
+ --grey-100:hsl(150,16%,97%);--grey-200:hsl(150,12%,94%);--grey-300:hsl(150,10%,88%);--grey-400:hsl(150,8%,70%);--grey-500:hsl(150,8%,51%);--grey-600:hsl(150,10%,40%);--grey-700:hsl(150,12%,30%);--grey-800:hsl(150,16%,22%);--grey-900:hsl(150,20%,14%);
+ --green-100:hsl(160,40%,96%);--green-200:hsl(160,34%,90%);--green-300:hsl(160,32%,80%);--green-400:hsl(160,35%,64%);--green-500:hsl(163,68%,30%);--green-600:hsl(163,66%,26%);--green-700:hsl(163,60%,22%);--green-800:hsl(163,50%,18%);--green-900:hsl(163,42%,14%);
+ --ui-body:var(--font-size);--ui-control:var(--font-secondary);--ui-caption:12px;--ui-section:16px;--ui-title:20px;--ui-metric:24px;
+ --ui-divider:var(--color-border);--ui-control-border:hsl(150,8%,48%);--ui-focus:var(--color-accent);--ui-text:var(--color-text);--ui-muted:var(--color-muted-text);--ui-subtle:var(--color-muted-text);
+ --shadow-panel:0 1px 3px hsla(150,20%,14%,.1);--shadow-menu:0 4px 6px hsla(150,20%,14%,.2);--shadow-dialog:0 15px 35px hsla(150,20%,14%,.2);
+}
+:root[data-appearance=dark]{--ui-control-border:hsl(160,10%,60%);--shadow-panel:0 1px 3px hsla(0,0%,0%,.2);--shadow-menu:0 4px 6px hsla(0,0%,0%,.4);--shadow-dialog:0 15px 35px hsla(0,0%,0%,.4)}
+.app-shell{font-size:var(--ui-body);line-height:1.6}
+.app-shell h1,.app-shell h2{font-size:var(--ui-title);font-weight:600;line-height:1.5;letter-spacing:0}
+.app-shell h3,.app-shell h4{font-size:var(--ui-section);font-weight:600;line-height:1.5;letter-spacing:0}
+.app-shell strong,.app-shell b{font-weight:600}.app-shell small{font-size:var(--ui-caption)}
+.app-shell :is(button,input,select,textarea,table,summary){font-size:var(--ui-control)}
+.app-shell :is(input,select,textarea){line-height:1.5}
+.app-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea){border:1px solid var(--ui-control-border);border-radius:var(--radius);padding:8px 12px;color:var(--ui-text);background:var(--color-surface);max-width:100%}
+.app-shell input[type=checkbox],.app-shell input[type=radio]{appearance:none;width:16px;height:16px;border:1px solid var(--ui-control-border);background:var(--color-surface);border-radius:2px;display:inline-grid;place-content:center;vertical-align:middle;margin:0 8px 0 0;flex-shrink:0}
+.app-shell input[type=radio]{border-radius:50%}.app-shell input:checked{background:var(--color-accent);border-color:var(--color-accent)}
+.app-shell input[type=checkbox]:checked::after{content:'✓';font:600 12px/1 sans-serif;color:var(--color-accent-text)}.app-shell input[type=radio]:checked::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--color-accent-text)}
+.app-shell input::placeholder,.app-shell textarea::placeholder{color:var(--ui-muted);opacity:1}
+.app-shell :is(button,a,input,select,textarea,summary):focus-visible{outline:2px solid var(--ui-focus);outline-offset:2px}
+.app-shell :is(button,input,select,textarea):disabled{opacity:.6}
+.app-shell .button{min-height:32px;padding:4px 12px;border:1px solid var(--ui-control-border);border-radius:var(--radius);font-size:var(--ui-control);font-weight:400;box-shadow:none;gap:8px}
+.app-shell .button.primary{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-accent-text);font-weight:600}
+.app-shell .button.danger{background:var(--color-surface);border-color:var(--ui-control-border);color:var(--color-danger)}
+.app-shell .button.danger:hover{background:var(--color-danger-soft);border-color:var(--color-danger)}
+.app-shell .icon-btn{width:32px;height:32px;border-radius:var(--radius)}
+.app-shell :is(.input-submit-card,.poscar-editor,.calculation-card,.modal,details,pre){border-radius:var(--radius)}
+.app-shell .modal{box-shadow:var(--shadow-dialog);padding:24px;max-height:calc(100dvh - 32px);overflow:auto}
+.app-shell .modal-scrim{background:hsla(150,20%,10%,.4);padding:16px}
+.app-shell :is(th,td){padding:8px 12px;border-color:var(--ui-divider);font-variant-numeric:tabular-nums}
+.app-shell th{color:var(--ui-muted);font-weight:600;background:var(--color-surface-raised)}
+.app-shell :is(td,dd,p,label,strong){overflow-wrap:anywhere}
+.app-shell .field{gap:8px}.app-shell :is(.field-heading,.field>span){font-size:var(--ui-control)}
+.app-shell .empty-state{padding:32px 24px;border:0;box-shadow:none}.app-shell .empty-state h2{margin-bottom:8px}
+.app-shell :is(.remote-progress,.workspace-save-feedback){font-size:var(--ui-caption);font-variant-numeric:tabular-nums}
+.app-shell .workspace-save-feedback{height:24px;min-height:24px;flex-shrink:0;overflow:hidden;padding:0 16px;line-height:24px}
+.ui-feedback{min-height:32px;display:flex;align-items:flex-start;gap:8px;font-size:var(--ui-control);line-height:1.6;margin:8px 0;overflow-wrap:anywhere}.ui-feedback:empty{margin-top:8px;margin-bottom:8px}.ui-feedback [role=alert]{color:var(--color-danger)}
+@media(prefers-reduced-motion:reduce){.app-shell *{scroll-behavior:auto!important;transition:none!important}}

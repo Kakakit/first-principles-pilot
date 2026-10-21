@@ -5,6 +5,7 @@ import './style.css';
 import './appearance.css';
 import {initializeAppearance} from './appearance';
 import App from './App';
+import './ui-system.css';
 import WorkbenchErrorBoundary from './WorkbenchErrorBoundary';
 initializeAppearance();
 ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><WorkbenchErrorBoundary><App/></WorkbenchErrorBoundary></React.StrictMode>);

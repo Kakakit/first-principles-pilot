@@ -70,7 +70,7 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
   },[ready]);
   flushLatest.current=flush;
   const serialized=useMemo(()=>JSON.stringify(cleanWorkspace(workspace)),[workspace]);
-  useEffect(()=>{if(!ready||serialized===saved.current)return;setStatus('有修改待保存');timer.current=setTimeout(()=>void flush(),1000);return()=>clearTimeout(timer.current);},[serialized,ready,flush]);
+  useEffect(()=>{if(!ready)return;if(serialized===saved.current){if(!running.current&&!paused.current)setStatus('已保存到本机工作区');return;}setStatus('有修改待保存');timer.current=setTimeout(()=>void flush(),1000);return()=>clearTimeout(timer.current);},[serialized,ready,flush]);
   const finishEditing=useCallback(()=>{drain.current=true;void flush();},[flush]);
   useEffect(()=>{const hidden=()=>{if(document.hidden)finishEditing();};document.addEventListener('visibilitychange',hidden);return()=>document.removeEventListener('visibilitychange',hidden);},[finishEditing]);
   useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(ready&&JSON.stringify(cleanWorkspace(latest.current))!==saved.current){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[ready]);

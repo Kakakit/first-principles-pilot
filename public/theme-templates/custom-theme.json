@@ -11,9 +11,9 @@
     "surfaceRaised": "#f5f9f7",
     "sidebar": "#ffffff",
     "sidebarText": "#254b41",
-    "sidebarMuted": "#63786f",
+    "sidebarMuted": "#53675d",
     "text": "#263c34",
-    "mutedText": "#60756c",
+    "mutedText": "#52665c",
     "border": "#dce7e1",
     "accent": "#19816b",
     "accentText": "#ffffff",
@@ -67,8 +67,8 @@
     ]
   },
   "metrics": {
-    "fontSize": 15,
-    "secondaryFontSize": 13,
-    "radius": 12
+    "fontSize": 16,
+    "secondaryFontSize": 14,
+    "radius": 4
   }
 }

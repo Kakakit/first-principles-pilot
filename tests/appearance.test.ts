@@ -9,7 +9,7 @@ test('default is bright green and white; five themes include three dark choices'
 });
 test('partial import inherits colors, fonts and dimensions from its base',()=>{
  const theme=resolveTheme(parseTheme(JSON.stringify({...minimal,base:'orbit',colors:{accent:'#ffffff'},fonts:{chinese:['Songti SC','serif']},metrics:{fontSize:16}})));
- const base=BUILTIN_THEMES.find(t=>t.id==='orbit')!;assert.equal(theme.id,'custom:forest');assert.equal(theme.appearance,'dark');assert.equal(theme.colors.surface,base.colors.surface);assert.equal(theme.colors.accent,'#ffffff');assert.equal(theme.metrics.secondaryFontSize,13);assert.deepEqual(theme.fonts.chinese,['Songti SC','serif']);
+ const base=BUILTIN_THEMES.find(t=>t.id==='orbit')!;assert.equal(theme.id,'custom:forest');assert.equal(theme.appearance,'dark');assert.equal(theme.colors.surface,base.colors.surface);assert.equal(theme.colors.accent,'#ffffff');assert.equal(theme.metrics.secondaryFontSize,14);assert.deepEqual(theme.fonts.chinese,['Songti SC','serif']);
 });
 test('invalid colors, dimensions, unknown keys and malformed files explain corrections',()=>{
  for(const [change,pattern] of [[{colors:{accent:'green'}},/六位色号/],[{metrics:{secondaryFontSize:9}},/13–16/],[{colors:{surfac:'\u0023ffffff'}},/未知字段/],[{fonts:{english:'Georgia'}},/字体名称数组/],[{base:'missing'},/base/],[{schema:'v2'},/schema/],[{css:'body{}'},/未知字段/],[{fonts:{english:['x; color:red']}},/字体名称数组/]] as const)assert.throws(()=>parseTheme(JSON.stringify({...minimal,...change})),pattern);
