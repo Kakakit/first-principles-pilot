@@ -23,6 +23,7 @@ from . import servers
 from . import remote_paths
 from . import job_templates
 from . import recycle
+from .execution_evidence import read_record, electronic as electronic_evidence
 
 
 def now():return datetime.now(timezone.utc).isoformat()
@@ -96,7 +97,7 @@ def save(record, expected_updated_at=False):
         row=c.execute('SELECT body FROM attempts WHERE id=?',(record['id'],)).fetchone()
         if not row or recycle.purged('attempts',record['id']):
             c.rollback();return record
-        existing=json.loads(row[0]) if row else {}
+        existing=read_record(row[0]) if row else {}
         if expected_updated_at is not False and existing.get('updated_at') != expected_updated_at:
             c.rollback();return existing
         if existing.get('state') in ('COMPLETED','FAILED','CANCELLED'):
@@ -126,12 +127,12 @@ def get(key):
     with closing(db()) as c:
         row=c.execute('SELECT body FROM attempts WHERE id=?',(key,)).fetchone()
     if not row:raise ValueError('任务记录不存在')
-    return json.loads(row[0])
+    return read_record(row[0])
 
 
 def history(project_id=None, limit=100):
     with closing(db()) as c:
-        rows = [json.loads(row[0]) for row in c.execute('SELECT body FROM attempts ORDER BY rowid DESC')]
+        rows = [read_record(row[0]) for row in c.execute('SELECT body FROM attempts ORDER BY rowid DESC')]
     from .calculation_nodes import case_info
     return [{**row, **case_info(row)} for row in rows if (project_id is None or row.get('project_id') == project_id) and
             not recycle.inactive('attempts',row['id'],row)][:limit]
@@ -1202,16 +1203,7 @@ fi
     singleton_match=re.search(r'^FPILOT_MPI_SINGLETON=(\d+)',out,re.M)
     singleton_count=int(singleton_match.group(1)) if singleton_match else 0
     output_sanity=timing_count == 1 and singleton_count == 0
-    ediff_text=re.search(r'^FPILOT_EDIFF=([1-9]\d*)',out,re.M) is not None
-    numeric_match=re.search(r'^FPILOT_EDIFF_NUMERIC=([^|\s]+)\|(\d+)\|([^|\s]+)\|([^\s]+)',out,re.M)
-    ediff_numeric=False;ediff_value=None;last_electronic_step=None;last_delta_e=None;last_delta_eps=None
-    if numeric_match:
-        try:
-            ediff_value=float(numeric_match.group(1));last_electronic_step=int(numeric_match.group(2))
-            last_delta_e=float(numeric_match.group(3));last_delta_eps=float(numeric_match.group(4))
-            ediff_numeric=abs(last_delta_e)<=ediff_value and abs(last_delta_eps)<=ediff_value
-        except ValueError: pass
-    ediff=ediff_numeric if numeric_match else ediff_text
+    electronic = electronic_evidence(out)
     ionic_match = re.search(r'^FPILOT_IONIC=(\d+)', out, re.M)
     ionic_step_match = re.search(r'^FPILOT_IONIC_STEP=(\d+)', out, re.M)
     trace_exit, trace_complete = pbs_history_evidence(out) if scheduler == 'pbs' else (None, False)
@@ -1241,10 +1233,7 @@ fi
     record.update(state=state,status_receipt=receipt,updated_at=now(),state_checked_at=now(),tracking_error='',
                   evidence={'wrapper_exit':int(exit_match.group(1)) if exit_match else None,'vasp_timing':timing,
                             'timing_count':timing_count,'mpi_singleton_count':singleton_count,
-                            'output_sanity':output_sanity,'ediff_reached':ediff,
-                            'ediff_source':'OSZICAR_NUMERIC' if numeric_match else 'OUTCAR_MARKER' if ediff_text else None,
-                            'ediff_value':ediff_value,'last_electronic_step':last_electronic_step,
-                            'last_delta_e':last_delta_e,'last_delta_eps':last_delta_eps,
+                            'output_sanity':output_sanity,**electronic,
                             'ionic_converged': int(ionic_match.group(1)) == 1 if ionic_match else None,
                             'last_ionic_step': int(ionic_step_match.group(1)) if ionic_step_match else None,
                             'scheduler':scheduler,'scheduler_state':scheduler_state,
