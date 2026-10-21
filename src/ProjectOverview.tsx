@@ -1,22 +1,20 @@
-import HistoryList from './HistoryList';
-import {DeleteRecord,RecycleBin} from './RecordCleanup';
-import {ArrowRight,CheckCircle2,Clock3,AlertCircle,FileText} from 'lucide-react';
-import {catalog} from './model';
+import {useState} from 'react';
+import {ArrowRight,RefreshCw} from 'lucide-react';
+import {RecycleBin} from './RecordCleanup';
 import type {Project} from './model';
-import {latestByNode,nextAction,taskTemplates,programDone} from './resultWorkspace';
+import {latestByNode,nextAction,taskTemplates} from './resultWorkspace';
 import type {ResultAttempt} from './resultWorkspace';
+import {attemptLabel} from './humanLabels';
 import {statusLabel} from './statusLabels';
 export default function ProjectOverview({project,attempts,loading,error,onOpen,onRefresh,onTemplate,onDelete}:{project:Project;attempts:ResultAttempt[];loading:boolean;error:boolean;onOpen:(view:string,nodeId?:string,attemptId?:string)=>void;onRefresh:()=>void;onTemplate:(id:string)=>void;onDelete:()=>void}){
+ const [management,setManagement]=useState(false);
  const latest=latestByNode(attempts),calculations=project.nodes.filter(n=>n.data.kind!=='structure'),structures=project.nodes.filter(n=>n.data.kind==='structure');
- const completed=attempts.filter(a=>a.state==='COMPLETED'&&programDone(a)).length;
  const attention=attempts.filter(a=>['UNKNOWN','FAILED','DISPATCHING'].includes(a.state));
- return <section className="project-overview"><div className="page-heading"><div><h2>项目概览</h2></div><div className="action-row"><button className="button" onClick={onRefresh} disabled={loading}>刷新本机记录</button><button className="button danger" onClick={onDelete}>删除整个项目</button></div></div>
- {error&&<div className="action-error" role="alert">本机执行记录暂不可读，状态未更新。<button className="button" onClick={onRefresh}>重试读取状态</button></div>}
- <div className="overview-stats"><div><FileText/><span>流程节点</span><strong>{calculations.length}</strong></div><div><CheckCircle2/><span>有程序结束证据</span><strong>{completed}</strong></div><div><Clock3/><span>排队或运行记录</span><strong>{attempts.filter(a=>['SUBMITTED','QUEUED','RUNNING','HELD','EXITING'].includes(a.state)).length}</strong></div><div><AlertCircle/><span>需要核对的记录</span><strong>{attention.length}</strong></div></div>
- {loading&&<p role="status">正在读取记录…</p>}
- <div className="overview-columns"><section className="workspace-card"><h3>接下来做什么</h3>{!structures.some(n=>n.data.structure)&&<div className="next-action"><div><strong>先导入真实结构</strong><p>上传 POSCAR 或 CIF，核对晶胞、元素与原子顺序。</p></div><button className="button primary" onClick={()=>onOpen('structure')}>导入结构<ArrowRight size={15}/></button></div>}{!calculations.length&&<div className="next-action"><div><strong>建立计算流程</strong><p>添加计算节点并连接结构；也可从下方创建独立模板草稿。</p></div><button className="button" onClick={()=>onOpen('flow')}>编辑流程</button></div>}
- {calculations.map(node=>{const attempt=latest[node.id],action=nextAction(attempt);return <div className="next-action" key={node.id}><div><strong>{node.data.label}</strong><span className="state-pill">{attempt?statusLabel(attempt.state):'尚未准备'}</span></div><button className="button" disabled={error||loading} onClick={()=>onOpen(node.data.kind==='scan'?'run':action.view,node.id,action.view==='results'?attempt?.id:undefined)}>{node.data.kind==='scan'?'查看迭代批次':action.label}<ArrowRight size={15}/></button></div>;})}</section>
- <section className="workspace-card"><h3>待核对的历史记录</h3>{attention.length?<HistoryList rows={attention} limit={3} context={project.id} render={a=><div className="history-row" key={a.id}><button className="attention-row" onClick={()=>onOpen('results',a.node_id,a.id)}><span>{project.nodes.find(n=>n.id===a.node_id)?.data.label||'历史节点'} · {a.job_id||'未提交'}</span><strong>{statusLabel(a.state)}</strong><ArrowRight size={16}/></button><DeleteRecord kind="attempts" id={a.id} state={a.state} label={a.job_id||'未提交'} onChanged={onRefresh}/></div>}/>:<p className="empty-note">暂无待处理记录。</p>}<RecycleBin key={project.id} kind="attempts" projectId={project.id} title="计算记录回收区" onChanged={onRefresh}/></section></div>
- <section className="workspace-card"><h3>从任务模板建立草稿</h3><div className="task-template-grid">{taskTemplates.map(t=><article key={t.id}><h4>{t.name}</h4><p>{t.description}</p><button className="button" onClick={()=>onTemplate(t.id)}>新建此流程草稿</button></article>)}</div></section>
+ return <section className="workflow-project-overview"><div className="workflow-project-heading"><h2>{project.name}</h2><button className="icon-btn" aria-label="刷新本机项目记录" disabled={loading} onClick={onRefresh}><RefreshCw size={15}/></button></div><p className="summary-muted">{structures.length} 个结构 · {calculations.length} 个计算节点</p>
+  {error&&<div className="summary-warning" role="alert">本机记录暂不可读，保留已有信息。<button className="text-button" onClick={onRefresh}>重试</button></div>}
+  <details className="workflow-project-section" open><summary>待处理记录 <span>{attention.length}</span></summary>{attention.length?<div className="workflow-attention-list">{attention.slice(0,5).map(a=><button key={a.id} title={attemptLabel(a,project,true)} onClick={()=>onOpen('results',String(a.owner_node_id||a.execution_scope||a.node_id||''),a.id)}><span>{attemptLabel(a,project)}</span><strong>{statusLabel(a.state)}</strong></button>)}</div>:<p className="summary-muted">暂无待处理记录。</p>}</details>
+  <details className="workflow-project-section" open><summary>节点下一步</summary>{!structures.some(n=>n.data.structure)&&<button className="workflow-next-action" onClick={()=>onOpen('structure',structures[0]?.id)}><span>导入初始结构</span><ArrowRight size={14}/></button>}<div className="workflow-next-actions">{calculations.map(node=>{const attempt=latest[node.id],action=nextAction(attempt);return <button className="workflow-next-action" key={node.id} disabled={error||loading} onClick={()=>onOpen(node.data.kind==='scan'?'run':action.view,node.id,action.view==='results'?attempt?.id:undefined)}><span>{node.data.label}<small>{node.data.kind==='scan'?'查看迭代批次':action.label}</small></span><ArrowRight size={14}/></button>;})}</div></details>
+  <details className="workflow-project-section"><summary>从模板建立流程</summary><div className="workflow-template-list">{taskTemplates.map(t=><button key={t.id} onClick={()=>onTemplate(t.id)} title={t.description}>{t.name}<ArrowRight size={14}/></button>)}</div></details>
+  <details className="workflow-project-section" onToggle={e=>setManagement(e.currentTarget.open)}><summary>项目管理与回收</summary>{management&&<><button className="button danger" onClick={onDelete}>删除整个项目</button><RecycleBin kind="attempts" projectId={project.id} title="计算记录回收区" onChanged={onRefresh}/></>}</details>
  </section>;
 }

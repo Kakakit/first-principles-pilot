@@ -1,0 +1,4 @@
+import{test}from'node:test';import assert from'node:assert/strict';import{casePage}from'../src/scanCaseView';
+const cases=Array.from({length:23},(_,index)=>({id:String(index),index,state:index%2?'FAILED':'COMPLETED',parameters:[{key:'ENCUT',value:String(400+index*20)}]}));
+test('case search combines original coordinates and state without changing saved order',()=>{const before=JSON.stringify(cases);assert.deepEqual(casePage(cases,'ENCUT=420','FAILED',0).items.map(c=>c.index),[1]);assert.equal(casePage(cases,'case 23','',0).items[0].index,22);assert.equal(JSON.stringify(cases),before);});
+test('pages clamp after filters and empty results remain a usable first page',()=>{assert.deepEqual(casePage(cases,'','',2).items.map(c=>c.index),[20,21,22]);assert.equal(casePage(cases,'420','',2).page,0);assert.equal(casePage(cases,'absent','FAILED',8).pages,1);assert.equal(casePage(cases,'absent','FAILED',8).items.length,0);});
