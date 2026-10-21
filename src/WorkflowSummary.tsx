@@ -1,8 +1,9 @@
 import {useEffect,useRef,useState} from 'react';
+import ExecutionEvidence from './ExecutionEvidence';
 import {ArrowRight} from 'lucide-react';
 import type {Project,Step} from './model';
 import type {ResultAttempt,ResultSummary,Scalar} from './resultWorkspace';
-import {formatValue,programDone} from './resultWorkspace';
+import {formatValue} from './resultWorkspace';
 import {NodeIcon} from './nodeAppearance';
 import {attemptLabel,attemptName} from './humanLabels';
 import {statusLabel} from './statusLabels';
@@ -11,10 +12,6 @@ import {errorMessage,requestJson} from './apiClient';
 import {casePage} from './scanCaseView';
 import type {ScanCase} from './scanCaseView';
 const summaries=new Map<string,{version:string;value:ResultSummary}>();
-function ExecutionEvidence({attempt,evidence=attempt.evidence||{}}:{attempt:ResultAttempt;evidence?:Record<string,unknown>}){
- const convergence=evidence[attempt.kind==='wannier90'?'localization_converged':'ediff_reached'];
- return <div className="workflow-evidence"><div><span>调度状态</span><strong>{statusLabel(attempt.state)}</strong></div><div><span>程序结束</span><strong>{programDone({...attempt,evidence})?'已见结束标志':'未验证'}</strong></div><div><span>数值收敛</span><strong>{convergence===true?'已收敛':convergence===false?'未收敛':'未验证'}</strong></div><div><span>物理审核</span><strong>{statusLabel(String(evidence.scientific_validation||'NOT_PERFORMED'))}</strong></div></div>;
-}
 function ScanSummary({cases,attempts,onCase}:{cases:ScanCase[];attempts:ResultAttempt[];onCase:(id:string)=>void}){
  const [chosen,setChosen]=useState(''),[query,setQuery]=useState(''),[state,setState]=useState(''),[page,setPage]=useState(0);
  const view=casePage(cases,query,state,page),current=view.items.find(c=>String(c.index)===chosen)||view.items[0];
