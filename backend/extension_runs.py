@@ -116,17 +116,8 @@ def _stage(record):
 
 
 def _input_note(record):
-    note=record.get('input_reason') or record.get('reason')
-    if note:return note
-    key=record.get('bundle_id')
-    if not isinstance(key,str) or not re.fullmatch(r'[a-f0-9]{64}',key):return ''
-    try:
-        if record.get('kind')=='wannier90':
-            manifest=json.loads((ROOT/'wannier-bundles'/(key+'.json')).read_text())
-        else:
-            with zipfile.ZipFile(ROOT/'inputs'/(key+'.zip')) as archive:manifest=json.loads(archive.read('manifest.json'))
-        return manifest.get('reason') or manifest.get('input_reason') or ''
-    except (OSError,ValueError,KeyError,zipfile.BadZipFile):return ''
+    from .input_display import frozen_note
+    return frozen_note(record, ROOT) or ''
 
 
 def source_catalog(project_id):
@@ -143,9 +134,11 @@ def source_catalog(project_id):
         from .calculation_nodes import owner, case_info
         stage,_=_stage(record);node=nodes.get(owner(record),{})
         info=case_info(record)
+        input_note=_input_note(record)
         rows.append({'id':record['id'],'node_id':record.get('node_id'),'stage':stage,
                      **info, 'name':((node.get('label') or record.get('display_name') or stage) + (' · Case '+str(info['case_index']+1)+' · '+info['parameter_summary'] if info else '')),
-                     'input_reason':_input_note(record), 'seed':record.get('seed'),
+                     'input_reason':input_note, 'input_note':input_note, 'seed':record.get('seed'),
+                     'chain_run_id':record.get('chain_run_id'), 'config':{'name':record.get('config',{}).get('name')},
                      'state':record['state'],'job_id':record.get('job_id'),'created_at':record.get('created_at'),
                      'alias':record['config']['alias'],'evidence':record.get('evidence') or {}})
     return {'attempts':rows,'max_sources':p.MAX_SOURCES}

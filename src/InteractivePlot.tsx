@@ -1,4 +1,5 @@
 import {usePageVisible} from './usePageVisible';
+import {attemptLabel} from './humanLabels';
 import {memo,useEffect,useMemo,useRef,useState} from 'react';
 import * as echarts from 'echarts';
 import {useAppearance} from './useAppearance';
@@ -10,7 +11,7 @@ import type {Project} from './model';
 import BandEdges from './BandEdges';
 import type {BandReference} from './BandEdges';
 
-type Candidate={id:string;node_id?:string;execution_scope?:string;stage:'bands'|'dos';host:string;job_id?:string;path?:string;scf_attempt_id?:string};
+type Candidate={id:string;node_id?:string;execution_scope?:string;stage:'bands'|'dos';host:string;job_id?:string;path?:string;scf_attempt_id?:string;input_note?:string|null;chain_run_id?:string;config?:{name?:string};created_at?:string;state?:string;parameter_summary?:string;case_index?:number;batch_reason?:string};
 type CacheMeta={id:string;remote_parts?:Record<string,unknown>;band_attempt_id?:string;dos_attempt_id?:string;band?:{elements:string[];orbitals:string[];spins:number;energy_reference:BandReference};dos?:{elements:string[];orbitals:string[];spins:number;energy_reference:BandReference;projection_note?:string};sources:Array<{name:string;size_bytes:number;local_path:string}>;compatible?:boolean;compatibility_note?:string};
 type Job={id:string;state:string;downloaded_bytes:number;total_bytes:number;available_bytes?:number;current_file?:string;error?:string;metadata?:CacheMeta};
 type Trace={element:string;orbital:string;weights?:number[][][];values?:number[][]};
@@ -140,6 +141,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
   const seriesQueue=useRef<{running:boolean;pending?:()=>Promise<void>}>({running:false});
 
   const candidateLabel=(item:Candidate)=>{
+    if('input_note' in item)return attemptLabel(item,project)+' · '+item.host;
     const node=project.nodes.find(row=>row.id===(item.node_id||item.execution_scope));
     const attemptTime=item.path?.match(/attempts\/(\d{8})-(\d{6})/);
     const when=attemptTime?`${attemptTime[1].slice(4,6)}/${attemptTime[1].slice(6,8)} ${attemptTime[2].slice(0,2)}:${attemptTime[2].slice(2,4)}`:'';
@@ -223,7 +225,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
     return items;
   },[data,emin,emax,pointSize,componentColor,compact]);
   return <section className="input-submit-card interactive-plot-workspace"><h3>内置交互式 fatband／PDOS</h3>
-    <div className="parameter-grid"><label className="field">已完成能带 attempt<select value={bandId} onChange={e=>setBandId(e.target.value)}><option value="">不显示 fatband</option>{candidates.filter(item=>item.stage==='bands').map(item=><option key={item.id} value={item.id}>{candidateLabel(item)}</option>)}</select></label><label className="field">已完成 DOS attempt<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">不显示 PDOS</option>{candidates.filter(item=>item.stage==='dos').map(item=><option key={item.id} value={item.id}>{candidateLabel(item)}</option>)}</select></label></div>
+    <div className="parameter-grid"><label className="field">已完成能带 attempt<select value={bandId} onChange={e=>setBandId(e.target.value)}><option value="">不显示 fatband</option>{candidates.filter(item=>item.stage==='bands').map(item=><option key={item.id} value={item.id} title={attemptLabel(item,project,true)}>{candidateLabel(item)}</option>)}</select></label><label className="field">已完成 DOS attempt<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">不显示 PDOS</option>{candidates.filter(item=>item.stage==='dos').map(item=><option key={item.id} value={item.id} title={attemptLabel(item,project,true)}>{candidateLabel(item)}</option>)}</select></label></div>
     {(bandId||dosId)&&<p>来源：{candidates.filter(item=>item.id===bandId||item.id===dosId).map(item=>`${candidateLabel(item)} · ${item.scf_attempt_id?'使用相连 SCF 参考':'使用本任务参考'}`).join('；')}</p>}
     <button className="button primary" disabled={!bandId&&!dosId||job?.state==='GENERATING'||job?.state==='DOWNLOADING'||job?.state==='PARSING'} onClick={()=>void prepare()}>{job?.state==='READY'?'使用本机绘图缓存':'准备本地绘图数据'}</button>
     {job?.state==='READY'&&<button className="button" onClick={()=>void prepare(true)}>刷新远端来源</button>}

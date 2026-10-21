@@ -97,6 +97,7 @@ def candidates(project_id, wannier_attempt_id):
     scf_id = wannier_lineage.scf_id(parent)
     if not scf_id:
         raise ValueError('VASP-Wannier 来源未记录 SCF 依赖，不能确认同源能带')
+    from .input_display import frozen_note
     result = []
     for record in execution.history(project_id):
         try:
@@ -105,7 +106,10 @@ def candidates(project_id, wannier_attempt_id):
             continue
         result.append({'id': record['id'], 'job_id': record.get('job_id'),
                        'node_id': record.get('node_id'), 'path': record.get('remote_path_absolute'),
-                       'alias': record['config']['alias']})
+                       'alias': record['config']['alias'],
+                       'input_note': frozen_note(record),
+                       'chain_run_id':record.get('chain_run_id'),'config':{'name':record.get('config',{}).get('name')},
+                       'created_at':record.get('created_at'),'state':record['state']})
     return result
 
 

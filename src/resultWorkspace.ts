@@ -1,6 +1,6 @@
 import {newProject,makeStep,uid} from './model';
 import type {Project,Kind} from './model';
-export type ResultAttempt={id:string;node_id?:string;execution_scope?:string;state:string;kind?:string;created_at?:string;job_id?:string|null;path_schema?:string;stage_slug?:string;remote_path_absolute?:string;remote_path?:string;bundle_id?:string;evidence?:Record<string,unknown>;config?:{alias?:string;scheduler?:string};[key:string]:unknown};
+export type ResultAttempt={id:string;node_id?:string;execution_scope?:string;state:string;kind?:string;created_at?:string;job_id?:string|null;path_schema?:string;stage_slug?:string;remote_path_absolute?:string;remote_path?:string;bundle_id?:string;input_note?:string|null;chain_run_id?:string;evidence?:Record<string,unknown>;config?:{alias?:string;scheduler?:string;name?:string};[key:string]:unknown};
 export type FrozenInput={id?:string;display_name?:string;stage?:string;parameters:Record<string,string>;parameter_origin?:string;species?:string[];files:Record<string,{sha256?:string}>;geometry_sha256?:string;kpoints?:string;warning?:string};
 export type Scalar={value:number;unit:string;source:{file:string;sha256?:string;host?:string;method?:string;line?:number}}|null;
 export type ResultSummary={attempt_id:string;state:string;evidence:Record<string,unknown>;input:FrozenInput;sources:Array<{type:string;display_name?:string;attempt_id?:string;files:string[];reason?:string;path?:string}>;metrics:Record<string,Scalar|number|boolean|null>|null;metrics_error?:string;metrics_checked_at?:string};

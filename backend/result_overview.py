@@ -5,6 +5,7 @@ import re
 import zipfile
 from . import execution as ex
 from .extension_protocol import atomic_json
+from .input_display import manifest_note
 
 
 def signature(record):
@@ -38,7 +39,7 @@ def frozen_input(record):
         with zipfile.ZipFile(ex.ROOT/'inputs'/(key+'.zip')) as archive:
             if archive.getinfo('manifest.json').file_size>1024*1024:raise ValueError('输入清单过大')
             manifest=json.loads(archive.read('manifest.json'))
-            result.update(display_name=manifest.get('input_reason') or record.get('input_reason') or manifest.get('reason') or '已保存的计算输入',stage=manifest.get('stage'),files=manifest.get('files') or {},species=manifest.get('species') or [],geometry_sha256=manifest.get('geometry_sha256'))
+            result.update(display_name=manifest_note(manifest) or '已保存的计算输入',stage=manifest.get('stage'),files=manifest.get('files') or {},species=manifest.get('species') or [],geometry_sha256=manifest.get('geometry_sha256'))
             text=record.get('final_incar')
             if not text:
                 if archive.getinfo('INCAR').file_size>256*1024:raise ValueError('INCAR 过大')

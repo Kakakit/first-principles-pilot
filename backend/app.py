@@ -1350,7 +1350,8 @@ def node_attempts(project_id: str, node_id: str, view: str='full', limit: int=50
     rows=artifacts.attempts(project_id,node_id)
     if view=='summary':
         from . import task_summary
-        result=task_summary.paginate([task_summary.attempt(row) for row in rows],limit,cursor)
+        result=task_summary.paginate(rows,limit,cursor)
+        result['items']=[task_summary.attempt(row) for row in result['items']]
         return {**result,'attempts':result['items'],'path_schema':'fpilot.remote-attempt-path'}
     return {'attempts':rows,'path_schema':'fpilot.remote-attempt-path'}
 
@@ -2130,7 +2131,8 @@ def execution_detail(key: str, project_id: str):
         from . import recycle
         from .calculation_nodes import case_info
         recycle.assert_available('attempts',key,row)
-        return {**row,**case_info(row)}
+        from .input_display import frozen_note
+        return {**row,**case_info(row),'input_note':frozen_note(row) if not row.get('scan_batch_id') else None}
     except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
 
 

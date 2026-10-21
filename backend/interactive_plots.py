@@ -56,6 +56,8 @@ def _record(project_id: str, attempt_id: str, stage: str) -> dict:
 
 
 def candidates(project_id: str) -> list[dict]:
+    from .input_display import frozen_note
+    from .calculation_nodes import case_info
     rows = []
     for row in execution.history(project_id):
         if row.get('state') != 'COMPLETED' or not (row.get('evidence') or {}).get('vasp_timing'):
@@ -66,6 +68,9 @@ def candidates(project_id: str) -> list[dict]:
             continue
         if manifest.get('stage') in ('bands', 'dos'):
             rows.append({'id': row['id'], 'stage': manifest['stage'], 'host': row['config']['alias'],
+                         'input_note':frozen_note(row), 'chain_run_id':row.get('chain_run_id'),
+                         'config':{'name':row.get('config',{}).get('name')},
+                         'created_at':row.get('created_at'), 'state':row['state'], **case_info(row),
                          'job_id': row.get('job_id'), 'path': row.get('remote_path_absolute'),
                          'node_id': row.get('node_id') or manifest.get('node_id'),
                          'execution_scope': row.get('execution_scope'),

@@ -7,7 +7,7 @@ import './pyw90-advice.css';
 import {attemptLabel} from './humanLabels';
 import {requestJson,errorMessage} from './apiClient';
 
-type Candidate={id:string;job_id?:string;node_id?:string;alias:string};
+type Candidate={id:string;job_id?:string;node_id?:string;alias:string;input_note?:string|null;chain_run_id?:string;config?:{name?:string};created_at?:string;state?:string};
 
 type Attempt={id:string;node_id?:string;kind?:string;created_at?:string;state:string;config:Record<string,string>;node?:string;cores?:number;seed?:string;remote_path_absolute?:string;script?:string;job_id?:string;plot_source_attempt_id?:string;band_attempt_id?:string};
 type Proposal={path_lines:string[];bands_num_points:number;source_path:string;kpoints_sha256:string;[key:string]:unknown};

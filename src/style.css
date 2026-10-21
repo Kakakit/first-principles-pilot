@@ -898,3 +898,6 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .extension-field-explained aside{padding:8px 12px;border-left:3px solid var(--color-border);color:var(--color-muted-text);line-height:1.65;font-size:var(--font-secondary)}
 .extension-field-explained aside p{margin:0}.extension-advanced{margin:20px 0;padding:14px;border:1px solid var(--color-border);border-radius:9px}.extension-advanced>summary{cursor:pointer;font-weight:600}.extension-array-action{margin:4px 6px 4px 0;min-height:32px}.extension-options input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--color-accent)}
 @media(max-width:800px){.extension-field-explained{grid-template-columns:1fr;gap:6px}}
+
+/* Frozen notes are inspectable without stretching the run selector. */
+.result-full-note{margin:8px 0;max-width:100%;overflow-wrap:anywhere}.result-full-note p{white-space:pre-wrap;max-height:160px;overflow:auto}

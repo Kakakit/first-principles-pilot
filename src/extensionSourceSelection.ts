@@ -1,5 +1,7 @@
-export type SourceCandidate={id:string;node_id?:string;name:string;input_reason?:string;stage:string;alias:string;state:string;job_id?:string;created_at?:string;seed?:string};
-export function sourceCaption(source:SourceCandidate){
+import {attemptLabel} from './humanLabels';
+export type SourceCandidate={id:string;node_id?:string;name:string;input_reason?:string;input_note?:string|null;chain_run_id?:string;config?:{name?:string};parameter_summary?:string;stage:string;alias:string;state:string;job_id?:string;created_at?:string;seed?:string};
+export function sourceCaption(source:SourceCandidate,full=false){
+ if('input_note' in source&&!source.parameter_summary)return [source.name,attemptLabel(source,undefined,full)].join(' · ');
  const channel=source.seed?.endsWith('.1')?'通道 1':source.seed?.endsWith('.2')?'通道 2':'';
  const date=source.created_at?new Date(source.created_at):null;
  return [source.name,channel,source.job_id||(date&&Number.isFinite(date.getTime())?date.toLocaleString():'未提交'),source.input_reason].filter(Boolean).join(' · ');
