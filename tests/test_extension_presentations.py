@@ -99,7 +99,9 @@ class PresentationHostTests(unittest.TestCase):
     def test_source_renderer_uses_actual_ssh_argument_contract(self):
         from contextlib import nullcontext
         self.package();record=self.execute();view=record['presentation'];dest=views.root(record['id'])/view['id'];record.update(remote_dir='/remote/original',runtime={'python':'/remote/python','alias':'fixture'})
-        def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None):return {'exit_code':1,'stdout':'','stderr':'simulated transport receipt'}
+        def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None,lane='normal'):
+            self.assertEqual(lane,'analysis')
+            return {'exit_code':1,'stdout':'','stderr':'simulated transport receipt'}
         with patch.object(ex,'ssh',side_effect=ssh),patch('backend.analysis_queue.slot',return_value=nullcontext()):
             with self.assertRaisesRegex(ValueError,'simulated transport receipt'):views.remote_generate(record,view,dest,'scripts/view.py',{'source_dir':'unused'})
 

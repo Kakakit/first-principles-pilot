@@ -151,18 +151,18 @@ def remote_generate(record,view,dest,entry,request):
     command='set -e\ndest='+remote_paths.shell_path(remote_dir)+'\ntest ! -e "$dest"\nmkdir -p "$dest/outputs"\ntar -xzf - -C "$dest"\ncd "$dest"\nexport PYTHONDONTWRITEBYTECODE=1\n'+shlex.quote(view['python'])+' '+shlex.quote('package/'+entry)+' render --request request.json'
     from .analysis_queue import slot,environment
     with slot(record['runtime']['alias']):
-        response=ex.ssh(record['runtime']['alias'],environment(record['runtime'].get('cores'))+command,stream.getvalue(),timeout=180,mutating=True)
+        response=ex.ssh(record['runtime']['alias'],environment(record['runtime'].get('cores'))+command,stream.getvalue(),timeout=180,mutating=True,lane='analysis')
     if response.get('exit_code')!=0:raise ValueError('服务器展示生成未完成：'+response.get('stderr','')[-1500:]+'；原计算不会重跑')
     manifest=json.loads(response['stdout'])
     assets=manifest.get('assets') or []
     if not isinstance(assets,list) or len(assets)>1000:raise ValueError('展示清单无效')
     names=[item['path'] for item in assets]
     code="import json,pathlib,sys; root=pathlib.Path('.').resolve(); out={}\nfor name in json.loads(sys.argv[1]):\n p=root/name\n if not name or pathlib.Path(name).is_absolute() or '..' in pathlib.Path(name).parts or p.is_symlink() or not p.is_file() or root not in p.resolve().parents: raise ValueError('invalid view asset')\n out[name]=p.stat().st_size\nprint(json.dumps(out))"
-    response=ex.ssh(record['runtime']['alias'],'set -e\ncd '+remote_paths.shell_path(remote_dir+'/outputs')+'\n'+shlex.quote(view['python'])+' -c '+shlex.quote(code)+' '+shlex.quote(json.dumps(names)),timeout=30)
+    response=ex.ssh(record['runtime']['alias'],'set -e\ncd '+remote_paths.shell_path(remote_dir+'/outputs')+'\n'+shlex.quote(view['python'])+' -c '+shlex.quote(code)+' '+shlex.quote(json.dumps(names)),timeout=30,lane='analysis')
     if response.get('exit_code')!=0:raise ValueError('无法读取展示产物大小')
     sizes=json.loads(response['stdout']);validate(manifest,dest/'outputs',sizes)
     from .safe_files import pull_many
-    pull_many(record['runtime']['alias'],[{'remote_path':remote_dir+'/outputs/'+name,'destination':str(dest/'outputs'/name)} for name in names],timeout=180)
+    pull_many(record['runtime']['alias'],[{'remote_path':remote_dir+'/outputs/'+name,'destination':str(dest/'outputs'/name)} for name in names],timeout=180,lane='analysis')
     validate(manifest,dest/'outputs')
     view['remote_dir']=remote_dir
     return manifest

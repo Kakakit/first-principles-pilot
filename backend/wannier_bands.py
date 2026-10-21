@@ -1,4 +1,4 @@
-"""PyW90 path proposal and checked Wannier90 band input assembly."""
+"""Local KPOINTS path proposal and checked Wannier90 band input assembly."""
 from __future__ import annotations
 
 import hashlib
@@ -22,18 +22,22 @@ def path_lines_from_run(run):
     candidates = match.group(1).splitlines() if match else output.splitlines()
     lines = [line.strip() for line in candidates if len(line.split()) == 8 and
              not line.lstrip().startswith(('!', '#'))]
+    return validate_path_lines(lines)
+
+
+def validate_path_lines(lines):
     if not lines or len(lines) > 200:
-        raise ValueError('PyW90 能带路径为空或过长')
+        raise ValueError('能带路径为空或过长')
     for line in lines:
         fields = line.split()
-        if not all(re.fullmatch(r'[A-Za-zΓ][A-Za-z0-9_Γ+-]*', fields[i]) for i in (0, 4)):
-            raise ValueError('PyW90 路径标签或坐标行格式无效')
+        if len(fields) != 8 or not all(re.fullmatch(r'[A-Za-zΓ][A-Za-z0-9_Γ+-]*', fields[i]) for i in (0, 4)):
+            raise ValueError('能带路径标签或坐标行格式无效')
         try:
             coordinates = [float(fields[i]) for i in (1, 2, 3, 5, 6, 7)]
         except ValueError as exc:
-            raise ValueError('PyW90 路径坐标无效') from exc
+            raise ValueError('能带路径坐标无效') from exc
         if not all(abs(value) <= 2 for value in coordinates):
-            raise ValueError('PyW90 路径坐标超出可检查范围')
+            raise ValueError('能带路径坐标超出可检查范围')
     return lines
 
 
@@ -45,7 +49,7 @@ def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
         raise ValueError('DFT 能带与 VASP-Wannier 不属于同一 SCF 来源')
     if band.get('project_id') != project['id'] or band.get('config', {}).get('alias') != alias or band.get('state') != 'COMPLETED':
         raise ValueError('请选择同项目、同服务器的已完成 DFT 能带 attempt')
-    manifest, _ = execution.bundle(band['bundle_id'], allow_dependencies=True)
+    manifest, files = execution.bundle(band['bundle_id'], allow_dependencies=True)
     if manifest.get('stage') != 'bands':
         raise ValueError('所选 attempt 不是 DFT 能带计算')
     path = execution.attempt_path(band)['shell']
@@ -64,21 +68,21 @@ def path_proposal(project, node_id, parent_id, alias, band_attempt_id):
             raise ValueError('两个来源的实际结构不同，不能自动复用能带路径')
     source = next((info for name, info in wannier_lineage.binding(band)['files'].items()
                    if name in ('POSCAR', 'CONTCAR') and info.get('sha256')), {})
-    run = pyw90_remote._run(alias, path, ['pre', 'kpath', '--path', '.'], ('KPOINTS',))
-    lines = path_lines_from_run(run)
-    receipt = execution.ssh(alias, 'set -e\ncd ' + remote_paths.shell_path(path) + "\nsed -n '2p' KPOINTS\n", timeout=30, stdout_limit=100)
-    if receipt['exit_code'] != 0 or not re.fullmatch(r'\d+', receipt['stdout'].strip()):
-        raise ValueError('DFT line-mode KPOINTS 采样数不可识别')
-    points = int(receipt['stdout'].strip())
-    if not 2 <= points <= 10000:
-        raise ValueError('DFT 能带每段采样数无效')
+    raw = files.get('KPOINTS')
+    if raw is None or hashlib.sha256(raw).hexdigest() != hashes['KPOINTS']:
+        raw, size = artifacts._small_bytes(band, 'KPOINTS', mode='head')
+        if size != len(raw) or hashlib.sha256(raw).hexdigest() != hashes['KPOINTS']:
+            raise ValueError('DFT KPOINTS 在读取期间变化或超出读取上限，请重新获取路径')
+    from . import wannier_kpath
+    parsed = wannier_kpath.read(raw)
+    lines = validate_path_lines(parsed['path_lines'])
     return {'project_id':project['id'], 'band_attempt_id': band_attempt_id, 'parent_attempt_id': parent_id,
             'scf_attempt_id': scf_id, 'alias': alias, 'kpoints_sha256': hashes['KPOINTS'],
             'poscar_sha256': hashes['POSCAR'], 'structure_sha256': source.get('sha256', hashes['POSCAR']),
             'parent_poscar_sha256': parent_hashes['POSCAR'], 'parent_source_path': parent_path,
-            'path_lines': lines, 'bands_num_points': points,
+            'path_lines': lines, 'bands_num_points': parsed['bands_num_points'],
             'path_sha256': hashlib.sha256(('\n'.join(lines)+'\n').encode()).hexdigest(),
-            'source_path': path, 'generator': 'pyw90 pre kpath', 'pyw90_run': run}
+            'source_path': path, 'generator': 'fpilot.kpoints-line-mode.v1', 'warnings':parsed['warnings']}
 
 
 def with_path(win, proposal, enabled=True):
@@ -94,7 +98,7 @@ def with_path(win, proposal, enabled=True):
     lines = proposal.get('path_lines')
     points = proposal.get('bands_num_points')
     if not isinstance(lines, list) or not lines or not isinstance(points, int):
-        raise ValueError('请先获取 PyW90 能带路径')
+        raise ValueError('请先获取 DFT 能带路径')
     if not 2 <= points <= 10000 or len(lines) > 200:
         raise ValueError('能带路径段数或采样数无效')
     for line in lines:

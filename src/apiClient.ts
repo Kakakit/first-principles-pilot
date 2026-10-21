@@ -17,23 +17,34 @@ export async function readJson(response: Response): Promise<any> {
   return data;
 }
 
-export async function requestJson(path: string, body?: unknown, method?: string, options?: {signal?:AbortSignal}): Promise<any> {
-  let response: Response;
+export async function requestJson(path: string, body?: unknown, method?: string, options?: {signal?:AbortSignal;timeoutMs?:number}): Promise<any> {
+  const controller=options?.timeoutMs?new AbortController():null;
+  let expired=false;
+  const abort=()=>controller?.abort();
+  if(options?.signal?.aborted)abort();
+  else options?.signal?.addEventListener('abort',abort,{once:true});
+  const timer=controller?setTimeout(()=>{expired=true;controller.abort();},options!.timeoutMs):null;
   try {
-    response = await fetch(path, {
-      signal:options?.signal,
-      method: method || (body === undefined ? 'GET' : 'POST'),
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+    const response=await fetch(path, {
+      signal:controller?.signal||options?.signal,
+      method:method||(body===undefined?'GET':'POST'),
+      headers:body===undefined?undefined:{'Content-Type':'application/json'},
+      body:body===undefined?undefined:JSON.stringify(body),
+    }).catch(error=>{
+      if(error instanceof DOMException&&error.name==='AbortError')throw error;
+      throw new Error('无法连接本机 API。请检查服务是否运行；恢复后可在当前页面重试，已填写内容仍保留。');
     });
+    try {return await readJson(response);}
+    finally {
+      if(typeof window!=='undefined'&&/\/(submit|refresh|resolve-legacy)$/.test(path))
+        window.dispatchEvent(new Event('fpilot:binding-changed'));
+    }
   } catch(error) {
-    if(error instanceof DOMException&&error.name==='AbortError')throw error;
-    throw new Error('无法连接本机 API。请检查服务是否运行；恢复后可在当前页面重试，已填写内容仍保留。');
-  }
-  try { return await readJson(response); }
-  finally {
-    if (typeof window !== 'undefined' && /\/(submit|refresh|resolve-legacy)$/.test(path))
-      window.dispatchEvent(new Event('fpilot:binding-changed'));
+    if(expired)throw new Error('本次请求等待超时，已结束等待，草稿保留。没有自动重试；这不代表远端程序已停止。');
+    throw error;
+  } finally {
+    if(timer!==null)clearTimeout(timer);
+    options?.signal?.removeEventListener('abort',abort);
   }
 }
 

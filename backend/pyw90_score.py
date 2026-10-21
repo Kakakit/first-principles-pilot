@@ -4,13 +4,13 @@ import sys
 
 
 def score(request):
+    if request.get('spinors'):return {'status':'NOT_APPLICABLE','reason':'SOC 使用通用分段误差，不套用原生共线评分'}
     try:
         import numpy as np
         from pyw90.lib.w90 import W90
         from pyw90.utility.utility import parse_kernel
         from importlib.metadata import version
     except ImportError as exc:return {'status':'UNAVAILABLE','reason':str(exc)}
-    if request.get('spinors'):return {'status':'NOT_APPLICABLE','reason':'SOC 使用通用分段误差，不套用原生共线评分'}
     vx,wx=np.asarray(request['dft_x']),np.asarray(request['wannier_x'])
     ve,we=np.asarray(request['dft_energy']).T,np.asarray(request['wannier_energy']).T
     if ve.shape[0]<we.shape[0]:return {'status':'NOT_APPLICABLE','reason':'DFT 参考带数不足，无法计算完整原生评分'}

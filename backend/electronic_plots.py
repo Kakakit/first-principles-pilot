@@ -37,11 +37,8 @@ def _local_file(attempt_id, entry, directory):
 
 def _remote_table(record, entry, directory, mode, ions, orbitals, fermi=None, noncollinear=False):
     alias = record['config']['alias']
-    host = servers.load_registry()['hosts'].get(alias, {})
-    python = host.get('python', {})
-    interpreter = python.get('known_interpreter') or next(iter(python.get('known_interpreters', [])), None)
-    if not interpreter or not interpreter.startswith('/'):
-        raise ValueError('该服务器没有登记 Python 解释器，无法提取大文件绘图数据')
+    from .analysis_queue import interpreter as analysis_interpreter
+    interpreter = analysis_interpreter(alias)
     root = remote_paths.shell_path(artifacts._root(record))
     command = 'cd ' + root + ' && ' + shlex.quote(interpreter) + ' - ' + ' '.join(
         shlex.quote(str(part)) for part in ([mode, entry['path'], ions, orbitals] +

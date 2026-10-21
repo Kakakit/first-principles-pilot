@@ -5,6 +5,7 @@ from unittest.mock import patch
 from backend import wannier_lineage as lineage, wannier_bands as bands, wannier_execution as w90
 
 POSCAR = b'test\n1\n3 0 0\n0 3 0\n0 0 3\nFe O\n1 1\nDirect\n0 0 0\n0.5 0.5 0.5\n'
+KPOINTS = b'Path\n40\nLine-mode\nReciprocal\n0 0 0 ! G\n0.5 0 0 ! X\n'
 ROUNDING = POSCAR.replace(b'0.5 0.5 0.5', b'0.5000001 0.5 0.5')
 
 class WannierLineageTests(unittest.TestCase):
@@ -22,16 +23,16 @@ class WannierLineageTests(unittest.TestCase):
         band={'id':'band','state':'COMPLETED','project_id':'p','config':{'alias':'host'},'bundle_id':'bundle','chain_source_snapshot':{'source_attempt_id':scf,'kind':'dependency','files':{'CONTCAR':{'sha256':'old'}}}}
         self.parent,self.band=parent,band
         def hashes(alias,path,names):
-            return {name:hashlib.sha256((parent_poscar if path=='/interface' else POSCAR) if name=='POSCAR' else b'kpoints').hexdigest() for name in names}
+            return {name:hashlib.sha256((parent_poscar if path=='/interface' else POSCAR) if name=='POSCAR' else KPOINTS).hexdigest() for name in names}
         with ExitStack() as stack:
             stack.enter_context(patch.object(w90,'_parent',return_value=(parent,{})))
             stack.enter_context(patch.object(bands.execution,'get',return_value=band))
-            stack.enter_context(patch.object(bands.execution,'bundle',return_value=({'stage':'bands'},{})))
+            stack.enter_context(patch.object(bands.execution,'bundle',return_value=({'stage':'bands'},{'KPOINTS':KPOINTS})))
             stack.enter_context(patch.object(bands.execution,'attempt_path',side_effect=lambda r:{'shell':'/'+r['id']}))
             stack.enter_context(patch.object(bands.pyw90_remote,'_file_hashes',side_effect=hashes))
             stack.enter_context(patch.object(bands.artifacts,'_small_bytes',side_effect=lambda r,*a,**k:((parent_poscar,len(parent_poscar)) if r['id']=='interface' else (POSCAR,len(POSCAR)))))
-            stack.enter_context(patch.object(bands.pyw90_remote,'_run',return_value={'arguments':['pyw90','pre','kpath'],'stdout':'begin kpoint_path\nG 0 0 0 X 0.5 0 0\nend kpoint_path','stderr':'','exit_code':0}))
-            stack.enter_context(patch.object(bands.execution,'ssh',return_value={'exit_code':0,'stdout':'40'}))
+            stack.enter_context(patch.object(bands.pyw90_remote,'_run',side_effect=AssertionError('path conversion must not run PyW90')))
+            stack.enter_context(patch.object(bands.execution,'ssh',side_effect=AssertionError('no extra CLI or sampling request')))
             return bands.path_proposal({'id':'p'},'w','interface','host','band')
 
     def test_mixed_v1_contcar_v2_poscar_uses_actual_geometry(self):

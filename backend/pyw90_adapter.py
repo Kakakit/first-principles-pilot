@@ -234,7 +234,23 @@ def dos_report(request):
     return result
 
 
+def runtime_info():
+    import pyw90
+    from pathlib import Path
+    from importlib.metadata import distribution, PackageNotFoundError
+    version=getattr(pyw90,'__version__',None)
+    try:
+        installed=distribution('pyw90')
+        if not version and Path(installed.locate_file('pyw90/__init__.py')).resolve()==Path(pyw90.__file__).resolve():
+            version=installed.version
+    except (PackageNotFoundError,TypeError,AttributeError):pass
+    return {'version':version,'python':sys.executable,'module_file':getattr(pyw90,'__file__',None),
+            'adapter_revision':REVISION}
+
+
 def main():
+    if sys.argv[1]!='window-check':
+        print('FPILOT_PYW90_RUNTIME='+json.dumps(runtime_info()),flush=True)
     if sys.argv[1]=='dos-report':
         print('FPILOT_DOS_REPORT='+json.dumps(dos_report(json.loads(sys.argv[2])),allow_nan=False))
         return

@@ -18,6 +18,10 @@ def runtime(alias):
     from . import servers
     value=(servers.load_registry(include_removed=True)['hosts'].get(alias) or {}).get('pyw90') or {}
     if not value.get('python'): raise ValueError('该服务器尚未配置 PyW90；请在服务器设置填写已有 Python 与安装目录')
+    for key in ('python','package'):
+        path=value.get(key)
+        if path and (not isinstance(path,str) or not path.startswith('/') or any(c in path for c in '\x00\r\n')):
+            raise ValueError('PyW90 '+key+' 需为服务器上的绝对路径')
     return value
 
 
@@ -33,7 +37,8 @@ def _file_hashes(alias, path, names):
     command += '\n'.join('test -s ' + shlex.quote(name) + ' && test ! -L ' + shlex.quote(name)
                          for name in names) + '\n'
     command += 'sha256sum -- ' + ' '.join(map(shlex.quote, names))
-    receipt = execution.ssh(alias, command, timeout=90, stdout_limit=4000)
+    lane='normal' if set(names)<={'KPOINTS','POSCAR'} else 'analysis'
+    receipt = execution.ssh(alias, command, timeout=90, stdout_limit=4000,lane=lane)
     if receipt['exit_code'] != 0:
         raise ValueError('远端分析输入缺失或不可读：' + receipt.get('stderr', '')[-250:])
     rows = receipt['stdout'].splitlines()
@@ -50,12 +55,18 @@ def _file_hashes(alias, path, names):
 
 def _run(alias, path, arguments, input_names):
     from . import servers
-    tool=runtime(alias)
+    from .analysis_queue import slot,environment,interpreter
+    builtin=arguments[0]=='window-check'
+    tool={'python':interpreter(alias)} if builtin else runtime(alias)
     package=remote_paths.shell_path(tool['package']) if tool.get('package') else "''"
     invocation = ' '.join(map(shlex.quote, arguments))
-    adapter = Path(__file__).with_name('pyw90_adapter.py').read_text(encoding='utf-8')
-    checker = Path(__file__).with_name('pyw90_window_check.py').read_text(encoding='utf-8')
-    numerics = Path(__file__).with_name('pyw90_dos.py').read_text(encoding='utf-8')
+    if builtin:
+        source=Path(__file__).with_name('pyw90_window_check.py').read_text(encoding='utf-8')
+        source+='\nimport sys\nprint("FPILOT_WINDOW_CHECK="+json.dumps(window_check(json.loads(sys.argv[2])),allow_nan=False))\n'
+    else:
+        adapter = Path(__file__).with_name('pyw90_adapter.py').read_text(encoding='utf-8')
+        numerics = Path(__file__).with_name('pyw90_dos.py').read_text(encoding='utf-8')
+        source=numerics+'\n'+adapter+'\nmain()\n'
     links = '\n'.join('ln -s "$source_dir"/' + shlex.quote(name) +
                       ' "$scratch"/' + shlex.quote(name) for name in input_names)
     command = ('set -e\ncd ' + remote_paths.shell_path(path) + '\n'
@@ -65,22 +76,32 @@ def _run(alias, path, arguments, input_names):
                'scratch=$(mktemp -d "$scratch_root/run.XXXXXX")\n'
                "trap 'rm -rf -- \"$scratch\"' EXIT\n"
                + links + '\ncd "$scratch"\n'
-               'PYTHONPATH=' + package + ' MPLBACKEND=Agg timeout 180 '
+               'test -x '+shlex.quote(tool['python'])+' || { echo "PyW90 Python 路径不存在或不可执行" >&2; exit 127; }\n'
+               'PYTHONPATH=' + package + ' PYTHONDONTWRITEBYTECODE=1 MPLBACKEND=Agg timeout 180 '
                + shlex.quote(tool['python'])
-               + ' -c ' + shlex.quote(checker + '\n' + numerics + '\n' + adapter + '\nmain()\n') + ' '
+               + ' -c ' + shlex.quote(source) + ' '
                + invocation + '\n')
-    from .analysis_queue import slot,environment
-    with slot(alias):receipt = execution.ssh(alias,environment(tool.get('cores'))+command,timeout=210,stdout_limit=524288,lane='analysis')
+    with slot(alias,wait=False):receipt = execution.ssh(alias,environment(tool.get('cores'))+command,timeout=210,stdout_limit=524288,lane='analysis')
     if receipt['exit_code'] != 0 or receipt.get('stdout_truncated') or receipt.get('stderr_truncated'):
         diagnostic = receipt.get('stderr', '')[-700:]
+        if any(text in diagnostic for text in ('ModuleNotFoundError:', 'ImportError:', 'Python 路径不存在')):
+            if builtin:raise ValueError('窗口检查的服务器默认分析 Python 不可用：'+tool['python']+'；请在远端分析环境设置中核对 NumPy。原始错误：'+diagnostic)
+            raise ValueError('PyW90 分析环境不可用；实际 Python：'+tool['python']+
+                             '；安装目录：'+str(tool.get('package') or '此 Python 的已安装包')+
+                             '。请在服务器设置更新 PyW90 环境，修改通用 Python 不会自动替换此配置。原始错误：'+diagnostic)
         if 'KeyError: PeriodicSite:' in diagnostic:
             raise ValueError('所选 vasprun.xml 缺少 PyW90 pre dos 所需的站点轨道投影；请选择包含投影 DOS 的已完成 DOS attempt（如设置 LORBIT=11）')
         if 'FileNotFoundError:' in diagnostic:
             raise ValueError('PyW90 所需的远端输入文件缺失：' + diagnostic.split('FileNotFoundError:')[-1].strip())
         raise ValueError('PyW90 远端分析未完成：' + diagnostic +
                          ('；输出超过上限' if receipt.get('stdout_truncated') else ''))
-    return {'arguments': arguments, 'stdout': ANSI.sub('', receipt['stdout']),
+    result={'arguments': arguments, 'stdout': ANSI.sub('', receipt['stdout']),
             'stderr': ANSI.sub('', receipt.get('stderr', '')), 'exit_code': receipt['exit_code']}
+    marker=re.search(r'^FPILOT_PYW90_RUNTIME=(.+)$',result['stdout'],re.M)
+    if marker:
+        try:result['runtime']=json.loads(marker.group(1))
+        except ValueError:pass
+    return result
 
 
 def _remote_num_wann(alias, path, seed):
@@ -205,7 +226,7 @@ def pre_dos(project, node_id, source_attempt_id, channel='auto', emin=-4, emax=4
     if _file_hashes(alias,path,tuple(hashes)) != hashes: raise ValueError('分析期间来源文件发生变化，请重新分析')
     return {**result,'energy_reference':energy,'relative_range_eV':[emin,emax],
             'source_attempt_id':source['id'],'scf_attempt_id':source['scf_attempt_id'],
-            'source_hashes':hashes,'alias':alias,'channel':channel,'pyw90_version':'1.0.7',
+            'source_hashes':hashes,'alias':alias,'channel':channel,'pyw90_version':(run.get('runtime') or {}).get('version') or '未报告',
             'runs':[run],'note':'仅为当前 DOS 数据与能量区间的投影建议；没有读取接口矩阵或 .eig，不证明拟合质量。'}
 
 
@@ -316,12 +337,12 @@ def recommend(project, node_id, parent_id, alias, seed, mode, emin, emax,
         result['minimum_outer_max'] = round(result['minimum_outer_max'] - fermi, 10)
     if result.get('current_dos'):
         for tag in ('dis_froz_min','dis_froz_max'):result['current_dos'][tag]-=fermi
-    note = '候选数值由 PyW90 命令行给出；未自动写入 .win，也不代表局域化质量合格。'
+    note = '候选由 PyW90 与工作台的积分、通道适配生成；未自动写入 .win，也不代表局域化质量合格。'
     if mode == 'pre' and not result['frozen']:
         note = '分析已完成，但当前范围未生成冻结窗候选；请核对分析范围与投影选择。' + note
     return {'schema': 'fpilot.pyw90-advice.v2', 'mode': mode, 'seed': seed,
             'source_attempt_id': source_id, 'source_hashes': source_hashes,
             'interface_source_hashes': parent_hashes, 'interface': mesh, 'runs': runs,
             'fermi_eV': fermi, 'relative_range_eV': [emin, emax],
-            'pyw90_version': '1.0.7', 'advice': result,
+            'pyw90_version': (run.get('runtime') or {}).get('version') or '未报告', 'advice': result,
             'note': note}

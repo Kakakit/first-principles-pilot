@@ -801,14 +801,14 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
     return record
 
 
-def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None):
+def ssh(alias,command,data=None,timeout=90,stdout_limit=524288,mutating=None,lane='normal'):
     if os.environ.get('FPILOT_SSH_MODE', 'session') == 'session':
         from .remote_transport import run
-        return run(alias,command,data,timeout,stdout_limit,mutating=mutating)
+        return run(alias,command,data,timeout,stdout_limit,mutating=mutating,lane=lane)
     args=['ssh',*ssh_multiplex_options(alias),'-o','BatchMode=yes','-o','ConnectTimeout=8','-o','ServerAliveInterval=10','-o','ServerAliveCountMax=2',
           '-o','StrictHostKeyChecking=yes',alias,command]
     from .remote_transport import legacy
-    return legacy(args,data,timeout,stdout_limit)
+    return legacy(args,data,timeout,stdout_limit,lane=lane)
 
 
 def ssh_multiplex_options(alias):

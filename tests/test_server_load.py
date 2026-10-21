@@ -199,8 +199,3 @@ class LoadTests(unittest.TestCase):
         with patch.object(Path,'read_text',side_effect=AssertionError('no full text allocation')):value=interactive_plots._outcar_info(outcar)
         self.assertEqual(value['reference']['fermi_eV'],1.234567);self.assertTrue(value['noncollinear'])
         self.assertEqual(value['sha256'],hashlib.sha256(outcar.read_bytes()).hexdigest())
-
-    def test_vaspkit_computation_failure_does_not_enable_second_run(self):
-        log=self.root/'vaspkit.log'
-        for body,expected in [('ERROR: PROCAR truncated',False),('invalid task 213',False),('Unrecognized option: -task',True)]:
-            log.write_text(body);self.assertEqual(interactive_plots._unsupported_vaspkit_cli(log),expected)

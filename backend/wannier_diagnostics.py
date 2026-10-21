@@ -98,7 +98,9 @@ def native(directory,record,alias,spinors):
             if states and states[0]['state']!='READY':return {'status':'UNAVAILABLE','reason':'源服务器连接已暂停；未发送评分请求'}
             runtime=configured
             command=environment(runtime.get('cores'))+'PYTHONPATH='+remote_transport_path(runtime.get('package'))+' MPLBACKEND=Agg '+shlex.quote(runtime['python'])+' -c '+shlex.quote(source)
-            with slot(alias):receipt=remote_transport.run(alias,command,data=payload.encode(),timeout=60,stdout_limit=6000,lane='analysis')
+            try:
+                with slot(alias,wait=False):receipt=remote_transport.run(alias,command,data=payload.encode(),timeout=60,stdout_limit=6000,lane='analysis')
+            except ValueError as exc:return {'status':'UNAVAILABLE','reason':str(exc),'location':'remote'}
             result=_score_receipt(receipt.get('stdout',''),receipt.get('stderr',''),receipt.get('exit_code'))
             result['location']='remote'
         if result['status'] in ('COMPLETED','NOT_APPLICABLE'):return remote_cache.write('pyw90-score',identity,result)

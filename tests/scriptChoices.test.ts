@@ -47,3 +47,10 @@ test('SOC falls back to the host std default but keeps explicit SOC settings',()
  const registered=runtimeFor({alias:'gpu'},profiles,{...settings,runtimes:{'gpu:vasp_ncl':{runtime_source:'registered',vasp_executable:'/special/vasp_ncl'}}},'gpu','vasp_ncl');
  assert.equal(registered.runtime_source,'registered');assert.equal(registered.template_id,undefined);
 });
+
+test('host tool paths override stale per-program copies including cleared paths',()=>{
+ const profiles=[{alias:'gpu',scheduler:'pbs',queue:'q',pyw90_python:'/new/python',pyw90_package:''}] as Parameters<typeof runtimeFor>[1];
+ const saved={...emptySettings,runtimes:{'gpu:vasp_ncl':{pyw90_python:'/old/python',pyw90_package:'/old/package'}}};
+ const next=runtimeFor({alias:'gpu'},profiles,saved,'gpu','vasp_ncl');
+ assert.equal(next.pyw90_python,'/new/python');assert.equal(next.pyw90_package,'');
+});

@@ -1,7 +1,7 @@
-"""Local, attempt-bound VASP projection cache and saved interactive figures.
+"""Attempt-bound VASP projection readers, cached arrays and saved figures.
 
-Remote files are read only.  The user's explicit Prepare action starts a local
-download; all plotting and orbital selection after that uses local arrays.
+Explicit preparation runs the shared reader at the source; bounded derived
+arrays are cached locally, while oversized arrays remain on the server.
 """
 from __future__ import annotations
 
@@ -13,16 +13,14 @@ import math
 import os
 import re
 import shutil
-import subprocess
 import threading
 import uuid
-import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 
-from . import artifacts, execution, remote_paths
+from . import execution, remote_paths
 from .recycle import is_recycled
 from .storage import ROOT
 
@@ -34,7 +32,6 @@ NUMBER = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?'
 ORBITAL_GROUPS = {'s': ('s',), 'p': ('px', 'py', 'pz'),
                   'd': ('dxy', 'dyz', 'dz2', 'dxz', 'dx2-y2')}
 PBAND_COLUMNS = ['s', 'py', 'pz', 'px', 'dxy', 'dyz', 'dz2', 'dxz', 'dx2-y2']
-VASPKIT_INPUTS = ('INCAR', 'POSCAR', 'KPOINTS', 'EIGENVAL', 'DOSCAR', 'PROCAR')
 
 
 def _sha(path: Path) -> str:
@@ -78,27 +75,6 @@ def candidates(project_id: str) -> list[dict]:
     return rows
 
 
-def _source(record: dict, filename: str, listing: dict | None = None) -> dict:
-    listing = listing or artifacts.listing(record['id'])
-    match = next((row for row in listing['files'] if row['path'] == filename and row['size_bytes'] > 0), None)
-    if not match:
-        raise ValueError(f'{record.get("stage_slug", "attempt")} 缺少非空 {filename}')
-    return {'attempt_id': record['id'], 'host': record['config']['alias'], 'remote_dir': artifacts._root(record),
-            'name': filename, 'size_bytes': match['size_bytes'], 'modified_at': match['modified_at']}
-
-
-def _remote_elements(record: dict) -> list[str]:
-    path = remote_paths.shell_path(artifacts._root(record)) + '/POSCAR'
-    receipt = execution.ssh(record['config']['alias'], 'sed -n "6,7p" ' + path, timeout=30, stdout_limit=500)
-    lines = receipt['stdout'].splitlines()
-    if receipt['exit_code'] != 0 or len(lines) != 2:
-        raise ValueError('无法读取远端 POSCAR 元素列表')
-    symbols = lines[0].split()
-    if not symbols or not all(re.fullmatch(r'[A-Z][a-z]?', item) for item in symbols):
-        raise ValueError('远端 POSCAR 元素列表无效')
-    return list(dict.fromkeys(symbols))
-
-
 def _pband_names(elements: list[str], available: set[str]) -> tuple[str, list[str]] | None:
     patterns = (('soc', lambda element: [f'PBAND_{element}_SOC.dat']),
                 ('spin2', lambda element: [f'PBAND_{element}_UP.dat', f'PBAND_{element}_DW.dat']),
@@ -108,23 +84,6 @@ def _pband_names(elements: list[str], available: set[str]) -> tuple[str, list[st
         if all(name in available for name in names):
             return mode, names
     return None
-
-
-def _remote_hashes(record: dict, names: tuple[str, ...]) -> dict[str, str]:
-    base = remote_paths.shell_path(artifacts._root(record))
-    commands = ['set -e', 'cd ' + base]
-    commands += ['test -f ' + shlex.quote(name) + ' && test ! -L ' + shlex.quote(name) for name in names]
-    commands += ['sha256sum -- ' + ' '.join(map(shlex.quote, names))]
-    receipt = execution.ssh(record['config']['alias'], '\n'.join(commands), timeout=600, stdout_limit=4096)
-    if receipt['exit_code'] != 0: raise ValueError('无法核对远端 VASPKIT 输入：' + receipt['stderr'][-300:])
-    rows = receipt['stdout'].splitlines()
-    if len(rows) != len(names): raise ValueError('远端 VASPKIT 输入哈希不完整')
-    result = {}
-    for name, row in zip(names, rows):
-        match = re.fullmatch(r'([a-f0-9]{64})\s+\*?' + re.escape(name), row)
-        if not match: raise ValueError('远端 VASPKIT 输入哈希格式异常')
-        result[name] = match.group(1)
-    return result
 
 
 def _key(project_id: str, band_id: str | None, dos_id: str | None) -> str:
@@ -294,70 +253,6 @@ def _download(source: dict, target: Path, job: dict) -> dict:
         raise
 
 
-
-def _cleanup_remote_pbands(host: str, scratch: str) -> None:
-    from . import servers
-    prefix=servers.scratch_root(host,'pbands')+'/'
-    if not scratch.startswith(prefix) or not re.fullmatch('[a-f0-9]{32}',scratch[len(prefix):]):
-        raise ValueError('远端临时目录标识异常，拒绝清理')
-    receipt = execution.ssh(host, 'rm -rf -- ' + remote_paths.shell_path(scratch), timeout=120)
-    if receipt['exit_code'] != 0:
-        raise ValueError('远端临时 PBAND 目录清理失败：' + receipt['stderr'][-300:])
-
-
-def _generate_pbands(record: dict, elements: list[str]) -> tuple[str, str, list[dict], dict]:
-    host = record['config']['alias']
-    source = remote_paths.shell_path(artifacts._root(record))
-    from . import servers
-    scratch = servers.scratch_root(host,'pbands')+'/' + uuid.uuid4().hex
-    target = remote_paths.shell_path(scratch)
-    tool_receipt = execution.ssh(host, 'command -v vaspkit', timeout=30, stdout_limit=500)
-    tool = tool_receipt['stdout'].strip().splitlines()[-1] if tool_receipt['stdout'].strip() else ''
-    if tool_receipt['exit_code'] != 0 or not tool.startswith('/') or '\n' in tool:
-        raise ValueError('目标服务器未找到可用的 VASPKIT；未下载 PROCAR')
-    before = _remote_hashes(record, VASPKIT_INPUTS)
-    command = '\n'.join([
-        'set -eu', 'umask 077',
-        'mkdir -p -- ' + remote_paths.shell_path(servers.scratch_root(host,'pbands')),
-        'test ! -e ' + target,
-        'mkdir -- ' + target,
-        'source_dir=' + source, 'scratch_dir=' + target,
-        'required=0',
-        'for name in ' + ' '.join(VASPKIT_INPUTS) + '; do required=$((required + $(stat -c %s -- "$source_dir/$name"))); done',
-        "free=$(df -Pk \"$scratch_dir\" | awk 'NR==2 {printf \"%.0f\", $4*1024}')",
-        'test "$free" -gt $((required + 268435456)) || { echo "远端空间不足，无法隔离生成 PBAND" >&2; exit 1; }',
-        'for name in ' + ' '.join(VASPKIT_INPUTS) + '; do cp -- "$source_dir/$name" "$scratch_dir/$name"; done',
-        'cd "$scratch_dir"',
-        'if ' + shlex.quote(tool) + ' -task 213 >vaspkit.log 2>&1; then :; else',
-        "  grep -Eiq '(unknown|unrecognized|invalid|illegal) (option|argument).*[-]task' vaspkit.log || { tail -30 vaspkit.log >&2; exit 1; }",
-        '  rm -f -- PBAND_*.dat KLABELS KLINES.dat',
-        "  printf '213\\n' | " + shlex.quote(tool) + ' >vaspkit.log 2>&1 || { tail -30 vaspkit.log >&2; exit 1; }',
-        'fi',
-        "find . -maxdepth 1 -type f -name 'PBAND_*.dat' -printf '%f|%s|%T@\\n' | sort",
-    ])
-    try:
-        receipt = execution.ssh(host, command, timeout=1200, stdout_limit=12000)
-        if receipt['exit_code'] != 0:
-            raise ValueError('远端 VASPKIT 213 失败：' + receipt['stderr'][-500:])
-        entries = {}
-        for line in receipt['stdout'].splitlines():
-            match = re.fullmatch(r'(PBAND_[A-Za-z0-9_]+\.dat)\|(\d+)\|([\d.]+)', line)
-            if match and int(match.group(2)) > 0:
-                entries[match.group(1)] = (int(match.group(2)), match.group(3))
-        found = _pband_names(elements, set(entries))
-        if not found: raise ValueError('VASPKIT 213 未生成完整的逐元素 PBAND 文件组')
-        mode, names = found
-        after = _remote_hashes(record, VASPKIT_INPUTS)
-        if after != before: raise ValueError('生成期间原始输入发生变化，丢弃 PBAND')
-        sources = [{'attempt_id': record['id'], 'host': host, 'remote_dir': scratch,
-                    'name': name, 'size_bytes': entries[name][0], 'modified_at': entries[name][1]}
-                   for name in names]
-        return scratch, mode, sources, {'tool': tool, 'task': 213, 'input_sha256': before}
-    except BaseException:
-        _cleanup_remote_pbands(host, scratch)
-        raise
-
-
 def _species(poscar: Path) -> list[str]:
     lines = poscar.read_text(errors='replace').splitlines()
     symbols = lines[5].split()
@@ -409,7 +304,7 @@ def energy_reference(project_id: str, attempt_id: str, force=False) -> dict:
 
 
 def _canonical(name: str) -> str:
-    low = name.lower().replace('x2-y2', 'dx2-y2')
+    low = name.lower()
     return {'dx2': 'dx2-y2', 'x2-y2': 'dx2-y2', 'z2': 'dz2'}.get(low, low)
 
 
@@ -456,64 +351,162 @@ def _doscar(path: Path, species: list[str], target: Path) -> dict:
             'projection_note': '' if labels else '该 DOSCAR 只有总态密度，没有逐原子轨道投影；可看总 DOS，PDOS 需选择输出投影的 DOS attempt'}
 
 
-def _procar(path: Path, species: list[str], target: Path, noncollinear: bool) -> dict:
+def _check_procar_eigenval(path: Path, target: Path, spins: int, nk: int, nb: int) -> None:
+    """Check matching states without loading another full energy array."""
+    energies = np.load(target / 'band_energy.npy', mmap_mode='r')
+    coords = np.load(target / 'band_kcoords.npy', mmap_mode='r')
+    try:
+        with path.open(errors='strict') as stream:
+            first = next(stream).split()
+            if len(first) < 4 or first[3] not in ('1', '2') or int(first[3]) != spins:
+                raise ValueError('PROCAR 与 EIGENVAL 自旋通道不一致')
+            for _ in range(4): next(stream)
+            dimensions = next(stream).split()
+            if len(dimensions) != 3 or tuple(map(int, dimensions[1:])) != (nk, nb):
+                raise ValueError('PROCAR 与 EIGENVAL 的 k 点或能带数不一致')
+            for k in range(nk):
+                line = next(stream).strip()
+                while not line: line = next(stream).strip()
+                fields = line.split()
+                point = [float(value) for value in fields[:3]]
+                if len(fields) != 4 or not np.isfinite(point).all() or not np.allclose(point, coords[k], atol=2e-6, rtol=0):
+                    raise ValueError('PROCAR 与 EIGENVAL 的 k 点坐标不一致')
+                for band in range(nb):
+                    fields = next(stream).split()
+                    if len(fields) != 1 + 2 * spins or int(fields[0]) != band + 1:
+                        raise ValueError('EIGENVAL 能带行不完整或顺序无效')
+                    values = [float(value) for value in fields[1:1 + spins]]
+                    if not np.isfinite(values).all() or not np.allclose(values, energies[:spins, k, band], atol=0.002, rtol=0):
+                        raise ValueError('PROCAR 与 EIGENVAL 的能带能量不一致（容差 0.002 eV）')
+    except StopIteration as exc:
+        raise ValueError('EIGENVAL 内容截断，无法核对 PROCAR') from exc
+
+
+def _procar(path: Path, species: list[str], target: Path, noncollinear: bool,
+            eigenval: Path | None = None) -> dict:
+    """Stream charge projections into element arrays; never sum SOC magnetization."""
     dimensions = re.compile(r'# of k-points:\s*(\d+)\s*# of bands:\s*(\d+)\s*# of ions:\s*(\d+)')
     kline = re.compile(r'k-point\s+(\d+)\s*:\s*(.*?)\s+weight\s*=', re.I)
     bandline = re.compile(r'band\s+(\d+).*energy\s+(' + NUMBER + r')', re.I)
-    elements = list(dict.fromkeys(species)); labels = []
-    nk = nb = 0; weights = energies = kcoords = None
-    spin = 0; k = band = -1; table = 0; seen_k = 0; explicit_spin = False
-    with path.open(errors='replace') as stream:
+    elements = list(dict.fromkeys(species))
+    atom_elements = [elements.index(symbol) for symbol in species]
+    labels = []
+    nk = nb = 0; energies = weights = kcoords = charge = None
+    spin = 0; k = band = -1; next_k = next_band = completed = ion = 0
+    header = False
+    expected_tables = 4 if noncollinear else 1
+
+    def finish_band():
+        if band >= 0 and (completed != expected_tables or ion):
+            raise ValueError('PROCAR 投影表不完整：spin %d / k %d / band %d' % (spin + 1, k + 1, band + 1))
+
+    def finish_k():
+        finish_band()
+        if k >= 0 and next_band != nb:
+            raise ValueError('PROCAR 能带块不完整')
+
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
         for raw in stream:
-            line = raw.strip()
-            if not nk:
-                match = dimensions.search(line)
-                if match:
-                    nk, nb, ni = map(int, match.groups())
-                    if ni != len(species): raise ValueError('PROCAR 原子数与 POSCAR 不一致')
-                    energies = np.lib.format.open_memmap(target / 'band_energy.npy', mode='w+', dtype='float32', shape=(2,nk,nb))
-                    energies[:] = np.nan
-                    kcoords = np.zeros((nk,3), dtype=np.float32)
+            digest.update(raw)
+            line = raw.decode('utf-8').strip()
+            match = dimensions.search(line)
+            if match:
+                values = tuple(map(int, match.groups()))
+                if not nk:
+                    nk, nb, ni = values
+                    if min(values) <= 0 or ni != len(species):
+                        raise ValueError('PROCAR 维度无效或原子数与 POSCAR 不一致')
+                    energies = np.lib.format.open_memmap(target / 'band_energy.npy', mode='w+', dtype='float32', shape=(2, nk, nb))
+                    kcoords = np.lib.format.open_memmap(target / 'band_kcoords.npy', mode='w+', dtype='float32', shape=(nk, 3))
+                elif values != (nk, nb, len(species)):
+                    raise ValueError('PROCAR 不同自旋通道维度不一致')
                 continue
+            if not nk: continue
             match = re.match(r'spin component\s+(\d+)', line, re.I)
             if match:
-                spin = int(match.group(1)) - 1; explicit_spin = True; k = band = -1; continue
+                finish_k()
+                value = int(match.group(1)) - 1
+                if (value == 0 and k == -1 and next_k == 0 and spin == 0):
+                    pass
+                elif value == spin + 1 and next_k == nk:
+                    spin = value
+                else:
+                    raise ValueError('PROCAR 自旋通道重复或顺序无效')
+                if spin > 1 or (noncollinear and spin):
+                    raise ValueError('PROCAR 自旋通道与计算模式不一致')
+                k = band = -1; next_k = next_band = 0
+                continue
             match = kline.match(line)
             if match:
-                next_k = int(match.group(1)) - 1
-                coords = re.findall(NUMBER, match.group(2))
-                if len(coords) != 3: raise ValueError('PROCAR k 点坐标格式无法识别：' + line[:100])
-                if not explicit_spin and next_k == 0 and seen_k >= nk: spin += 1
-                if spin > 1: break
-                k = next_k; seen_k += 1; band = -1
-                if spin == 0: kcoords[k] = [float(value) for value in coords]
+                finish_k()
+                index = int(match.group(1)) - 1
+                if index == 0 and next_k == nk:
+                    spin += 1; next_k = 0
+                if spin > 1 or (noncollinear and spin) or index != next_k:
+                    raise ValueError('PROCAR k 点重复、缺失或自旋通道无效')
+                values = re.findall(NUMBER, match.group(2))
+                if len(values) != 3 or not all(math.isfinite(float(value)) for value in values):
+                    raise ValueError('PROCAR k 点坐标无效')
+                point = [float(value) for value in values]
+                if spin == 0: kcoords[index] = point
+                elif not np.allclose(point, kcoords[index], atol=2e-6, rtol=0):
+                    raise ValueError('PROCAR 上下自旋 k 点坐标不一致')
+                k = index; next_k += 1; band = -1; next_band = 0
                 continue
             match = bandline.match(line)
-            if match and k >= 0:
-                band = int(match.group(1)) - 1; table = 0
-                if 0 <= band < nb: energies[spin,k,band] = float(match.group(2))
+            if match:
+                finish_band()
+                index = int(match.group(1)) - 1
+                energy = float(match.group(2))
+                if k < 0 or index != next_band or index >= nb or not math.isfinite(energy):
+                    raise ValueError('PROCAR 能带编号、顺序或能量无效')
+                energies[spin, k, index] = energy
+                band = index; next_band += 1; completed = ion = 0; header = False; charge = None
                 continue
-            if line.startswith('ion ') and band >= 0:
-                names = [_canonical(x) for x in line.split()[1:] if x.lower() != 'tot']
+            if band < 0 or completed >= expected_tables:
+                # LORBIT phase-factor blocks are not charge projections.
+                continue
+            fields = line.split()
+            if fields and fields[0].lower() == 'ion':
+                names = [_canonical(name) for name in fields[1:-1]]
+                if ion or fields[-1].lower() != 'tot' or not names or len(set(names)) != len(names):
+                    raise ValueError('PROCAR 轨道表头或原子行无效')
                 if not labels:
                     labels = names
                     weights = np.lib.format.open_memmap(target / 'band_weight.npy', mode='w+', dtype='float32',
-                                                        shape=(2,nk,nb,len(elements),len(labels)))
-                    weights[:] = 0
-                if names != labels: raise ValueError('PROCAR 轨道表头不一致')
-                table += 1; continue
-            fields = line.split()
-            if weights is not None and table == 1 and fields and fields[0].isdigit() and 0 <= band < nb:
-                ion = int(fields[0]) - 1
-                if 0 <= ion < len(species):
-                    weights[spin,k,band,elements.index(species[ion]),:] += [float(x) for x in fields[1:1+len(labels)]]
-    if weights is None or not np.isfinite(energies[0]).all(): raise ValueError('PROCAR 能带投影不完整')
-    found_spins = 2 if np.isfinite(energies[1]).any() and not noncollinear else 1
-    if found_spins == 2 and not np.isfinite(energies[1]).all(): raise ValueError('PROCAR 第二自旋通道不完整')
-    if noncollinear and found_spins != 1: raise ValueError('非共线 PROCAR 自旋识别异常')
-    np.save(target / 'band_kcoords.npy', kcoords)
-    del energies, weights
-    return {'elements': elements, 'orbitals': labels, 'spins': found_spins, 'nk': nk, 'nb': nb,
+                                                       shape=(2, nk, nb, len(elements), len(labels)))
+                elif names != labels:
+                    raise ValueError('PROCAR 轨道表头不一致')
+                if completed == 0 and charge is None: charge = np.zeros((len(elements), len(labels)), dtype='float32')
+                header = True
+                continue
+            if fields and (fields[0].isdigit() or fields[0].lower() == 'tot'):
+                if not header or len(fields) != len(labels) + 2:
+                    raise ValueError('PROCAR 原子投影列数不完整')
+                values = [float(value) for value in fields[1:]]
+                if not all(math.isfinite(value) for value in values):
+                    raise ValueError('PROCAR 投影含无效数值')
+                if fields[0].lower() == 'tot':
+                    if ion != len(species): raise ValueError('PROCAR 原子投影缺失')
+                    if completed == 0: weights[spin, k, band] = charge
+                    completed += 1; ion = 0
+                else:
+                    if int(fields[0]) != ion + 1 or ion >= len(species):
+                        raise ValueError('PROCAR 原子投影重复或顺序无效')
+                    if completed == 0:
+                        charge[atom_elements[ion]] += values[:-1]
+                    ion += 1
+    finish_k()
+    if weights is None or next_k != nk or k < 0:
+        raise ValueError('PROCAR 能带投影不完整')
+    spins = spin + 1
+    energies.flush(); weights.flush(); kcoords.flush()
+    del energies, weights, kcoords
+    if eigenval is not None:
+        _check_procar_eigenval(eigenval, target, spins, nk, nb)
+    return {'elements': elements, 'orbitals': labels, 'spins': spins, 'nk': nk, 'nb': nb,
+            'source_format': 'procar', 'parser': 'fpilot.procar.v1', 'procar_sha256': digest.hexdigest(),
             'projection_component': 'charge' if noncollinear else 'collinear-or-nonspin'}
 
 
@@ -612,12 +605,6 @@ def _is_noncollinear(outcar: Path) -> bool:
     return _outcar_info(outcar)['noncollinear']
 
 
-def _unsupported_vaspkit_cli(log: Path) -> bool:
-    with log.open('rb') as stream:
-        stream.seek(max(0,log.stat().st_size-8192));tail=stream.read().decode(errors='replace')
-    return bool(re.search(r'(unknown|unrecognized|invalid|illegal)\s+(option|argument)[^\n]{0,80}-task',tail,re.I))
-
-
 def _kpath_labels(kpoints: Path, nk: int) -> list[dict]:
     lines = kpoints.read_text(errors='replace').splitlines()
     if len(lines) < 6 or 'line' not in lines[2].lower():
@@ -638,87 +625,6 @@ def _kpath_labels(kpoints: Path, nk: int) -> list[dict]:
             if result and result[-1]['index'] == index: result[-1]['label'] += '|' + label
             else: result.append({'index':index,'label':label})
     return result
-
-
-def _build(key: str, project_id: str, band: dict | None, dos: dict | None, sources: list[dict],
-           generate: bool, band_mode: str | None, elements: list[str]) -> None:
-    job = JOBS[key]; directory = CACHE_ROOT / key
-    scratch = None
-    try:
-        if job.get('discarded'):return
-        directory.mkdir(parents=True, exist_ok=True)
-        generation = None
-        if band and generate:
-            with LOCK: job['current_file'] = '远端 VASPKIT 213 生成逐元素 PBAND'
-            scratch, band_mode, generated, generation = _generate_pbands(band, elements)
-            required_bytes = sum(item['size_bytes'] for item in sources + generated)
-            available_bytes = shutil.disk_usage(CACHE_ROOT.parent).free
-            if available_bytes < required_bytes * 1.25 + 256 * 1024 * 1024:
-                raise ValueError(f'本机空间不足：绘图源文件 {required_bytes} 字节，可用 {available_bytes} 字节')
-            sources.extend(generated)
-            with LOCK:
-                job['total_bytes'] += sum(item['size_bytes'] for item in generated)
-                job['available_bytes'] = available_bytes
-                job['state'] = 'DOWNLOADING'
-        copied = []
-        for item in sources:
-            with LOCK: job['current_file'] = item['name'] + ' · ' + item['attempt_id'][:8]
-            copied.append(_download(item, directory / item['attempt_id'] / item['name'], job))
-        with LOCK: job['state'] = 'PARSING'; job['current_file'] = '解析本机轨道数据'
-        result = {'schema': 'fpilot.interactive-plot-cache.v2', 'id': key, 'project_id': project_id,
-                  'band_attempt_id': band['id'] if band else None, 'dos_attempt_id': dos['id'] if dos else None,
-                  'sources': copied, 'state': 'READY', 'created_at': datetime.now(timezone.utc).isoformat(),
-                  'band': None, 'dos': None, 'generation': generation}
-        if band:
-            folder = directory / band['id']
-            if (band_mode == 'soc') != _is_noncollinear(folder/'OUTCAR'):
-                raise ValueError('PBAND 通道与 OUTCAR 的 SOC/非共线模式不一致')
-            files = [folder/item['name'] for item in sources if item['attempt_id'] == band['id'] and item['name'].startswith('PBAND_')]
-            result['band'] = _pband(files, elements, band_mode, folder/'EIGENVAL', directory)
-            scf = (band.get('dependency_snapshot') or {}).get('upstream_attempt_id')
-            reference = _fermi(folder/'OUTCAR')
-            if scf:
-                scf_size = 0; before_bytes = job['downloaded_bytes']
-                try:
-                    scf_record = execution.get(scf)
-                    scf_source = _source(scf_record, 'OUTCAR')
-                    scf_path = directory / scf / 'OUTCAR'
-                    scf_size = scf_source['size_bytes']
-                    with LOCK: job['total_bytes'] += scf_size
-                    scf_receipt = _download(scf_source, scf_path, job)
-                    copied.append(scf_receipt)
-                    reference = _fermi(scf_path)
-                    reference['scf_attempt_id'] = scf
-                except (KeyError, OSError, ValueError):
-                    with LOCK:
-                        job['total_bytes'] -= scf_size
-                        job['downloaded_bytes'] = before_bytes
-                    reference['warning'] = 'SCF 费米能不可读；当前使用能带 OUTCAR 费米能'
-            result['band']['energy_reference'] = reference
-            result['band']['kpath_labels'] = _kpath_labels(folder/'KPOINTS', result['band']['nk'])
-            result['band']['kpath_breaks'] = [item['index'] for item in result['band']['kpath_labels'][2::2]]
-        if dos:
-            folder = directory / dos['id']; result['dos'] = _doscar(folder/'DOSCAR', _species(folder/'POSCAR'), directory)
-            result['dos']['energy_reference'] = _fermi(folder/'OUTCAR')
-        if band and dos:
-            bscf = (band.get('dependency_snapshot') or {}).get('upstream_attempt_id')
-            dscf = (dos.get('dependency_snapshot') or {}).get('upstream_attempt_id')
-            result['compatible'] = bool(bscf and bscf == dscf)
-            result['compatibility_note'] = '' if result['compatible'] else '能带与 DOS 未绑定同一 SCF；分别显示来源，不绘制同源合并图'
-        if scratch:
-            _cleanup_remote_pbands(band['config']['alias'], scratch)
-            scratch = None
-        if job.get('discarded'):raise ValueError('本地绘图来源已由用户清理')
-        (directory / 'metadata.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
-        with LOCK: job.update(state='READY', metadata=result, current_file='')
-    except BaseException as exc:
-        with LOCK: job.update(state='FAILED', error=str(exc)[:1000], current_file='')
-    finally:
-        if job.get('discarded'):shutil.rmtree(directory,ignore_errors=True)
-        if scratch:
-            try: _cleanup_remote_pbands(band['config']['alias'], scratch)
-            except ValueError as cleanup_error:
-                with LOCK: job.update(state='FAILED', error=str(cleanup_error)[:1000], current_file='')
 
 
 def _selection(meta: dict, selected: list[dict]) -> list[tuple[str,str]]:

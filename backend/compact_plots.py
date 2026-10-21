@@ -37,9 +37,9 @@ def script(record, kind, output):
     from .extension_remote import runtimes
     cores=max(1,int(runtimes().get(record['config']['alias'],{}).get('cores') or 1))
     functions = ['_sha','_pband_names','_species','_canonical','_doscar','_eigenval','_pband',
-                 '_outcar_info','_unsupported_vaspkit_cli','_kpath_labels']
+                 '_outcar_info','_check_procar_eigenval','_procar','_kpath_labels']
     source = '\n'.join(inspect.getsource(getattr(plots,name)) for name in functions)
-    source = ('from __future__ import annotations\nimport os,json,re,math,hashlib,stat,shutil,subprocess,time\n'
+    source = ('from __future__ import annotations\nimport os,json,re,math,hashlib,stat,time\n'
               'from pathlib import Path\n'
               'for name in ("OMP_NUM_THREADS","OPENBLAS_NUM_THREADS","MKL_NUM_THREADS","NUMEXPR_NUM_THREADS"):os.environ[name]='+repr(str(cores))+'\n'
               'import numpy as np\n'
@@ -47,7 +47,8 @@ def script(record, kind, output):
     request = {'root': execution.attempt_path(record)['shell'], 'output': output, 'kind':kind,
                'attempt_id':record['id'],'host':record['config']['alias']}
     source += '\nREQUEST='+repr(request)+'\n'+EXTRACT
-    return shlex.quote(remote_transport._interpreter(record['config']['alias']))+' -c '+shlex.quote(source)
+    from .analysis_queue import interpreter
+    return shlex.quote(interpreter(record['config']['alias']))+' -c '+shlex.quote(source)
 
 
 EXTRACT = r'''
@@ -59,7 +60,7 @@ sources=[];before={}
 def take(path):
     s=os.stat(path,follow_symlinks=False)
     if not stat.S_ISREG(s.st_mode) or s.st_size<=0:raise ValueError('missing ordinary nonempty file: '+str(path))
-    before[str(path)]=(s.st_size,s.st_mtime_ns)
+    before[str(path)]=(s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
     row={'attempt_id':REQUEST['attempt_id'],'host':REQUEST['host'],'remote_dir':str(path.parent),
          'name':path.name,'size_bytes':s.st_size,'modified_at':str(s.st_mtime_ns),
          'verification_mode':'metadata'}
@@ -75,40 +76,29 @@ generation=None
 if REQUEST['kind']=='band':
     eigenval=take(root/'EIGENVAL');kpoints=take(root/'KPOINTS')
     found=_pband_names(elements,{p.name for p in root.glob('PBAND_*.dat') if p.is_file() and p.stat().st_size>0})
-    origin=root
-    if not found:
-        tool=shutil.which('vaspkit')
-        if not tool:raise ValueError('VASPKIT is missing; PROCAR stays on server')
-        origin=out.parent/'vaspkit';origin.mkdir(exist_ok=True)
-        for name in ('INCAR','POSCAR','KPOINTS','EIGENVAL','DOSCAR','PROCAR'):
-            path=take(root/name)
-            if path.name in ('PROCAR','DOSCAR','EIGENVAL'):
-                target=origin/name
-                if target.exists() or target.is_symlink():target.unlink()
-                target.symlink_to(path)
-            else:shutil.copyfile(path,origin/name)
-        with (origin/'vaspkit.log').open('w') as log:
-            result=subprocess.run([tool,'-task','213'],cwd=str(origin),stdout=log,stderr=subprocess.STDOUT,timeout=1200)
-            log.flush()
-            if result.returncode and _unsupported_vaspkit_cli(origin/'vaspkit.log'):
-                result=subprocess.run([tool],input='213\n',text=True,cwd=str(origin),stdout=log,stderr=subprocess.STDOUT,timeout=1200)
-        if result.returncode:raise ValueError('VASPKIT 213 failed; see independent analysis log')
-        found=_pband_names(elements,{p.name for p in origin.glob('PBAND_*.dat') if p.is_file() and p.stat().st_size>0})
-        if not found:raise ValueError('VASPKIT did not produce complete element and spin projections')
-        generation={'tool':tool,'task':213,'directory':str(origin)}
-    mode,names=found
-    files=[take(origin/name) for name in names]
-    if (mode=='soc')!=outcar_info['noncollinear']:raise ValueError('PBAND SOC mode does not match OUTCAR')
-    meta=_pband(files,elements,mode,eigenval,work)
+    procar=root/'PROCAR'
+    if procar.exists() or procar.is_symlink():
+        meta=_procar(take(procar),species,work,outcar_info['noncollinear'],eigenval)
+        sources[-1].update(sha256=meta.pop('procar_sha256'),verification_mode='content')
+        generation={'tool':'fpilot.procar-reader','version':1,'projection_component':meta['projection_component']}
+    elif found:
+        mode,names=found
+        files=[take(root/name) for name in names]
+        if (mode=='soc')!=outcar_info['noncollinear']:raise ValueError('PBAND SOC mode does not match OUTCAR')
+        meta=_pband(files,elements,mode,eigenval,work)
+    else:
+        raise ValueError('缺少 PROCAR，也没有可读取的完整 PBAND 历史文件')
     meta['kpath_labels']=_kpath_labels(kpoints,meta['nk'])
     meta['kpath_breaks']=[r['index'] for r in meta['kpath_labels'][2::2]]
 else:
     meta=_doscar(take(root/'DOSCAR'),species,work)
 meta['energy_reference']=reference
-for name,(size,stamp) in before.items():
+for name,identity in before.items():
     s=os.stat(name,follow_symlinks=False)
-    if (s.st_size,s.st_mtime_ns)!=(size,stamp):raise ValueError('source changed during extraction: '+name)
+    if (s.st_dev,s.st_ino,s.st_size,s.st_mtime_ns,s.st_ctime_ns)!=identity:raise ValueError('source changed during extraction: '+name)
 arrays={p.stem:np.load(p,mmap_mode='r') for p in work.glob('*.npy')}
+if REQUEST['kind']=='band':
+    for name in ('band_energy','band_weight'):arrays[name]=arrays[name][:meta['spins']]
 receipt={'schema':'fpilot.compact-projection.v1','metadata':meta,'sources':sources,'generation':generation,
          'parse_seconds':time.monotonic()-started,'kind':REQUEST['kind'],
          'poscar_text':poscar.read_text()}
@@ -197,8 +187,8 @@ def selected_series(meta, selected, emin, emax, directory):
         source+='output=Path('+repr(output)+')\n'
         source+='with gzip.open(str(output),"wt") as stream:json.dump(data,stream)\n'
         source+='if output.stat().st_size>10485760:raise ValueError("所选投影仍超过 10 MiB，请减少同时显示的轨道；不缩减 k 点或能带")\n'
-        command=shlex.quote(remote_transport._interpreter(record['config']['alias']))+' -c '+shlex.quote(source)
-        from .analysis_queue import slot
+        from .analysis_queue import slot,interpreter,environment
+        command=environment()+shlex.quote(interpreter(record['config']['alias']))+' -c '+shlex.quote(source)
         with slot(record['config']['alias']),tempfile.TemporaryDirectory(prefix='fpilot-selected-') as temp:
             recycle.assert_available('attempts',record['id'],record)
             target=Path(temp)/'selected.json.gz'
