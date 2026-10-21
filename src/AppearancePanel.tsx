@@ -26,7 +26,7 @@ export default function AppearancePanel(){
     {custom&&<button className="theme-remove" aria-label={`移除主题 ${item.name}`} title="移除自定义主题" onClick={()=>{removeTheme(item.id);setMessage('已移除主题；计算数据和文件不受影响');}}><X size={15}/></button>}
   </div>;
   return <div className="appearance-panel">
-    <div className="appearance-heading"><span className="section-kicker"><Palette size={16}/>个人外观</span><h2>让工作台适合你的节奏</h2><p>切换即时生效，保留当前页面、计算草稿和流程画布。</p></div>
+    <div className="appearance-heading"><h2>外观</h2></div>
     <div className="theme-grid" aria-label="内置主题">{BUILTIN_THEMES.map(t=>card(t))}</div>
     {!!customThemes.length&&<><h3 className="appearance-section-title">我的主题</h3><div className="theme-grid">{customThemes.map(t=>card(resolveTheme(t),true))}</div></>}
     <div className="appearance-preview"><div><span className="section-kicker">字体预览</span><h3>从结构到结果 · Materials research</h3><p>选择来源，配置计算，审阅输入，再运行与比较。</p><p className="appearance-latin">Structure → Calculation → Results</p><code>ENCUT = 520 · E = −10.428 eV</code></div><span className="neutral-badge">{theme.metrics.fontSize} px 正文 · {theme.metrics.secondaryFontSize} px 辅助文字</span></div>

@@ -1,3 +1,5 @@
+import Feedback from './Feedback';
+import {useDialogFocus} from './useDialogFocus';
 import {useEffect,useRef,useState} from 'react';
 import type {ReactNode} from 'react';
 import CommonWorkspacePath from './CommonWorkspacePath';
@@ -19,12 +21,13 @@ import {importedChoice,programLabels,withResource} from './scriptChoices';
 import type {ScriptRecord} from './scriptChoices';
 const sections=[['appearance','概览与外观','本机设置'],['files','结构与文件','本机设置'],['flow','计算流程','当前项目'],['config','计算配置','当前节点'],['server','服务器与脚本','本机设置'],['operations','运行与监控','本机设置'],['extensions','结果与扩展','本机设置']];
 type Connection={resolved:Record<string,string>;connected?:boolean;note:string;python?:{path:string;version:number[]}};
-type Props={section:string;context?:SettingsContext;onSection:(id:string)=>void;onReturn?:()=>void;overview:ReactNode;flow:ReactNode;configuration:ReactNode;files?:ReactNode;branches?:ReactNode};
-export default function SettingsWorkbench({section,context,onSection,onReturn,overview,flow,configuration,files,branches}:Props){
+type Props={section:string;context?:SettingsContext;onSection:(id:string)=>void;onReturn?:()=>void;onBack?:()=>void;overview:ReactNode;flow:ReactNode;configuration:ReactNode;files?:ReactNode;branches?:ReactNode};
+export default function SettingsWorkbench({section,context,onSection,onReturn,onBack,overview,flow,configuration,files,branches}:Props){
  const scroll=useRef<HTMLDivElement>(null),generation=useRef(0),drafts=useRef(new Map<string,ServerConfig>());
  const [config,setConfig]=useState<ServerConfig|null>(null),[profiles,setProfiles]=useState<RegisteredProfile[]>([]),[settings,setSettings]=useState<WorkbenchSettings>(emptySettings),[base,setBase]=useState<ServerConfig>({});
  const [program,setProgram]=useState(context?.program||'vasp_std'),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[limit,setLimit]=useState(5),[adding,setAdding]=useState(false),[connections,setConnections]=useState<Record<string,Connection>>({}),[loaded,setLoaded]=useState(false);
  useEffect(()=>{if(scroll.current)scroll.current.scrollTop=0;},[section]);
+ useDialogFocus(adding,'.server-script-dialog',()=>setAdding(false));
  function select(alias:string,p:string,current=settings,items=profiles,original=base){
   if(config)drafts.current.set(config.alias+':'+program,config);
   const next=drafts.current.get(alias+':'+p)||runtimeFor(original,items,current,alias,p);
@@ -38,7 +41,7 @@ export default function SettingsWorkbench({section,context,onSection,onReturn,ov
  async function save(){if(!config)return;setBusy(true);setMessage('');setError('');try{if(config.runtime_source==='script'&&!config.template_id)throw new Error('请选择默认脚本，或切换到已登记运行方式');const updatedSite=await requestJson('/api/sites/'+encodeURIComponent(config.alias)+'/paths',{remote_workspace_root:config.remote_workspace_root,pyw90_python:config.pyw90_python||'',pyw90_package:config.pyw90_package||''},'PUT');setProfiles(updatedSite.registered_profiles);const saved=await requestJson('/api/workbench-settings',{runtime:config,program,template_id:config.runtime_source==='script'?config.template_id:null},'PUT');setSettings(saved);const stored=saved.runtimes[config.alias+':'+program]||config;setConfig(stored);drafts.current.set(config.alias+':'+program,stored);setMessage('已保存 '+config.alias+' 的 '+programLabels[program]+' 默认值');window.dispatchEvent(new Event('fpilot:settings-changed'));}catch(e){setError(errorMessage(e));}finally{setBusy(false);}}
  function choose(id:string,script?:ScriptRecord){if(!config)return;const next=script?importedChoice(config,program,script):{...config,template_id:id,runtime_source:'script',program,vasp_executable:program};setConfig(next);setMessage('');}
  const profile=profiles.find(p=>p.alias===config?.alias),connection=config?connections[config.alias]:null;
- return <div className="settings-workbench"><header><h2>设置</h2><p>按使用范围保存。科学参数和本次来源在计算配置中填写。</p></header><div className="settings-layout"><nav aria-label="设置分类">{sections.map(([id,title,scope])=><button key={id} className={section===id?'active':''} aria-pressed={section===id} onClick={()=>onSection(id)}>{title}<span>{scope}</span></button>)}</nav><div ref={scroll} className="settings-content" tabIndex={0} aria-label="设置内容" data-section={section}>
+ return <div className="settings-workbench"><header><div><h2>工作台设置</h2><p>应用设置保存在本机；项目与节点设置仅作用于当前项目。</p></div>{onBack&&<button className="button" onClick={onBack}>返回项目与流程</button>}</header><div className="settings-layout"><nav aria-label="设置分类">{['应用设置','当前项目'].map(group=><div className="settings-nav-group" key={group}><h3>{group}</h3>{sections.filter(([, ,scope])=>(scope.startsWith('当前')?'当前项目':'应用设置')===group).map(([id,title,scope])=><button key={id} className={section===id?'active':''} aria-pressed={section===id} onClick={()=>onSection(id)}>{title}{scope.startsWith('当前')&&<span>{scope}</span>}</button>)}</div>)}</nav><div ref={scroll} className="settings-content" tabIndex={0} aria-label="设置内容" data-section={section}>
  {section==='appearance'&&<><LocalSetup/><AppearancePanel/><section className="input-submit-card"><h3>本机路径、备份与恢复</h3>{overview}</section></>}
  {section==='files'&&<section className="input-submit-card"><h3>结构与文件</h3>{files}<p>结构的导入、坐标和晶胞仍在结构页编辑；本次赝势版本在计算配置中选择。</p><button className="button" onClick={()=>onSection('config')}>配置本机 POTCAR 库</button></section>}
  {section==='flow'&&<><section className="input-submit-card"><h3>流程模板与目录命名</h3>{flow}</section><section className="input-submit-card"><h3>分支与服务器</h3>{branches}</section></>}
@@ -52,5 +55,5 @@ export default function SettingsWorkbench({section,context,onSection,onReturn,ov
  {section==='operations'&&<><h3>运行与监控</h3><p>这些设置适用于整个工作台，与单台服务器的脚本配置分开保存。</p><ExecutionControl/><RemotePerformance/></>}
  {section==='extensions'&&<><label>历史默认显示条数<select value={limit} onChange={async e=>{const n=Number(e.target.value);try{await requestJson('/api/workbench-settings',{history_limit:n},'PUT');setLimit(n);localStorage.setItem('fpilot-history-limit',String(n));window.dispatchEvent(new Event('fpilot:settings-changed'));}catch(e){setError(errorMessage(e));}}}>{[3,5,10].map(n=><option key={n}>{n}</option>)}</select></label><p>本地记录可在各页面的历史中回收，统一回收站支持恢复和清空本地文件。</p><button className="button" onClick={openRecycleBin}>打开回收站</button><ExtensionManager/></>}
  {adding&&<div className="modal-scrim"><section className="modal server-script-dialog" role="dialog" aria-modal="true" aria-label="添加服务器"><button className="button" onClick={()=>setAdding(false)}>取消添加</button><SiteRegistration onRegistered={(c,p)=>{setProfiles(p);setBase(c);setConfig({...c,program});setAdding(false);setLoaded(true);}}/></section></div>}
- {busy&&<p role="status">正在处理当前服务器设置…</p>}{message&&<p role="status">{message}</p>}{error&&<p role="alert" className="structure-error">{error}</p>}</div></div></div>;
+ <Feedback busy={busy} label="正在处理当前服务器设置…" message={message} error={error}/></div></div></div>;
 }
