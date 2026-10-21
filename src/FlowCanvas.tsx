@@ -29,6 +29,7 @@ function StepCard({data, selected}: NodeProps<Step>) {
     <strong>{data.label}</strong><p>{data.kind==='structure'?data.params.material || '未指定结构':meta.description}</p>
     {chainSelection?<div className="step-foot chain-selection-foot"><span>{chainSelection==='execute'?'本次执行':chainSelection==='reuse'?'复用历史结果':chainSelection==='context'?'流程上下文':'本次不执行'}</span></div>:
       <div className="step-foot"><span>{data.kind==='structure'?(data.structure?'已导入':'待导入'):data.kind==='scan'?'批次容器':'草稿'}</span>{resultState&&openResults?<button className="node-result-button" onClick={event=>{event.stopPropagation();openResults();}}>结果 · {statusLabel(resultState)}</button>:<span>{data.kind==='scan'?'按批次执行':attemptStatus==='error'?'状态暂不可读':attemptStatus==='loading'?'正在读取状态':'未提交'}</span>}</div>}
+    {data.kind==='structure'&&typeof data.openStructure==='function'&&<button className="node-result-button nodrag nopan" onClick={event=>{event.stopPropagation();(data.openStructure as ()=>void)();}}>打开结构详情</button>}
     {Boolean(data.chainState)&&openChain&&<button className="node-result-button" onClick={event=>{event.stopPropagation();openChain();}}>计算链 · {String(data.chainState)}</button>}
     {data.kind==='scan'&&toggleExpand&&<button className="node-result-button" onClick={event=>{event.stopPropagation();toggleExpand();}}>{data.expanded?'收起 case':'展开 case'}</button>}
     <Handle type="source" position={Position.Right} aria-label={`${data.label}输出`}/>

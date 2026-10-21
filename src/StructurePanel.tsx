@@ -29,10 +29,13 @@ export function CrystalView({structure,projectId}:{structure:StructureDocument;p
   useEffect(()=>{const update=()=>send({type:'crystal-theme',background:selectedTheme().colors.canvas});window.addEventListener('fpilot:appearance-changed',update);return()=>window.removeEventListener('fpilot:appearance-changed',update);},[]);
   return <><div className="crystal-view"><iframe ref={frame} src="/crystal-frame.html" title="晶胞三维视图" style={{width:'100%',height:'100%',border:0}}/></div>{error&&<p role="alert">{error}</p>}<div className="crystal-legend" aria-label="元素颜色与晶格基矢图例">{Object.entries(colors).map(([element,color])=><span key={element}><i style={{background:color}}/>{element} · {structure.atoms.filter(a=>a.element===element).length} 个</span>)}<span>基矢：</span>{axes.map((color,i)=><span key={i} style={{color}}>➜ {['a','b','c'][i]}</span>)}</div><div className="crystal-actions"><span>拖动旋转 · 默认滚轮滚动页面 · 仅显示当前晶胞原子</span><div><button className="button" aria-pressed={wheelZoom} onClick={()=>setWheelZoom(value=>!value)}>{wheelZoom?'关闭滚轮缩放':'开启滚轮缩放'}</button> <button className="button" onClick={()=>{send({type:'crystal-reset'});}}>重置视角</button></div></div><SymmetryAnalysis poscar={structure.poscar} sourceSha={structure.source.sha256} projectId={projectId}/></>;
 }
-export default function StructurePanel({nodes,onImport,projectId}:{nodes:Step[];projectId?:string;onImport:(id:string,s:StructureDocument)=>void}) {
+export default function StructurePanel({nodes,onImport,projectId,targetNodeId,onTargetChange}:{nodes:Step[];projectId?:string;targetNodeId?:string|null;onTargetChange?:(id:string)=>void;onImport:(id:string,s:StructureDocument)=>void}) {
   const structureNodes=nodes.filter(n=>n.data.kind==='structure');
-  const [target,setTarget]=useState(structureNodes[0]?.id||'');
+  const [localTarget,setLocalTarget]=useState(structureNodes[0]?.id||'');
+  const target=targetNodeId===undefined?localTarget:targetNodeId;
+  const setTarget=(id:string)=>{setLocalTarget(id);onTargetChange?.(id);};
   const active=structureNodes.find(n=>n.id===target)||structureNodes[0];
+  useEffect(()=>{if(active&&targetNodeId===undefined)onTargetChange?.(active.id);},[active?.id,targetNodeId,onTargetChange]);
   const candidate=active?.data.structure;
   const [verified,setVerified]=useState<StructureDocument|null>(null);
   const doc=verified===candidate?verified:null;
