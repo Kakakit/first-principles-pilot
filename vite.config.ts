@@ -1,3 +1,4 @@
+import release from './packaging/release.json';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 export default defineConfig({ build:{rollupOptions:{input:{main:'index.html',crystal:'crystal-frame.html'}}}, plugins: [react({exclude: [/node_modules/, /\.fpilot-cache\//]})],
@@ -5,7 +6,7 @@ export default defineConfig({ build:{rollupOptions:{input:{main:'index.html',cry
   cacheDir: '.fpilot-cache/vite',
   resolve: { dedupe: ['react', 'react-dom'] },
   optimizeDeps: { entries: ['index.html'], include: ['react', 'react-dom/client', '@rjsf/core', '@rjsf/validator-ajv8', '@xyflow/react'] },
-  define: { '__FPILOT_CONTROL_URL__': JSON.stringify((globalThis as any).process?.env?.FPILOT_CONTROL_URL || '') },
+  define: { '__FPILOT_VERSION__': JSON.stringify(release.version), '__FPILOT_CONTROL_URL__': JSON.stringify((globalThis as any).process?.env?.FPILOT_CONTROL_URL || '') },
   server: {
   watch: { ignored: ['**/workspace-data/**', '**/.fpilot-runtime/**', '**/.fpilot-cache/**'] },
   proxy: { '/api': `http://127.0.0.1:${Number((globalThis as any).process?.env?.FPILOT_API_PORT || 8000)}` },
