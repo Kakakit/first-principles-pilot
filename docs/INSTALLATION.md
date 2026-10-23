@@ -2,14 +2,15 @@
 
 安装后点击 First Principles Pilot 图标，浏览器自动打开工作台。包内自带 Python 和锁定依赖，无需安装 Node、Python 或运行 npm。界面和计算逻辑共用一份代码，安装包按系统/架构分别构建。
 
-## v1.1.0-beta.2 更新
+## v1.1.0-beta.3 更新
 
-- 项目快照保存目录与计算工作区分开；上传后可继续编辑，上传与下载暂停后续自动流程，已提交任务继续跟踪。旧交接须通过“切换为快照传输”入口解除只读，回执不明时先核查。
-- 增加服务器移除与恢复、能带 VBM/CBM 信息，并统一 Windows 和 Mac 应用图标。
-- GPU 节点显示逐卡显存、利用率与计算进程，保留独占检查；脚本支持在提交页指定使用卡数。
-- 支持 INCAR 手动文本和自由 Wannier 投影，VASP-Wannier 可在生成矩阵前运行 PyW90 pre dos 投影诊断。
+本次仅发布 Apple Silicon Mac 的 DMG，内置 Python 3.11 与锁定依赖。Windows 用户继续使用 beta.2；本次不生成 Windows 或 Intel Mac 安装包。
 
-本版只包含已完成验收的源码。讨论中的 PyW90 分析区间与 `.win` 能量注释调整尚未交付，不包含在本版。
+- 绿色工作台、融合项目流程、节点摘要与结构直达，运行记录显示冻结备注。
+- 单项重算与批次恢复、参数迭代列表取值、可调监控周期，以及 SSH 和文件读取减负。
+- 同源 DFT 路径及基础窗口检查脱离 PyW90；投影能带内置流式 PROCAR 解析，不再执行 VASPKIT。
+- 修复非有限运行证据导致 HTTP 500，以及选择计算链时画布覆盖配置页面。
+- 扩展独立发布，主程序不再从旧扩展源码目录加载科学实现；扩展从 extensions 分支导入。
 
 ## 下载与安装
 
@@ -17,9 +18,9 @@
 
 - **Windows 10/11 x64**：下载 `FPilot-1.1.0-beta.2-Windows-x64-Setup.exe`，双击安装。默认安装到当前用户的应用目录，无需管理员权限。开始菜单有启动、停止和导出诊断三个入口，可创建桌面快捷方式。
 - **Apple Silicon Mac**：下载名称含 `macos-arm64` 的 DMG，打开并把应用拖入 Applications。
-- 首版只发布 Windows x64 与 Apple Silicon Mac；暂不提供 Intel Mac 安装包。
+- beta.3 只提供 Apple Silicon Mac；Windows x64 保留 beta.2，暂不提供 Intel Mac 安装包。
 
-这是未使用商业代码签名证书的测试版。Windows SmartScreen/macOS Gatekeeper 可能提示发布者未验证；核对这是自己授权仓库的发布和 SHA256 后决定是否允许运行。Mac 的临时签名不等于 Developer ID 签名或公证。本轮不把打包成功当成用户机器安装验收。
+这是未使用商业代码签名证书的测试版。Windows SmartScreen/macOS Gatekeeper 可能提示发布者未验证；核对这是自己授权仓库的发布和 SHA256 后决定是否允许运行。Mac 的临时签名不等于 Developer ID 签名或公证。本版在开发者的 Apple Silicon Mac 隔离安装与配置验收；其他 Mac 的 Gatekeeper 与实际科研环境仍需使用者核对。
 
 ## 启动、停止和重启
 

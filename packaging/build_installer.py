@@ -138,7 +138,7 @@ def package_mac(app, version, output, target):
         plistlib.dump({'CFBundleExecutable':'launcher', 'CFBundleIdentifier':'org.fpilot.workbench',
             'CFBundleName':'First Principles Pilot', 'CFBundleDisplayName':'First Principles Pilot',
             'CFBundlePackageType':'APPL', 'CFBundleIconFile':'fpilot.icns', 'CFBundleShortVersionString':version.split('-')[0],
-            'CFBundleVersion':'1101', 'LSMinimumSystemVersion':'11.0', 'NSHighResolutionCapable':True}, f)
+            'CFBundleVersion':json.loads((ROOT / 'packaging/release.json').read_text()).get('macos_build', '1101'), 'LSMinimumSystemVersion':'11.0', 'NSHighResolutionCapable':True}, f)
     launcher = contents / 'MacOS/launcher'
     launcher.write_text('#!/bin/sh\nAPP_PATH="$(CDPATH= cd -- "$(dirname -- "$0")/../Resources/FPilot" && pwd)"\nexec "$APP_PATH/python/bin/python3" -X utf8 "$APP_PATH/scripts/installed_launcher.py"\n')
     launcher.chmod(0o755)

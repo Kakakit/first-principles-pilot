@@ -1,6 +1,6 @@
 {
   "name": "fpilot-workbench",
-  "version": "1.0.0",
+  "version": "1.1.0-beta.3",
   "private": true,
   "type": "module",
   "scripts": {
