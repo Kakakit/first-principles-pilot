@@ -338,13 +338,13 @@
     {
       "id": "lcalcpol-polarization-analysis",
       "name": "形式极化与双结果比较",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "schema": "fpilot.extension.v2",
       "install_mode": "workbench-v2",
       "source": "resources/extensions/lcalcpol-polarization-analysis",
-      "package": "extensions/packages/lcalcpol-polarization-analysis-2.1.0.zip",
-      "sha256": "8beab6ac8e25ba6de2c8e30b9e5de5ffb6a77fcd39fc12e7e9030443b3a17b32",
-      "size_bytes": 30340,
+      "package": "extensions/packages/lcalcpol-polarization-analysis-2.2.0.zip",
+      "sha256": "80842bd8cb985ca9950df2a75cea0a9561ad586252b816ec3b0d8eb861e96cc6",
+      "size_bytes": 33375,
       "files": [
         {
           "path": "POLARIZATION_QUANTUM_SUBTRACTION_MATH.md",
@@ -352,7 +352,7 @@
         },
         {
           "path": "README.md",
-          "sha256": "d35bc2b22bacf2d2b298e2f843057782ee20f1dedf91c52947c122a70db48598"
+          "sha256": "7acf8b9906afc57414e980532304b601ed2ebba0c3a9b85a480f1c681e79fcc3"
         },
         {
           "path": "extension.json",
@@ -360,7 +360,7 @@
         },
         {
           "path": "extension.manifest.json",
-          "sha256": "f2c4fe78d409ec8e9a4c95e99ceafe0ebb53cb9495ab353a322e94a15a45b642"
+          "sha256": "7a92560a51cec9e1a1b28893224e9e148df91cb7b5add7b1c4d69afa85de2bcc"
         },
         {
           "path": "extension.sdk.json",
@@ -376,7 +376,7 @@
         },
         {
           "path": "scripts/cli.py",
-          "sha256": "a7a225e446eef881f6358bcc1bef63c6b1f432a6bd60019031e0fc750a88a468"
+          "sha256": "08a9b68c18d02571b3fe270eed6b936afbf11da9e4d9beca7013d9ebeb7bac0d"
         },
         {
           "path": "scripts/presentation.py",
@@ -400,15 +400,15 @@
         },
         {
           "path": "viewer/main.js",
-          "sha256": "cab3dcfc40664710b60e3027568cc05f2720dd5b8a4091087b387f9c7d960a5b"
+          "sha256": "672ad699b703234fa7ef83aa31b8d2c236f36606e085c1e4e85f34e09aa80797"
         },
         {
           "path": "viewer/model.js",
-          "sha256": "75a813f4f95bbcb58d1c8298b181eb07e1d9579c0ab5eba3704ea0c33c2afb6f"
+          "sha256": "e3e7a7a5025fb2b1048287df803bcc97694573971ea0cb0f9723083151d4aa7e"
         },
         {
           "path": "viewer/shell.html",
-          "sha256": "f65c58b2fa6e8db00aeaa6d8ef044dcd31c68913d23b3236a396d0d84bf23e41"
+          "sha256": "ee3cb94da4bcb82408ba88f377b05fc7a0cccded46859db3e3abcb52a0efd773"
         }
       ]
     },

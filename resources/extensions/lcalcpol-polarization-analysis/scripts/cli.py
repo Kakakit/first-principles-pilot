@@ -24,11 +24,6 @@ def analyze(request):
     else:
         rows=[{'axis':a,'raw':x} for a,x in zip('xyz',data['raw']['polarization_c_m2'])]
         columns=[{'key':'axis','label':'方向','unit':''},{'key':'raw','label':'形式极化','unit':'C/m²'}];summary='形式极化已读取；物理分支未建立'
-    details=[]
-    endpoints=[data['noSOC'],data['SOC']] if data.get('mode')=='compare' else [data]
-    for i,end in enumerate(endpoints):
-        entries=[('p[ion]',end['p_ion_e_ang']),('p[elc]',end['p_elc_e_ang']),('p[tot]',end['total_dipole_e_ang']),('总量约化代表',end['branch_reduced']['dipole_e_ang'])]
-        details.append({'title':chr(65+i)+' 原始与总量约化 dipole','columns':[{'key':'field','label':'字段','unit':''}]+[{'key':a,'label':a,'unit':'e Å'} for a in 'xyz'],'rows':[dict(field=k,**dict(zip('xyz',v))) for k,v in entries]})
-    return {'summary':summary,'warnings':warnings,'scientific_validation':'INSUFFICIENT','tables':[{'title':'形式极化','columns':columns,'rows':rows}]+details,'artifacts':[artifact(output,'完整数据、量子与假设')]}
+    return {'summary':summary,'warnings':warnings,'scientific_validation':'INSUFFICIENT','tables':[{'title':'形式极化（原始值与整数量子参考）','columns':columns,'rows':rows}],'artifacts':[artifact(output,'完整数据、量子与假设')]}
 
 if __name__=='__main__':raise SystemExit(main(check,analyze))

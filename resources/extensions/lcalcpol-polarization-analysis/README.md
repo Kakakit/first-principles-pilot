@@ -1,3 +1,26 @@
+# 形式极化与双结果比较 · 2.2.0
+
+## 本版使用方法
+
+页面先显示量子扣除计算器和 x/y/z 极化（μC/cm²）、向量模长；来源、OUTCAR 原文、晶格、基底与换算过程折叠查看。同一 OUTCAR 电子/离子记录只显示一次，不再同时重列表格。新分析的通用回退表只保留原始/整数参考概览，不复制整套端点明细。
+
+- n1/n2/n3 可输入 4.5、−0.5、0.125 等有限小数（绝对值不超过 1000000）。点击“应用并计算”立即计算 P′ = P_raw − ΣnᵢQᵢ；双结果先计算 B−A，再扣除共同基底中的量子倍数。电子与离子不分别约化。
+- 自动选择默认“最近整数或半整数”（0.5 步长），也可选择“最近整数”（1 步长），再点击“搜索并应用”。逐个基底系数取最近格点，恰好等距使用 ties-to-even；不是对非正交晶格做最短笛卡尔向量优化。
+- 半整数及任意小数均按计算器原样执行，标为“小数系数试算”；整数标为“整数量子分支候选”。半量子形式极化可以出现，但扣除半量子一般不是同一极化等价类的分支变换，不能自动解释为去掉数值误差或获得自发极化。参见 [VASP 极化说明](https://vasp.at/wiki/index.php/Berry_phases_and_finite_electric_fields)。
+- 选择及搜索模式单独保存，兼容旧整数选择。JSON/CSV 导出实际系数、数值试算类型、原值、单位与计算结果；原始分析保持不变。旧的自动整数量子结果仍保存在完整数据中，不被新搜索替换。
+
+在工作台扩展管理导入新版 ZIP/源码目录，然后对已有结果点击“更新结果展示”，无需重跑 VASP 或重新读取服务器文件。历史通用回退表保持原样，新展示优先使用冻结 JSON。
+
+仅验证本扩展：`node --import tsx --test tests/polarizationViewer.test.ts`；`python -m unittest discover -s tests -p test_polarization_presentation.py`；`python -m unittest discover -s resources/extensions/lcalcpol-polarization-analysis/tests`。旧解析、晶格核对及 CLI 算法保持。
+
+## 本轮验收
+
+5 项 JS 数值检查、2 项新旧/双端点展示检查与 17 项原解析/CLI 回归通过。覆盖任意小数、负数、非正交重建、半整数/整数搜索、等距处理、诊断小数差及 CSV 标识。内嵌浏览器在独立本机夹具页面实测 4.5 应用、刷新恢复、两种搜索、CSV 生成与折叠展示；未声称真实材料的物理验证或原生 Safari 验收。
+
+本机通过宿主标准导入接口安装启用 2.2.0，沿用现有依赖环境及已安装版本支持的三种运行位置；不修改宿主、不连接服务器、不重跑分析或 VASP。仅更新交互展示时使用原冻结数据。GitHub 增量只包含本扩展、独立测试、分发包与相应索引/交接，不带入其他扩展未发布工作。
+
+## 历史算法及 CLI 说明
+
 # LCALCPOL polarization analysis v0.3.0
 
 This local-only extension migrates `archived-development-source/calc_lcalcpol.py` while preserving its POSCAR/OUTCAR parsing, constants, unit conversion, and lattice-coordinate branch algorithm. The migration initially added polarization magnitudes; v0.3.0 also corrects the comparison order to subtract first and reduce second. The original source file remains unmodified.
