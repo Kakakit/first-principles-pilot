@@ -14,7 +14,8 @@
 .app-shell strong,.app-shell b{font-weight:600}.app-shell small{font-size:var(--ui-caption)}
 .app-shell :is(button,input,select,textarea,table,summary){font-size:var(--ui-control)}
 .app-shell :is(input,select,textarea){line-height:1.5}
-.app-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea){border:1px solid var(--ui-control-border);border-radius:var(--radius);padding:8px 12px;color:var(--ui-text);background:var(--color-surface);max-width:100%}
+.app-shell :where(input:not([type=checkbox]):not([type=radio]),select,textarea){border:1px solid var(--ui-control-border);border-radius:var(--radius);padding:8px 12px;color:var(--ui-text);background:var(--color-surface);max-width:100%}
+.app-shell :is(input:not([type=checkbox]):not([type=radio]),select,textarea):where(:not(.compact-project-name)){border-color:var(--ui-control-border)}
 .app-shell input[type=checkbox],.app-shell input[type=radio]{appearance:none;width:16px;height:16px;border:1px solid var(--ui-control-border);background:var(--color-surface);border-radius:2px;display:inline-grid;place-content:center;vertical-align:middle;margin:0 8px 0 0;flex-shrink:0}
 .app-shell input[type=radio]{border-radius:50%}.app-shell input:checked{background:var(--color-accent);border-color:var(--color-accent)}
 .app-shell input[type=checkbox]:checked::after{content:'✓';font:600 12px/1 sans-serif;color:var(--color-accent-text)}.app-shell input[type=radio]:checked::after{content:'';width:8px;height:8px;border-radius:50%;background:var(--color-accent-text)}
@@ -36,5 +37,5 @@
 .app-shell .empty-state{padding:32px 24px;border:0;box-shadow:none}.app-shell .empty-state h2{margin-bottom:8px}
 .app-shell :is(.remote-progress,.workspace-save-feedback){font-size:var(--ui-caption);font-variant-numeric:tabular-nums}
 .app-shell .workspace-save-feedback{height:24px;min-height:24px;flex-shrink:0;overflow:hidden;padding:0 16px;line-height:24px}
-.ui-feedback{min-height:32px;display:flex;align-items:flex-start;gap:8px;font-size:var(--ui-control);line-height:1.6;margin:8px 0;overflow-wrap:anywhere}.ui-feedback:empty{margin-top:8px;margin-bottom:8px}.ui-feedback [role=alert]{color:var(--color-danger)}
+.ui-feedback{min-height:32px;display:flex;align-items:flex-start;gap:8px;font-size:var(--ui-control);line-height:1.6;margin:8px 0;overflow-wrap:anywhere}.app-shell .ui-feedback:empty{display:none}.ui-feedback [role=alert]{color:var(--color-danger)}
 @media(prefers-reduced-motion:reduce){.app-shell *{scroll-behavior:auto!important;transition:none!important}}

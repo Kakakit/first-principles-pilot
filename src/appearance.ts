@@ -34,12 +34,12 @@ const fonts:ThemeFonts = {
 };
 const metrics:ThemeMetrics = {fontSize:16,secondaryFontSize:14,radius:4};
 const light:ThemeColors = {
-  background:'#f3f7f5',surface:'#ffffff',surfaceRaised:'#f5f9f7',
+  background:'#f4f5f6',surface:'#ffffff',surfaceRaised:'#f5f6f7',
   sidebar:'#ffffff',sidebarText:'#254b41',sidebarMuted:'#53675d',
-  text:'#263c34',mutedText:'#52665c',border:'#dce7e1',
+  text:'#29333b',mutedText:'#58636c',border:'#dce1e5',
   accent:'#19816b',accentText:'#ffffff',accentSoft:'#f2fcf7',
   success:'#24714e',successSoft:'#eaf7ee',warning:'#8b5b16',warningSoft:'#fff4df',
-  danger:'#b5414a',dangerSoft:'#fcecef',canvas:'#f5f9f6',canvasGrid:'#d4e4da',canvasEdge:'#7a9e8e',
+  danger:'#b5414a',dangerSoft:'#fcecef',canvas:'#f5f6f7',canvasGrid:'#dce1e5',canvasEdge:'#82958e',
   codeBackground:'#eef4f0',codeText:'#304b3d',plotText:'#53685f',plotGrid:'#dce7e1',
 };
 const dark:ThemeColors = {

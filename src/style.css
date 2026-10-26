@@ -288,18 +288,9 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .parameter-workspace p{line-height:1.6}
 .parameter-workspace label{display:flex;flex-direction:column;gap:6px}
 .parameter-workspace input,.parameter-workspace select{padding:8px;border:1px solid var(--color-border);background:var(--color-surface);border-radius:var(--radius);font:inherit;min-width:0;width:100%;color:var(--color-text)}
-.parameter-heading{display:flex;gap:16px;align-items:end;flex-wrap:wrap}
-.parameter-heading>div{flex:1;min-width:220px}
-.parameter-heading>label{min-width:170px}
 .parameter-presets{display:flex;gap:20px;align-items:center;margin:18px 0;padding:14px;background:var(--color-surface-raised);border-radius:var(--radius)}
 .personal-templates{padding:14px;border:1px solid var(--color-border);border-radius:var(--radius);margin-bottom:16px}
 .personal-templates .button{margin:8px 8px 0 0}
-.parameter-search{max-width:420px;margin-bottom:16px}
-.parameter-grid{display:grid;grid-template-columns:repeat(2,minmax(240px,1fr));gap:14px}
-.parameter-card{padding:16px;background:var(--color-surface);border:1px solid var(--color-border);border-radius:var(--radius)}
-.parameter-card-title{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
-.parameter-card-title code{font-size:var(--font-secondary);color:var(--color-muted-text)}
-.parameter-origin{display:flex;gap:10px;justify-content:space-between;font-size:var(--font-secondary);color:var(--color-muted-text);align-items:center;margin:10px 0}
 .text-button{background:none;border:0;padding:4px;cursor:pointer;color:var(--color-accent);white-space:nowrap}
 .parameter-card summary{color:var(--color-muted-text);font-size:var(--font-secondary);cursor:pointer}
 .parameter-tables{margin-top:22px}
@@ -588,11 +579,9 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .configuration-parts .active{background:var(--color-accent-soft);color:var(--color-accent);border-color:var(--color-border);font-weight:600}
 .configuration-section{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;background:var(--color-surface-raised)}
 .configuration-section>.parameter-workspace,.configuration-section>.input-workspace{height:auto;overflow:visible;flex:none;padding:20px 22px}
-.parameter-heading{align-items:start;gap:16px;flex-wrap:wrap}
 .parameter-heading h2,.input-workspace h2{font-size:var(--ui-title);margin:0 0 8px}
 .parameter-workspace p,.input-workspace p{line-height:1.65}
 .parameter-workspace small,.parameter-origin,.parameter-card details{font-size:var(--font-secondary)}
-.parameter-card{border-radius:var(--radius)}
 .configuration-presets{margin:8px 0 14px}
 .configuration-presets .parameter-presets{margin:12px 0;padding:12px}
 .configuration-presets .personal-templates{margin:10px 0}
@@ -760,8 +749,6 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--color-border);bo
 .parameter-group-nav{display:flex;flex-wrap:wrap;gap:7px;margin:18px 0}
 .parameter-group-nav button{border:1px solid var(--color-border);background:var(--color-surface-raised);border-radius:var(--radius);padding:9px 13px;font-size:var(--font-size);min-height:38px}
 .parameter-group-nav button.active{color:var(--color-accent);border-color:var(--color-border);background:var(--color-accent-soft);font-weight:600}
-.parameter-grid{gap:14px}
-.parameter-card{border-radius:var(--radius);padding:16px}
 .parameter-card-title strong{font-size:var(--font-size)}
 .parameter-origin,.parameter-card details,.configuration-presets,.parameter-checks p,.parameter-tables p{font-size:var(--font-secondary);line-height:1.7}
 .parameter-card summary{font-size:var(--font-secondary);padding:6px 0}
