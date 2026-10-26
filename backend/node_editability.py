@@ -3,13 +3,37 @@ import json
 import sqlite3
 import zipfile
 from pathlib import Path
+from .file_cache import identity, ByteCache
 
 VASP_KINDS = {'relax', 'scf', 'bands', 'dos', 'vasp-wannier'}
 STAGE_SEQUENCES = {kind: index for index, kind in enumerate(
     ('structure', 'relax', 'scf', 'bands', 'dos', 'vasp-wannier', 'wannier90', 'scan'), 1)}
 
 
-def usage(root, project_id, expected_kinds=None):
+_contracts = ByteCache(8 * 1024 * 1024, max_entries=128)
+
+
+def _contract(key, wannier=False):
+    cached = _contracts.get((key, wannier))
+    if cached is not None:return cached
+    project = None
+    try:
+        if wannier:
+            value = json.loads(Path(key[0]).read_text())
+            project = value.get('project') or {'id': value.get('project_id')}
+        else:
+            with zipfile.ZipFile(key[0]) as archive:
+                project = json.loads(archive.read('project.json'))
+                value = json.loads(archive.read('manifest.json'))
+        if not isinstance(project,dict) or not isinstance(value,dict):raise ValueError('记录格式无效')
+        result = project, value, None
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as exc:
+        result = project if isinstance(project,dict) else None, None, str(exc)
+    _contracts.put((key,wannier), result, len(json.dumps(result,ensure_ascii=False).encode()))
+    return result
+
+
+def usage(root, project_id, expected_kinds=None, warnings=None):
     root = Path(root)
     blockers = {}
     def add(node_id, reason, kind=None):
@@ -24,7 +48,8 @@ def usage(root, project_id, expected_kinds=None):
         with sqlite3.connect('file:' + str(database.resolve()) + '?mode=ro', uri=True) as db:
             tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for table in ('attempts', 'chain_runs', 'scan_batches'):
-                records[table] = [json.loads(r[0]) for r in db.execute('SELECT body FROM ' + table)] if table in tables else []
+                records[table] = [json.loads(r[0]) for r in db.execute(
+                    'SELECT body FROM ' + table + " WHERE json_valid(body) AND json_extract(body, '$.project_id')=?", (project_id,))] if table in tables else []
     attempts = {r['id']: r for r in records.get('attempts', [])}
 
     def references(value, reason, kinds=None):
@@ -55,24 +80,28 @@ def usage(root, project_id, expected_kinds=None):
                          ('scan_batches', '已被扫描批次合同引用')):
         for record in records.get(table, []):
             if record.get('project_id') == project_id: references(record, label, node_kinds(record.get('project')))
-    for path in (root / 'inputs').glob('*.zip'):
+    paths = [(path, False) for path in (root / 'inputs').glob('*.zip')]
+    paths += [(path, True) for path in (root / 'wannier-bundles').glob('*.json')]
+    for path, wannier in paths:
         try:
-            with zipfile.ZipFile(path) as archive:
-                project = json.loads(archive.read('project.json'))
-                if project.get('id') != project_id: continue
-                references(json.loads(archive.read('manifest.json')), '已有冻结输入或被冻结来源引用', node_kinds(project))
-        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
-            raise ValueError('冻结输入记录无法核查，请修复记录后再切换类型') from exc
-    for path in (root / 'wannier-bundles').glob('*.json'):
-        record = json.loads(path.read_text())
-        if record.get('project_id', (record.get('project') or {}).get('id')) == project_id:
-            references(record, '已被 Wannier 冻结输入引用', node_kinds(record.get('project')))
+            project, record, error = _contract(identity(path), wannier)
+        except OSError as exc:
+            project, record, error = None, None, str(exc)
+        if error:
+            if project and project.get('id') == project_id:
+                raise ValueError('当前项目冻结输入记录无法核查：' + path.name)
+            if warnings is not None:
+                warnings.append('已跳过无法读取的历史记录：' + path.name)
+            continue
+        if project.get('id') == project_id:
+            references(record, '已被 Wannier 冻结输入引用' if wannier else '已有冻结输入或被冻结来源引用', node_kinds(project))
     return blockers
 
 
 def status(root, project):
-    blockers = usage(root, project['id'])
-    return {'project_id': project['id'], 'nodes': {
+    warnings = []
+    blockers = usage(root, project['id'], warnings=warnings)
+    return {'project_id': project['id'], 'warnings': warnings, 'nodes': {
         node['id']: {'can_switch_scan': node['data']['kind']=='scan' and not blockers.get(node['id']),
                      'can_switch': node['data']['kind'] in VASP_KINDS and not blockers.get(node['id']),
                      'reasons': blockers.get(node['id'], []) if node['data']['kind'] in VASP_KINDS

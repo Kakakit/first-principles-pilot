@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ import numpy as np
 from . import execution, remote_paths
 from .recycle import is_recycled
 from .storage import ROOT
+from . import job_cache
 
 CACHE_ROOT = ROOT / 'projection-cache'
 SAVED_ROOT = ROOT / 'plot-datasets'
@@ -119,6 +121,7 @@ def prepare(project_id: str, band_attempt_id: str | None = None, dos_attempt_id:
     key=_key(project_id,band_attempt_id,dos_attempt_id)
     directory=CACHE_ROOT/key
     with LOCK:
+        job_cache.prune(JOBS, CACHE_ROOT/'job-receipts')
         old=JOBS.get(key)
         if old and old['state'] in ('GENERATING','DOWNLOADING','PARSING'):
             return dict(old)
@@ -175,6 +178,9 @@ def _compact_build(key, project_id, band, dos, force):
         with LOCK:job.update(state='FAILED',error=str(exc)[:1500],current_file='')
     finally:
         if job.get('discarded'):shutil.rmtree(directory,ignore_errors=True)
+        with LOCK:
+            job['finished_at']=time.time()
+            job_cache.prune(JOBS, CACHE_ROOT/'job-receipts')
 
 
 def status(key: str) -> dict:
@@ -184,6 +190,8 @@ def status(key: str) -> dict:
         job = JOBS.get(key)
         if job:
             return dict(job)
+        receipt=job_cache.read(CACHE_ROOT/'job-receipts',key)
+        if receipt:return receipt
     meta = _metadata(CACHE_ROOT / key)
     if not meta:
         raise ValueError('本机缓存不存在')

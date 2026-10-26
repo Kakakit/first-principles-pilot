@@ -72,14 +72,22 @@ def tick(refresh=None, notify=False):
                     control.journal(c,r['id'],'REFRESH_ERROR',{'message':message});c.commit()
         return checked,errors
     import concurrent.futures
+    def isolated_host(pair):
+        try:
+            return refresh_host(pair)
+        except Exception as exc:
+            return 0, [{'host': pair[0], 'message': control.redact(str(exc))[:1000]}]
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,min(4,len(groups)))) as pool:
-        for count,failures in pool.map(refresh_host,groups.items()):
+        for count,failures in pool.map(isolated_host,groups.items()):
             checked+=count;errors.extend(failures)
     with closing(ex.db()) as c:
         failed=[row[0] for row in c.execute("SELECT id FROM attempts WHERE state='FAILED'")]
     for key in failed:
-        if recycle.inactive('attempts',key,ex.get(key)):continue
-        if not (ex.ROOT/'failure-snapshots'/(key+'.json')).exists():control.freeze_failure(key)
+        try:
+            if recycle.inactive('attempts',key,ex.get(key)):continue
+            if not (ex.ROOT/'failure-snapshots'/(key+'.json')).exists():control.freeze_failure(key)
+        except Exception as exc:
+            errors.append({'attempt_id':key,'message':control.redact(str(exc))[:1000]})
     from . import task_recovery
     capacity_context={}
     try:task_recovery.tick(capacity_context=capacity_context)
@@ -146,7 +154,10 @@ def run(interval=None, once=False):
                 if parent and not process_alive(int(parent)):break
                 heartbeat.update(heartbeat_epoch=time.time(),interval_seconds=interval_seconds(interval))
                 control.write_json(ex.ROOT/'worker-state.json',heartbeat)
-                result=tick(notify=os.environ.get('FPILOT_NOTIFICATIONS','1')!='0')
+                try:
+                    result=tick(notify=os.environ.get('FPILOT_NOTIFICATIONS','1')!='0')
+                except Exception as exc:
+                    result={'checked':0,'errors':[{'batch':'worker-cycle','message':control.redact(str(exc))[:1000]}]}
                 heartbeat.update(heartbeat_epoch=time.time(),last_cycle=result)
                 control.write_json(ex.ROOT/'worker-state.json',heartbeat)
                 if once:break

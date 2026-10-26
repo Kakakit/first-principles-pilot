@@ -250,6 +250,24 @@ def _input_request(record,dest):
             'output_dir':str(dest/'outputs'),'result_file':str(dest/'outputs/result.json')}
 
 
+def preview_binding(binding, manifest):
+    """Compare selected inputs, not incidental listing/connection status."""
+    sources = binding['sources']
+    mode_manifest = getattr(p, 'mode_manifest', None)
+    if mode_manifest is not None:
+        manifest = mode_manifest(manifest, sources)
+    normalized = []
+    for source in sources:
+        item = {k: source[k] for k in ('id','kind','attempt_id','alias','remote_root','poscar','sha256') if k in source}
+        item['inputs'] = {}
+        for role in manifest['inputs']:
+            fact = selected_input(role, source)
+            item['inputs'][role['role']] = None if fact is None else {
+                k: fact[k] for k in ('name','path','size_bytes','modified_at') if k in fact}
+        normalized.append(item)
+    return {**binding, 'sources': normalized}
+
+
 def start(payload):
     receipt=p.installed(payload['extension_id']);manifest=receipt['manifest']
     if not receipt['enabled']:raise ValueError('扩展已停用')
@@ -262,7 +280,7 @@ def start(payload):
     if location!='local' or payload.get('preview_id'):
         approval=json.loads((ROOT/'analysis-previews'/(payload.get('preview_id','')+'.json')).read_text()) if __import__('re').fullmatch(r'[a-f0-9]{32}',payload.get('preview_id','')) else None
         binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
-        if not approval or approval['binding']!=binding or (datetime.now(timezone.utc)-datetime.fromisoformat(approval['created_at'])).total_seconds()>600:raise ValueError('请重新预览当前来源、选项和运行环境')
+        if not approval or preview_binding(approval['binding'],manifest)!=preview_binding(binding,manifest):raise ValueError('来源、选项或运行环境已改变，请重新预览')
         runtime=copy.deepcopy(runtime)
         if location!='local' and any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
     environment=p.doctor(receipt,python=runtime['python']) if location=='local' else None

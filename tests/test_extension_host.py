@@ -157,6 +157,12 @@ class ExtensionHostTests(unittest.TestCase):
     def test_remote_preview_binding_rejects_later_changes(self):
         payload=self.remote_payload();payload['options']={'include_elements':False}
         with self.assertRaisesRegex(ValueError,'重新预览'):runs.start(payload)
+    def test_unchanged_remote_preview_survives_age_and_listing_status(self):
+        payload=self.remote_payload();path=self.root/'analysis-previews'/(payload['preview_id']+'.json')
+        approval=json.loads(path.read_text());approval['created_at']='2000-01-01T00:00:00+00:00'
+        approval['binding']['sources'][0].update(host_state='COOLDOWN',needs_refresh=True,refreshing=True)
+        p.atomic_json(path,approval)
+        self.assertEqual(runs.start(payload)['state'],'QUEUED')
     def test_ssh_preview_accepts_home_workspace_without_resource_probe(self):
         self.install();runtime=self.runtime();runtime['config']['remote_workspace_root']='$HOME/230269265lht'
         p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})

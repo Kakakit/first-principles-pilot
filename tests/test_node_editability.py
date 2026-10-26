@@ -61,7 +61,9 @@ class NodeEditabilityTests(unittest.TestCase):
         foreign=copy.deepcopy(self.p);foreign['id']='other';self.freeze({'node_id':'scf'},foreign)
         self.assertTrue(status(self.root,self.p)['nodes']['scf']['can_switch'])
         (self.root/'inputs/a.zip').write_bytes(b'incomplete')
-        with self.assertRaisesRegex(ValueError,'无法核查'):status(self.root,self.p)
+        result=status(self.root,self.p)
+        self.assertTrue(result['nodes']['scf']['can_switch'])
+        self.assertIn('a.zip',result['warnings'][0])
         w={'activeId':'p','projects':[self.p]};self.p['stagePolicy']='kind-fixed-v1'
         with self.assertRaisesRegex(ValueError,'编号'):validate_workspace(w)
 

@@ -1,6 +1,5 @@
 """Versioned local workspace snapshots and content-addressed originals."""
 import hashlib
-import copy
 import base64
 import json
 import os
@@ -11,6 +10,19 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from .structure_edit import source_bytes, input_geometry
+from .file_cache import ByteCache, read_bytes
+
+_structures = ByteCache(8 * 1024 * 1024, max_entries=64)
+
+
+def validated_structure(document):
+    key = json.dumps(document, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+    raw = _structures.get(key)
+    if raw is None:
+        raw = source_bytes(document)
+        if 'poscarText' in document:input_geometry(document)
+        _structures.put(key, raw, len(key.encode()) + len(raw))
+    return raw
 
 MAX_WORKSPACE_BYTES = 32 * 1024 * 1024
 ROOT = Path(os.environ.get('FPILOT_WORKSPACE', Path(__file__).resolve().parents[1] / 'workspace-data')).resolve()
@@ -71,9 +83,7 @@ def validate_workspace(w):
             if 'structure' in n['data']:
                 if n['data']['kind'] != 'structure':
                     raise ValueError('结构只能绑定输入结构节点。')
-                source_bytes(n['data']['structure'])
-                if 'poscarText' in n['data']['structure']:
-                    input_geometry(n['data']['structure'])
+                validated_structure(n['data']['structure'])
         if any(e['source'] not in nodes or e['target'] not in nodes for e in p['edges']):
             raise ValueError('连接引用不存在的节点。')
     if w.get('activeId') not in ids:
@@ -102,11 +112,11 @@ class WorkspaceStore:
     def connect(self):
         return sqlite3.connect(str(self.root / 'index.sqlite3'), timeout=10)
 
-    def put_file(self, directory, raw):
-        digest = hashlib.sha256(raw).hexdigest()
+    def put_file(self, directory, raw, digest=None):
+        digest = digest or hashlib.sha256(raw).hexdigest()
         path = self.root / directory / digest
         if path.exists():
-            if path.read_bytes() != raw:
+            if read_bytes(path) != raw:
                 raise ValueError('已存文件校验失败；未覆盖原记录。')
             return digest
         temp = path.with_name(digest + '.' + uuid.uuid4().hex + '.tmp')
@@ -157,11 +167,17 @@ class WorkspaceStore:
         if (self.root / 'project-sync').exists():
             from .project_sync import assert_draft_edits
             assert_draft_edits(self.root, workspace)
-        packed = copy.deepcopy(workspace)
-        for p in packed['projects']:
-            for n in p['nodes']:
-                if n['data'].get('structure'):
-                    n['data']['structure']['source'].pop('base64')
+        # Copy only the branches being changed; serialization does not mutate the rest.
+        packed = {**workspace, 'projects': []}
+        for project in workspace['projects']:
+            nodes = []
+            for node in project['nodes']:
+                structure = node['data'].get('structure')
+                if structure:
+                    source = {k:v for k,v in structure['source'].items() if k != 'base64'}
+                    node = {**node, 'data': {**node['data'], 'structure': {**structure, 'source': source}}}
+                nodes.append(node)
+            packed['projects'].append({**project, 'nodes': nodes})
         raw = json.dumps(packed, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
         with closing(self.connect()) as db:
             db.execute('BEGIN IMMEDIATE')
@@ -179,8 +195,9 @@ class WorkspaceStore:
             for p in workspace['projects']:
                 for n in p['nodes']:
                     if n['data'].get('structure'):
-                        self.put_file('originals', source_bytes(n['data']['structure']))
-            self.put_file('snapshots', raw)
+                        structure = n['data']['structure']
+                        self.put_file('originals', validated_structure(structure), structure['source']['sha256'])
+            self.put_file('snapshots', raw, digest)
             cursor = db.execute('INSERT INTO revisions(digest,created_at,reason) VALUES (?,?,?)',
                                 (digest, datetime.now(timezone.utc).isoformat(), reason))
             revision = cursor.lastrowid

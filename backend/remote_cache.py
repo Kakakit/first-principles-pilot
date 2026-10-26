@@ -20,8 +20,15 @@ def key(kind, identity):
 @contextlib.contextmanager
 def singleflight(kind, identity):
     digest=key(kind,identity)
-    with GUARD: lock=LOCKS.setdefault(digest,threading.RLock())
-    with lock: yield digest
+    with GUARD:
+        entry=LOCKS.setdefault(digest,[threading.RLock(),0])
+        entry[1]+=1  # Count waiters too; never replace a lock they are waiting on.
+    try:
+        with entry[0]: yield digest
+    finally:
+        with GUARD:
+            entry[1]-=1
+            if not entry[1]:LOCKS.pop(digest,None)
 
 
 def read(kind, identity, max_age=None):

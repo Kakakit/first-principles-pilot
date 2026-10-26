@@ -22,6 +22,7 @@ from . import compact_plots, safe_files, remote_transport, recycle
 from . import wannier_diagnostics as diagnostics
 from .recycle import is_recycled
 from .storage import ROOT
+from . import job_cache
 
 from .builtin_analysis.banddos_core.common import read_fermi_from_outcar
 from .builtin_analysis.banddos_core.plotting import plot_compare, remap_channel_to_ticks
@@ -293,6 +294,7 @@ JOB_LOCK=threading.Lock()
 def start(**options):
     key=hashlib.sha256(json.dumps({'options':options,'metrics_revision':diagnostics.metrics.REVISION},sort_keys=True).encode()).hexdigest()
     with JOB_LOCK:
+        job_cache.prune(JOBS, ROOT_COMPARE/'job-receipts')
         old=JOBS.get(key)
         if old and old['state']=='RUNNING':return dict(old)
         if old and old['state']=='READY' and (ROOT_COMPARE/old['result']['id']/'record.json').is_file():
@@ -309,13 +311,20 @@ def start(**options):
             with JOB_LOCK:job.update(state='READY',result=result,seconds=time.time()-job['started_at'])
         except Exception as exc:
             with JOB_LOCK:job.update(state='FAILED',error=str(exc)[:1000])
+        finally:
+            with JOB_LOCK:
+                job['finished_at']=time.time()
+                job_cache.prune(JOBS, ROOT_COMPARE/'job-receipts')
     from .analysis_queue import executor
     executor.submit(work);return dict(job)
 
 
 def status(key):
     with JOB_LOCK:
-        if key not in JOBS:raise ValueError('本机绘图任务不存在，请重新生成')
+        if key not in JOBS:
+            receipt=job_cache.read(ROOT_COMPARE/'job-receipts',key)
+            if receipt:return receipt
+            raise ValueError('本机绘图任务不存在，请重新生成')
         return dict(JOBS[key])
 
 
@@ -328,6 +337,7 @@ def start_diagnostic(project_id, identifier):
     recycle.assert_available('comparisons', identifier, record)
     key = 'diagnostic-' + identifier
     with JOB_LOCK:
+        job_cache.prune(JOBS, ROOT_COMPARE/'job-receipts')
         if key in JOBS and JOBS[key]['state']=='RUNNING':return dict(JOBS[key])
         job={'id':key,'state':'RUNNING','step':'PyW90 补充诊断','started_at':time.time()};JOBS[key]=job
     def work():
@@ -338,6 +348,10 @@ def start_diagnostic(project_id, identifier):
             with JOB_LOCK:job.update(state='READY',result=result,seconds=time.time()-job['started_at'])
         except Exception as exc:
             with JOB_LOCK:job.update(state='FAILED',error=str(exc)[:1000])
+        finally:
+            with JOB_LOCK:
+                job['finished_at']=time.time()
+                job_cache.prune(JOBS, ROOT_COMPARE/'job-receipts')
     from .analysis_queue import executor
     executor.submit(work);return dict(job)
 

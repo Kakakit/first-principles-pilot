@@ -2,7 +2,8 @@ import HistoryList from './HistoryList';
 import {useVisibleRefresh} from './useVisibleRefresh';
 import {DeleteRecord,RecycleBin} from './RecordCleanup';
 import {lazy,Suspense,useEffect,useRef,useState} from 'react';
-import {readJson,errorMessage} from './apiClient';
+import {readJson,errorMessage,requestJson} from './apiClient';
+import {pollSerial} from './pollSerial';
 import RemoteProgress from './RemoteProgress';
 import ExtensionResult from './ExtensionResult';
 import ExtensionSourcePicker from './ExtensionSourcePicker';
@@ -19,6 +20,7 @@ export default function ExtensionPanel({source,projectId,title='运行后处理'
  const [historySearch,setHistorySearch]=useState(''),[historyState,setHistoryState]=useState('all'),[uncertain,setUncertain]=useState<{id?:string}|null>(null);
  const [environmentData,setEnvironmentData]=useState<EnvironmentData>({local:{python:'',inherited:true},runtimes:{},overrides:{}}),[environmentDoctor,setEnvironmentDoctor]=useState<EnvironmentDoctor|null>(null),[environmentRevision,setEnvironmentRevision]=useState(0);
  const creating=useRef(false);
+ const historySequence=useRef(0);
  const locationPreference=useRef('local');
  const identity=source.kind==='attempt'?source.attempt_id:source.poscar;
  const currentSource=useRef('');currentSource.current=JSON.stringify([identity,projectId]);
@@ -29,7 +31,15 @@ export default function ExtensionPanel({source,projectId,title='运行后处理'
  const payload={extension_id:selected,project_id:projectId,sources,options,location,alias,...(chosenRuntime?.python?{runtime_python:chosenRuntime.python}:{})};
  currentRequest.current=JSON.stringify(payload);
  useEffect(()=>{setCheck(null);setPreview(null);},[JSON.stringify(extra),JSON.stringify(roleFiles),alias]);
- const history=async()=>{const signature=JSON.stringify([identity,projectId]);const data=await api('/analyses'+(projectId?`?project_id=${encodeURIComponent(projectId)}`:source.kind==='attempt'?`?attempt_id=${source.attempt_id}`:'?project_id=geometry'));if(signature===currentSource.current)setRecords(data.analyses.filter((r:Analysis)=>source.kind==='attempt'?r.sources.some(s=>s.attempt_id===source.attempt_id):r.sources.some((s:any)=>s.sha256===resolved[0]?.sha256||s.poscar===source.poscar)));};
+ const history=():Promise<void>=>{
+  const signature=JSON.stringify([identity,projectId]);
+  const sequence=++historySequence.current;
+  return requestJson('/api/extension-host/analyses'+(projectId?`?project_id=${encodeURIComponent(projectId)}`:source.kind==='attempt'?`?attempt_id=${source.attempt_id}`:'?project_id=geometry'),undefined,undefined,{timeoutMs:15000})
+   .then(data=>{if(sequence===historySequence.current&&signature===currentSource.current)setRecords(data.analyses.filter((r:Analysis)=>source.kind==='attempt'?r.sources.some(s=>s.attempt_id===source.attempt_id):r.sources.some((s:any)=>s.sha256===resolved[0]?.sha256||s.poscar===source.poscar)));})
+   .catch(error=>{if(sequence===historySequence.current&&signature===currentSource.current)throw error;});
+ };
+ const historyCallback=useRef(history);historyCallback.current=history;
+ useEffect(()=>()=>{historySequence.current++;},[identity,projectId]);
  useEffect(()=>{setExtra([]);setAttempts([]);setRoleFiles({});setRecords([]);setSelected('');setCheck(null);setPreview(null);},[identity,projectId]);
  useEffect(()=>{let live=true;void api('/runtimes').then(data=>{if(live){setRuntimes(data.runtimes);setEnvironmentData(data);setAlias('');}}).catch(e=>{if(live)setError(errorMessage(e));});return()=>{live=false;};},[identity,projectId]);
  useEffect(()=>{let live=true;if(source.kind==='attempt'&&projectId)void api(`/sources?project_id=${encodeURIComponent(projectId)}`).then(data=>{if(live)setAttempts(data.attempts);}).catch(e=>{if(live)setError(errorMessage(e));});return()=>{live=false;};},[identity,projectId]);
@@ -51,7 +61,8 @@ export default function ExtensionPanel({source,projectId,title='运行后处理'
   }catch(e){if(before===currentRequest.current)setError(errorMessage(e));}
  };
  const {element:metadataElement,visible:panelVisible}=useVisibleRefresh(source.kind==='attempt',selectionKey+'|'+location+'|'+alias,refreshMetadata);
- useEffect(()=>{if(!panelVisible||!records.some(r=>runningAnalysis(r.state)||r.presentation?.status==='GENERATING'))return;const timer=setInterval(()=>void history().catch(e=>setError(errorMessage(e))),2000);return()=>clearInterval(timer);},[records,panelVisible]);
+ const historyRunning=records.some(r=>runningAnalysis(r.state)||r.presentation?.status==='GENERATING');
+ useEffect(()=>{if(!panelVisible||!historyRunning)return;return pollSerial(()=>historyCallback.current(),e=>setError(errorMessage(e)));},[historyRunning,panelVisible,identity,projectId]);
  useEffect(()=>{
   if(!panelVisible||!extensions.some(item=>item.environment_checking))return;
   const before=currentRequest.current;
@@ -70,6 +81,7 @@ export default function ExtensionPanel({source,projectId,title='运行后处理'
     if(typeof receipt.analysis_id!=='string'||!receipt.analysis_id)throw new Error('无法读取分析创建回执；先核对分析历史。');
     receiptId=receipt.analysis_id;const record=await api('/analyses/'+receiptId);
     if(signature!==currentRequest.current)return;
+    historySequence.current++;
     setRecords(old=>[record,...old.filter(r=>r.id!==record.id)]);setPreview(null);
    }
   }catch(e){if(signature===currentRequest.current){setError(errorMessage(e));if(action==='run'&&(receiptId||e instanceof TypeError||/无法连接|空响应|无法读取|HTTP (5\d\d|408)/.test(errorMessage(e))))setUncertain({id:receiptId||undefined});}}
