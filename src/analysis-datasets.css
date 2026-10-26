@@ -4,10 +4,11 @@
 .analysis-dataset-layout>aside,.analysis-dataset-detail{min-width:0;overflow-wrap:anywhere}
 .analysis-dataset-layout>aside{max-height:75vh;overflow:auto;padding:2px 8px 10px 2px}
 .analysis-dataset-entry{position:relative;margin:8px 0;padding-right:28px}
-.analysis-dataset-entry>button{display:flex;flex-direction:column;gap:7px;width:100%;text-align:left;white-space:normal;padding:12px;border:1px solid var(--color-border,#dce3ec);border-radius:8px;background:var(--color-surface,#fff);color:inherit;cursor:pointer}
+.analysis-dataset-entry>button:not(.record-remove){display:flex;flex-direction:column;gap:7px;width:100%;text-align:left;white-space:normal;padding:12px;border:1px solid var(--color-border,#dce3ec);border-radius:8px;background:var(--color-surface,#fff);color:inherit;cursor:pointer}
 .analysis-dataset-entry>button.active{border-color:var(--color-accent,#4577da);box-shadow:inset 3px 0 var(--color-accent,#4577da)}
 .analysis-dataset-entry small{line-height:1.5;opacity:.8}
 .analysis-dataset-entry .record-remove{right:0;top:6px}
+.analysis-dataset-entry:hover>.record-remove,.analysis-dataset-entry:focus-within>.record-remove{opacity:.65}
 .analysis-dataset-detail{max-height:78vh;overflow:auto;padding:4px 12px 16px 4px}
 .analysis-dataset-placeholder{padding:30px 10px;opacity:.8}
 .analysis-register{margin:12px 0}

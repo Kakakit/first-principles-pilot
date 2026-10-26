@@ -4,6 +4,8 @@ export type AnalysisRecord={id?:string;dataset_id?:string|null;dataset_recycled?
 export type AnalysisFile={path:string;media_type:string;available:boolean;reason?:string;sha256?:string;size_bytes?:number};
 export type AnalysisDetail=AnalysisRecord&{analysis:Analysis|Record<string,any>;files:AnalysisFile[];comparison_context?:Record<string,unknown>};
 export const analysisKey=(row:AnalysisRecord)=>`${row.source_kind}:${row.source_id}`;
+const historyRecycleKinds:Record<AnalysisKind,string>={v2:'analyses',v1:'local-analyses',local:'local-analyses',plot:'plots',comparison:'comparisons'};
+export const analysisRecycleKind=(kind:AnalysisKind)=>historyRecycleKinds[kind];
 export const openDataset=(id:string)=>window.dispatchEvent(new CustomEvent('fpilot:dataset',{detail:{id}}));
 export function filterAnalyses(rows:AnalysisRecord[],projectId:string,type:string,query:string){
  const needle=query.trim().toLocaleLowerCase();
