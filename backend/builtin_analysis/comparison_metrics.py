@@ -7,7 +7,8 @@ import csv
 from pathlib import Path
 import numpy as np
 
-REVISION='fpilot.band-metrics.v1'
+REVISION='fpilot.band-metrics.v2'
+MATCHING_REVISION='first-point-lower-edge.v2'
 
 
 def align_segments(dft_x,dft,dft_segments,wannier_x,wannier,wannier_segments):
@@ -24,11 +25,18 @@ def align_segments(dft_x,dft,dft_segments,wannier_x,wannier,wannier_segments):
 
 
 def first_point_offset(dft,wannier):
-    count=min(dft.shape[1],wannier.shape[1])
-    if count<1:raise ValueError('没有可配对能带')
-    # The first comparison suggests one continuous DFT block; future comparisons
-    # use the saved offset instead of optimizing it again against their residuals.
-    return min(range(dft.shape[1]-count+1),key=lambda off:(float(np.abs(dft[0,off:off+count]-wannier[0,:count]).sum()),off))
+    dft,wannier=np.asarray(dft,dtype=float),np.asarray(wannier,dtype=float)
+    if (dft.ndim!=2 or wannier.ndim!=2 or not dft.size or not wannier.size or
+            not np.isfinite(dft).all() or not np.isfinite(wannier).all()):
+        raise ValueError('没有有限的可配对能带')
+    # Anchor the model's lowest band before counting coverage. Requiring a full
+    # block here shifts every pair when the DFT reference lacks upper bands.
+    distance=np.abs(dft[0]-wannier[0,0])
+    candidates=np.flatnonzero(np.isclose(distance,distance.min(),rtol=0,atol=1e-8))
+    def rank(offset):
+        count=min(dft.shape[1]-offset,wannier.shape[1])
+        return (float(np.abs(dft[0,offset:offset+count]-wannier[0,:count]).mean()),-count,int(offset))
+    return int(min(candidates,key=rank))
 
 
 def stats(residual):
@@ -64,11 +72,13 @@ def reference_metrics(dft,wannier,fermi,window,offset,group_size=6,allow_partial
     for start in range(0,expected,group_size):
         end=min(start+group_size,expected)
         groups.append({'wannier_first':start+1,'wannier_last':end,'dft_first':offset+start+1,'dft_last':offset+end,
+                       'matched_bands':max(0,min(end,matched)-start),'expected_bands':end-start,
                        **stats(np.concatenate(parts[start:end]))})
     complete=matched==expected
     overall=measured if complete else stats([])
     return {'revision':REVISION,'status':'PARTIAL' if not complete else 'MEASURED' if measured['paired_values'] else 'EMPTY',
             'offset':offset,'dft_band_first':offset+1,'dft_band_last':offset+expected,
+            'covered_dft_band_last':offset+matched if matched else None,
             'matched_bands':matched,'expected_bands':expected,'reference_values':measured['paired_values'],
             'sample_selector':'dft_reference_energy','interpolation':'segment-local linear',
             'metric_window_relative_eV':list(window),'group_size':group_size,**overall,

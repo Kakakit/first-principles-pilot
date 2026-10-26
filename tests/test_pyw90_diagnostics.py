@@ -115,6 +115,80 @@ class ComparisonMetricTests(unittest.TestCase):
         self.assertEqual(report['status'],'PARTIAL');self.assertEqual(report['matched_bands'],49)
         self.assertIsNone(report['rmse_meV']);self.assertEqual(report['partial_metrics']['rmse_meV'],0)
 
+    def test_automatic_match_does_not_shift_the_model_to_fill_missing_upper_bands(self):
+        dft=self.channel(np.tile(np.arange(70),(12,1)))
+        model=self.channel(np.tile(np.arange(20,74),(12,1))+.001)
+        report=diag.evaluate(self.root,{'project_id':'p'},dft,model,[0,100])
+        self.assertEqual(report['dft_band_first'],21)
+        self.assertEqual(report['dft_band_last'],74)
+        self.assertEqual(report['covered_dft_band_last'],70)
+        self.assertEqual(report['status'],'PARTIAL')
+        self.assertEqual(report['matched_bands'],50)
+        self.assertIsNone(report['mae_meV'])
+        self.assertAlmostEqual(report['partial_metrics']['mae_meV'],1)
+        self.assertEqual(report['groups'][-1]['matched_bands'],2)
+        self.assertEqual(report['groups'][-1]['expected_bands'],6)
+
+    def test_lower_edge_match_handles_short_references_and_degenerate_starts(self):
+        metrics=diag.metrics
+        dft=np.tile(np.arange(12),(3,1));model=np.tile(np.arange(5,15),(3,1))
+        self.assertEqual(metrics.first_point_offset(dft,model),5)
+        dft=np.tile([-10,0,0,1,2,3],(3,1))
+        self.assertEqual(metrics.first_point_offset(dft,np.tile([0,1,2],(3,1))),2)
+        self.assertEqual(metrics.first_point_offset(dft,np.tile([0,0,1],(3,1))),1)
+        # A single matching upper value must not beat the lower model edge.
+        self.assertEqual(metrics.first_point_offset(np.tile([0,10,20],(3,1)),np.tile([.01,100,200],(3,1))),0)
+
+    def test_new_comparison_replaces_legacy_auto_reference_without_rewriting_its_snapshot(self):
+        dft=self.channel(np.tile(np.arange(70),(12,1)))
+        model=self.channel(np.tile(np.arange(20,74),(12,1)))
+        identity={'project_id':'p','seed':'wannier90.1'}
+        original=diag.evaluate(self.root,identity,dft,model,[0,100])
+        current=next((self.root/'references').glob('*/current.json'))
+        old={**original['reference'],'id':'legacy','offset':16,'dft_band_first':17,'dft_band_last':70,
+             'selection':'first_common_kpoint_continuous_band_match'}
+        old.pop('matching_revision')
+        raw=json.dumps(old);current.write_text(raw);snapshot=current.with_name('legacy.json');snapshot.write_text(raw)
+        corrected=diag.evaluate(self.root,identity,dft,model,[0,100])
+        self.assertEqual(corrected['offset'],20)
+        self.assertNotEqual(corrected['reference']['id'],'legacy')
+        self.assertEqual(snapshot.read_text(),raw)
+        # An explicit historical choice remains explicit, even when it is poor.
+        old['selection']='user_selected';current.write_text(json.dumps(old))
+        self.assertEqual(diag.evaluate(self.root,identity,dft,model,[0,100])['offset'],16)
+
+    def test_partial_reference_never_runs_native_scoring_or_displays_a_complete_score(self):
+        report=diag.metrics.reference_metrics(np.tile(np.arange(70),(12,1)),
+            np.tile(np.arange(20,74),(12,1))+.001,0,[0,100],20,allow_partial=True)
+        record={'diagnostics':report,'pyw90_diagnostic':{'status':'COMPLETED','quality_value':777.113}}
+        with patch.object(diag.subprocess,'run',side_effect=AssertionError('no process')), \
+             patch('backend.pyw90_remote.runtime',side_effect=AssertionError('no runtime lookup')):
+            result=diag.native(self.root,record,'fixture',False)
+        self.assertEqual(result['status'],'NOT_APPLICABLE')
+        self.assertIn('50/54',result['reason'])
+        lines=diag.summary_lines(record)
+        self.assertIn('Coverage 50/54 bands',lines)
+        self.assertIn('Partial metrics only',lines)
+        self.assertIn('MAE   1.000 meV',lines)
+        self.assertIn('not scored (partial reference)',lines)
+        self.assertFalse(any('777.113' in line for line in lines))
+
+    def test_native_scorer_rejects_missing_or_incomplete_explicit_reference(self):
+        request={'dft_x':list(range(12)),'wannier_x':list(range(12)),
+                 'dft_energy':np.tile(np.arange(70),(12,1)).tolist(),
+                 'wannier_energy':np.tile(np.arange(20,74),(12,1)).tolist(),
+                 'metric_window_relative_eV':[0,100],'fermi_eV':0}
+        self.assertEqual(pyw90_score.score(request)['status'],'UNAVAILABLE')
+        self.assertEqual(pyw90_score.score({**request,'dft_band_first':21})['status'],'NOT_APPLICABLE')
+
+    def test_legacy_automatic_reference_cannot_generate_another_misleading_native_score(self):
+        report={'status':'MEASURED','revision':'fpilot.band-metrics.v1','matched_bands':54,'expected_bands':54,
+                'reference':{'selection':'first_common_kpoint_continuous_band_match'}}
+        with patch.object(diag.subprocess,'run',side_effect=AssertionError('no process')):
+            result=diag.native(self.root,{'diagnostics':report},'fixture',False)
+        self.assertEqual(result['status'],'NOT_APPLICABLE')
+        self.assertIn('重新生成叠图',result['reason'])
+
     def test_disconnected_segments_are_interpolated_independently(self):
         dft=np.array([[0],[1],[100],[101]],float);model=dft.copy()
         aligned,_=diag.metrics.align_segments(np.array([0,1,1,2]),dft,[(0,1),(2,3)],np.array([0,2,2,3]),model,[(0,1),(2,3)])
@@ -136,10 +210,17 @@ class ComparisonMetricTests(unittest.TestCase):
         x=np.linspace(0,1,21);dft=np.tile(np.arange(6),(21,1))+x[:,None]*.01
         model=dft[:,1:3]+.001
         result=pyw90_score.score({'dft_x':x.tolist(),'wannier_x':x.tolist(),'dft_energy':dft.tolist(),'wannier_energy':model.tolist(),
-                                  'metric_window_relative_eV':[-1,6],'fermi_eV':0})
+                                  'metric_window_relative_eV':[-1,6],'fermi_eV':0,'dft_band_first':2})
         self.assertEqual(result['status'],'COMPLETED',result)
         self.assertAlmostEqual(result['quality_value'],1,places=8)
         self.assertEqual(result['dft_band_first'],2)
+        self.assertEqual(result['band_matching'],'caller_fixed_reference')
+        # The library must respect a caller's reference instead of silently
+        # selecting another block that makes the residual smaller.
+        other=pyw90_score.score({'dft_x':x.tolist(),'wannier_x':x.tolist(),'dft_energy':dft.tolist(),
+            'wannier_energy':model.tolist(),'metric_window_relative_eV':[-1,6],'fermi_eV':0,'dft_band_first':3})
+        self.assertEqual(other['dft_band_first'],3)
+        self.assertAlmostEqual(other['quality_value'],999,places=8)
         self.assertEqual(pyw90_score.score({'spinors':True})['status'],'NOT_APPLICABLE')
 
     def test_native_failure_keeps_the_existing_plot_and_primary_metrics(self):

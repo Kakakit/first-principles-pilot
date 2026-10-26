@@ -40,7 +40,8 @@ class SupplementaryDiagnosticTests(unittest.TestCase):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);(root/'score-input.json').write_text('{}')
-            record={'diagnostics':{'metric_window_relative_eV':[-2,3]},'fermi_eV':5}
+            record={'diagnostics':{'metric_window_relative_eV':[-2,3],'revision':diagnostics.metrics.REVISION,
+                                  'status':'MEASURED','dft_band_first':21,'matched_bands':54,'expected_bands':54},'fermi_eV':5}
             missing=SimpleNamespace(returncode=0,stdout='FPILOT_PYW90_SCORE={"status":"UNAVAILABLE"}',stderr='')
             receipt={'exit_code':0,'stdout':'FPILOT_PYW90_SCORE={"status":"COMPLETED","quality_value":2.0}','stderr':''}
             with patch.object(remote_cache,'ROOT',root),patch.object(remote_health,'ROOT',root),patch.object(remote_health,'status',return_value=[]),patch.object(pyw90_remote,'available',return_value=True),patch.object(pyw90_remote,'runtime',return_value={'python':'/configured/python','package':'/configured/pyw90'}),patch.object(diagnostics.subprocess,'run',return_value=missing),patch.object(remote_transport,'run',return_value=receipt) as wire:
@@ -53,3 +54,4 @@ class SupplementaryDiagnosticTests(unittest.TestCase):
                     self.assertNotIn(forbidden,command)
                 self.assertEqual(wire.call_args.kwargs['lane'],'analysis')
                 self.assertEqual(json.loads(wire.call_args.kwargs['data'])['fermi_eV'],5)
+                self.assertEqual(json.loads(wire.call_args.kwargs['data'])['dft_band_first'],21)

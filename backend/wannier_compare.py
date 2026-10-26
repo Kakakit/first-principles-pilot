@@ -291,7 +291,7 @@ def _wannier_data(record,seed,force=False):
 JOBS={}
 JOB_LOCK=threading.Lock()
 def start(**options):
-    key=hashlib.sha256(json.dumps(options,sort_keys=True).encode()).hexdigest()
+    key=hashlib.sha256(json.dumps({'options':options,'metrics_revision':diagnostics.metrics.REVISION},sort_keys=True).encode()).hexdigest()
     with JOB_LOCK:
         old=JOBS.get(key)
         if old and old['state']=='RUNNING':return dict(old)

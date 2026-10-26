@@ -31,11 +31,17 @@ def evaluate(root,identity,dft,wannier,window,group_size=6,dft_band_start=None):
     with FileLock(str(folder/'reference.lock'),timeout=5):
         path=folder/'current.json';reference=json.loads(path.read_text()) if path.is_file() else None
         if dft_band_start is not None and (type(dft_band_start) is not int or dft_band_start<1):raise ValueError('DFT 起始带号须为正整数')
-        offset=dft_band_start-1 if dft_band_start is not None else reference['offset'] if reference else metrics.first_point_offset(aligned,model)
-        if reference is None or reference['offset']!=offset:
+        automatic=reference is None or reference.get('selection')!='user_selected'
+        obsolete=automatic and (reference or {}).get('matching_revision')!=metrics.MATCHING_REVISION
+        offset=(dft_band_start-1 if dft_band_start is not None else
+                reference['offset'] if reference and not obsolete else metrics.first_point_offset(aligned,model))
+        if (reference is None or reference['offset']!=offset or
+                dft_band_start is None and obsolete or
+                dft_band_start is not None and reference.get('selection')!='user_selected'):
             reference={'id':uuid.uuid4().hex,'identity':signature,'offset':offset,'dft_band_first':offset+1,
                        'dft_band_last':offset+model.shape[1],
-                       'selection':'user_selected' if dft_band_start is not None else 'first_common_kpoint_continuous_band_match'}
+                       'selection':'user_selected' if dft_band_start is not None else 'first_common_kpoint_lower_edge_match',
+                       'matching_revision':metrics.MATCHING_REVISION}
             atomic(folder/(reference['id']+'.json'),reference);atomic(path,reference)
     report=metrics.reference_metrics(aligned,model,0,window,int(reference['offset']),group_size,allow_partial=True)
     return {**report,'reference':reference,'sample_grid':'dft_reference'}
@@ -52,18 +58,26 @@ def save_tables(directory,report):
 
 def summary_lines(record):
     report=record.get('diagnostics') or {};native=record.get('pyw90_diagnostic') or {}
+    partial=report.get('status')=='PARTIAL'
+    measured=(report.get('partial_metrics') or {}) if partial else report
     number=lambda value:'unavailable' if value is None else f'{value:.3f}'
     lines=['Fixed DFT reference',f"Bands {report.get('dft_band_first','?')} - {report.get('dft_band_last','?')}",
            f"Coverage {report.get('matched_bands',0)}/{report.get('expected_bands',0)} bands",
-           'Metric '+str(report.get('metric_window_relative_eV',[]))+' eV',
-           'MAE   '+number(report.get('mae_meV'))+' meV','RMSE '+number(report.get('rmse_meV'))+' meV',
-           'Max    '+number(report.get('max_abs_diff_meV'))+' meV']
+           'Metric '+str(report.get('metric_window_relative_eV',[]))+' eV']
+    if partial:
+        lines[1]=f"Target bands {report.get('dft_band_first','?')} - {report.get('dft_band_last','?')}"
+        lines+=[f"Covered DFT {report.get('dft_band_first','?')} - {report['dft_band_first']+report['matched_bands']-1}" if report.get('matched_bands') else 'No reference bands',
+                'Partial metrics only']
+    lines+=['MAE   '+number(measured.get('mae_meV'))+' meV','RMSE '+number(measured.get('rmse_meV'))+' meV',
+            'Max    '+number(measured.get('max_abs_diff_meV'))+' meV']
     groups=[g for g in report.get('groups',[]) if g.get('rmse_meV') is not None]
     if groups:
         worst=max(groups,key=lambda g:g['rmse_meV'])
-        lines+=['Worst W '+str(worst['wannier_first'])+'-'+str(worst['wannier_last']),
+        last=min(worst['wannier_last'],report.get('matched_bands',worst['wannier_last']))
+        lines+=['Worst W '+str(worst['wannier_first'])+'-'+str(last),
                 '  RMSE '+number(worst['rmse_meV'])+' meV']
-    lines+=['','PyW90 AbAk',number(native.get('quality_value'))+' meV' if native.get('status')=='COMPLETED' else native.get('status','PENDING')]
+    lines+=['','PyW90 AbAk',('not scored (partial reference)' if partial else
+            number(native.get('quality_value'))+' meV' if native.get('status')=='COMPLETED' else native.get('status','PENDING'))]
     windows=record.get('plot_relative_windows') or {}
     for prefix,tags in [('Outer',('dis_win_min','dis_win_max')),('Frozen',('dis_froz_min','dis_froz_max'))]:
         if all(tag in windows for tag in tags):lines.append(prefix+f" [{windows[tags[0]]:.3f}, {windows[tags[1]]:.3f}] eV")
@@ -72,15 +86,24 @@ def summary_lines(record):
 
 
 def native(directory,record,alias,spinors):
+    report=record['diagnostics']
+    if report.get('status')=='PARTIAL' or report.get('matched_bands',0)<report.get('expected_bands',0):
+        return {'status':'NOT_APPLICABLE','reason':f"DFT 参考仅覆盖 {report['matched_bands']}/{report['expected_bands']} 条；不计算完整 PyW90 评分，请查看已覆盖带段统计"}
+    if report.get('status')=='EMPTY':
+        return {'status':'NOT_APPLICABLE','reason':'评价范围内没有参考样本'}
+    if report.get('revision')!=metrics.REVISION and (report.get('reference') or {}).get('selection')!='user_selected':
+        return {'status':'NOT_APPLICABLE','reason':'旧版自动匹配尚未核对起始带号；请重新生成叠图，原记录保留'}
     from . import extension_environments,remote_health,pyw90_remote,remote_transport
     from .analysis_queue import subprocess_environment,environment,slot
     request=json.loads((directory/'score-input.json').read_text())
-    request.update(metric_window_relative_eV=record['diagnostics']['metric_window_relative_eV'],fermi_eV=record['fermi_eV'],spinors=spinors)
+    request.update(metric_window_relative_eV=report['metric_window_relative_eV'],fermi_eV=record['fermi_eV'],
+                   spinors=spinors,dft_band_first=report['dft_band_first'])
     source=Path(__file__).with_name('pyw90_score.py').read_text()
     python=extension_environments.local_default()['python']
     configured=pyw90_remote.runtime(alias) if pyw90_remote.available(alias) else None
     identity={'revision':hashlib.sha256(source.encode()).hexdigest(),'source':hashlib.sha256((directory/'score-input.json').read_bytes()).hexdigest(),
               'window':request['metric_window_relative_eV'],'spinors':spinors,'session':NATIVE_SESSION,
+              'dft_band_first':request['dft_band_first'],
               'local_python':python,'remote_runtime':configured}
     from . import remote_cache
     with remote_cache.singleflight('pyw90-score',identity):
