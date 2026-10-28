@@ -1,0 +1,7 @@
+Synthetic fixture, not a research calculation
+ ISPIN = 2
+ NSW = 0
+ LSORBIT = F
+ LNONCOLLINEAR = F
+ aborting loop because EDIFF is reached
+ General timing and accounting informations for this job:

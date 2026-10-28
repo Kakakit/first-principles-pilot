@@ -1,0 +1,264 @@
+{
+  "schema": "fpilot.extension.v2",
+  "id": "local-crystal-field-analysis",
+  "name": "轨道占据、能级与劈裂分析",
+  "version": "2.2.0",
+  "description": "VASP 完成即可分析无 SOC 占据矩阵或 PDOS；Wannier hr 可按逐项多面体配置分析局域能级。",
+  "entrypoint": "scripts/cli.py",
+  "contexts": [
+    "attempt"
+  ],
+  "stages": [
+    "dos",
+    "scf",
+    "wannier90"
+  ],
+  "sources": {
+    "min": 1,
+    "max": 64
+  },
+  "inputs": [
+    {
+      "role": "hamiltonian",
+      "title": "同模型 hr.dat",
+      "names": [
+        "wannier90_hr.dat",
+        "wannier90.1_hr.dat",
+        "wannier90.2_hr.dat"
+      ],
+      "max_bytes": 1099511627776
+    },
+    {
+      "role": "wannier-input",
+      "title": "同前缀 .win",
+      "names": [
+        "wannier90.win",
+        "wannier90.1.win",
+        "wannier90.2.win"
+      ],
+      "max_bytes": 10485760
+    },
+    {
+      "role": "wannier-output",
+      "title": "同前缀 .wout",
+      "names": [
+        "wannier90.wout",
+        "wannier90.1.wout",
+        "wannier90.2.wout"
+      ],
+      "max_bytes": 104857600
+    },
+    {
+      "role": "centres",
+      "title": "WF 中心（推荐）",
+      "names": [
+        "wannier90_centres.xyz",
+        "wannier90.1_centres.xyz",
+        "wannier90.2_centres.xyz"
+      ],
+      "max_bytes": 10485760,
+      "required": false
+    },
+    {
+      "role": "doscar",
+      "title": "轨道 DOSCAR",
+      "names": [
+        "DOSCAR"
+      ],
+      "max_bytes": 1099511627776,
+      "required": false
+    },
+    {
+      "role": "structure",
+      "title": "DOS 对应结构",
+      "names": [
+        "POSCAR",
+        "CONTCAR"
+      ],
+      "max_bytes": 10485760
+    },
+    {
+      "role": "outcar",
+      "title": "VASP 设置、结束证据与占据矩阵 OUTCAR",
+      "names": [
+        "OUTCAR"
+      ],
+      "max_bytes": 1099511627776
+    }
+  ],
+  "evidence": [
+    "COMPLETED"
+  ],
+  "execution": {
+    "locations": [
+      "local",
+      "ssh"
+    ],
+    "preferred_location": "ssh",
+    "timeout_seconds": 600
+  },
+  "dependencies": [
+    "numpy",
+    "pymatgen"
+  ],
+  "options_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "elements": {
+        "type": "string",
+        "title": "分析元素（逗号分隔，留空为所有 s/p/d）",
+        "default": ""
+      },
+      "ligands": {
+        "type": "string",
+        "title": "配体元素（例 S，O 或 Cl；不自动猜测）",
+        "default": ""
+      },
+      "coordination": {
+        "type": "string",
+        "title": "局域 d 配位（例 Cr:6,Fe:4；留空不做配位架）",
+        "default": ""
+      },
+      "basis_confirmed": {
+        "type": "boolean",
+        "title": "已独立核验最终 WF 轨道身份/相位及投影基底（仍是用户声明）",
+        "default": false
+      },
+      "centre_tolerance_ang": {
+        "type": "number",
+        "title": "WF 中心距离诊断阈值 / Å",
+        "default": 0.5,
+        "exclusiveMinimum": 0
+      },
+      "polyhedron_types": {
+        "type": "array",
+        "title": "多面体类型（每个输入框一种）",
+        "description": "点击添加，一框填写 CrO6，另一框填写 FeO4。程序按中心元素选择原子，并寻找对应配体；只支持单一配体的四配位、六配位。",
+        "maxItems": 16,
+        "default": [],
+        "items": {
+          "type": "string",
+          "title": "多面体",
+          "default": ""
+        }
+      },
+      "vasp_quantity": {
+        "type": "string",
+        "title": "VASP 分析内容",
+        "default": "auto",
+        "description": "占据矩阵的本征值是占据数，不是能级。首版占据支持 ISPIN=2、无SOC；没有矩阵时自动模式可使用已有DOSCAR。",
+        "oneOf": [
+          {
+            "const": "auto",
+            "title": "自动选择（SCF优先占据，DOS优先谱）"
+          },
+          {
+            "const": "occupation",
+            "title": "占据矩阵（需 LDAUPRINT）"
+          },
+          {
+            "const": "pdos",
+            "title": "PDOS 谱重心"
+          }
+        ]
+      },
+      "search_radius_angstrom": {
+        "type": "number",
+        "title": "配位搜索最大键长 / Å",
+        "exclusiveMinimum": 0,
+        "maximum": 20,
+        "default": 3,
+        "description": "只接受此距离内的配体构成四/六配位。下一近邻仍用于壳层间隔诊断；不足时明确报错，不静默选择远处原子。"
+      }
+    },
+    "required": [
+      "basis_confirmed",
+      "centre_tolerance_ang"
+    ]
+  },
+  "ui_schema": {
+    "ui:groups": [
+      {
+        "title": "分析对象",
+        "fields": [
+          "polyhedron_types"
+        ]
+      },
+      {
+        "title": "高级设置（普通使用无需填写）",
+        "fields": [
+          "vasp_quantity",
+          "search_radius_angstrom",
+          "elements",
+          "ligands",
+          "coordination",
+          "basis_confirmed",
+          "centre_tolerance_ang"
+        ],
+        "collapsed": true
+      }
+    ],
+    "polyhedron_types": {
+      "items": {
+        "ui:placeholder": "例如 CrO6（每框一种）"
+      },
+      "ui:options": {
+        "orderable": false
+      }
+    },
+    "ui:preview": [
+      "polyhedron_types",
+      "vasp_quantity"
+    ]
+  },
+  "outputs": [
+    "table",
+    "file"
+  ],
+  "fixtures": [
+    "fixtures/wannier90_hr.dat",
+    "fixtures/wannier90.win",
+    "fixtures/wannier90.wout",
+    "fixtures/pdos/DOSCAR",
+    "fixtures/pdos/POSCAR",
+    "fixtures/pdos/OUTCAR"
+  ],
+  "presentation": {
+    "entrypoint": "scripts/presentation.py"
+  },
+  "analysis_modes": [
+    {
+      "id": "vasp",
+      "title": "VASP 占据 / PDOS",
+      "stages": [
+        "dos",
+        "scf"
+      ],
+      "input_roles": [
+        "doscar",
+        "structure",
+        "outcar"
+      ],
+      "evidence": [
+        "vasp_timing"
+      ]
+    },
+    {
+      "id": "hamiltonian",
+      "title": "哈密顿量分析",
+      "stages": [
+        "wannier90"
+      ],
+      "input_roles": [
+        "hamiltonian",
+        "wannier-input",
+        "wannier-output",
+        "centres"
+      ],
+      "evidence": [
+        "wannier_all_done"
+      ]
+    }
+  ]
+}

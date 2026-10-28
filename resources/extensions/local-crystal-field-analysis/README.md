@@ -1,67 +1,79 @@
-# Local crystal-field analysis
+# 2.2.0：逐行多面体与自动局域分析
 
-This formal extension contains the local, offline part of the Wannier90 crystal-field workflow migrated from `02_Wannier计算/crystal_field_wannier/`.
+点击“添加”，在第一个框填 `CrO6`，第二个框填 `FeO4`；每框一种，可单独删除。只支持单一配体的四配位、六配位，中心和配体须实际存在；相同中心的冲突配位、空行和一个框内填多种类型会在检查时给出中文提示。旧参数和历史分析保留。
 
-It has two entrypoints:
+Wannier 来源按类型自动选择中心原子的完整 d 壳，按实际配体方向拟合局域架，默认显示局域配位候选；八面体显示 Δoct=⟨eɡ⟩−⟨t₂g⟩，四面体显示 Δtet=⟨t₂⟩−⟨e⟩。名称依赖最终 WF 身份与初始投影一致，拟合几何不证明该前提。搜索最大键长默认3 Å，可在高级参数调整；配体不足报错，配位壳层接近或明显畸变提示警告。解缠结停止标记保留为诊断，不单独阻止矩阵读取；质量仍需能带拟合与轨道身份证据。
 
-- `scripts/calc_local_crystal_field.py` reads one spin channel's `seedname_hr.dat` and a matching POSCAR, fits a local coordination frame from metal--oxygen bond directions, and prints local d-subspace metrics to stdout.
-- `scripts/compare_dense_coarse.py` compares two model directories. It reads spin-1 and spin-2 `hr.dat` files plus POSCAR from each directory and writes the requested JSON report.
+完成的无SOC、ISPIN=2静态SCF若已有 LDAUPRINT 两自旋5×5 d占据矩阵，自动选择“轨道占据”；DOS来源默认保留PDOS参考，也可在高级参数指定。按OUTCAR最后电子步读取完整矩阵，拒绝用前一步补缺。VASP顺序 dxy/dyz/dz2/dxz/dx2−y2 转成统一顺序后，以球谐旋转 n′=D†nD 得到局域矩阵；迹与本征值保持。结果可选原子、↑/↓/合计、全局/局域架、对角占据/自然占据，保留矩阵、混合权重及原文行证据。单位是电子数，不是eV晶场能级，不等于形式氧化态；近简并自然轨道不唯一。SOC占据首版明确不支持，已有Wannier spinor/PDOS功能保留。
 
-## Contract and scientific boundaries
+新建独立后处理时使用同一冻结任务的结构和OUTCAR或Wannier产物；不重新运行VASP/Wannier。旧分析缺少矩阵或局域几何时需新建后处理，“更新结果展示”不会补造缺失数据。参数检查和数值处理全在扩展内，无SSH、数据库读取或主体算法分支。
 
-The code requires NumPy. The source does not pin a NumPy version; the migration test was run with NumPy 2.0.2. Wannier90 Hamiltonian values are treated as eV. POSCAR lattice vectors and bond lengths are handled in Angstrom, while rotations and fit RMSD are dimensionless. The expected Wannier90 projection order is:
+# 局域 s/p/d 哈密顿量与晶场诊断 · 2.0.0
 
-`l=2: [dz2, dxz, dyz, dx2-y2, dxy]`; `l=1: [pz, px, py]`.
+独立新版工作台扩展（`fpilot.extension.v2`），支持 1–64 个已有 Wannier90 结果、本机或来源服务器执行。依赖已有 Python 3.9+、NumPy、pymatgen；不会运行 VASP/Wannier90 或提交调度任务。源码与算法均在扩展包内，宿主只负责通用来源冻结、执行与展示。
 
-`--sites` must list species in the same order as the POSCAR species row. The script expands each atom to five d WFs for `l=2` or three p WFs for `l=1`; this projection/atom order is a contract, not an inference from the contents of `hr.dat`.
+## 使用
 
-The comparison script is deliberately not a general site mapper. Its current hard-coded mapping is:
+从“扩展管理”安装或导入 ZIP，选定已有 Python 并检查环境。项目 → 结果与后处理 → 选择已完成的 Wannier90 记录 → 绘图与后处理 → 本扩展。每个来源选择同前缀的 `_hr.dat`、`.win`、`.wout`，推荐附 `_centres.xyz`。大 `hr.dat` 在来源服务器解析，只回传 onsite 矩阵和小证据文件。
 
-| site | atom index | WF start | coordination | frame/partition |
-| --- | ---: | ---: | ---: | --- |
-| Cr | 0 | 0 | 6 | octahedral `t2g/eg` |
-| Fe | 4 | 20 | 4 | tetrahedral `e/t2` |
+- **分析元素**：逗号分隔，留空显示所有已投影的 s/p/d 壳层；不固定 Cr/Fe。
+- **配体元素**：例如 `S`、`O`、`Cl` 或多个元素。只有需要配位架诊断时填写，不自动猜测化学配位。
+- **局域 d 配位**：例如 `Cr:6,Fe:4`，留空仅做一般矩阵/谱分析。当前立方分组支持六配位八面体和四配位四面体，输出其拟合质量和邻居间距比；配位数是明确选择，不是程序证明。
+- **WF 身份声明**：默认未确认。即使勾选也只是用户声明，不把它升级为科学验证。初始投影、中心位置都不能单独证明最终 WF 是纯原子球谐轨道。
 
-These fixed values must not be generalized or silently reused for another structure, species ordering, or Wannier projection layout without a separate implementation and validation. The compare script also assumes `wannier90.1_hr.dat` and `wannier90.2_hr.dat` in both model directories.
+页面可以选择模型、候选原子完整块或独立子壳、原始 WF 基底/全局轴候选/配位架候选；显示完整复矩阵、排序本征值、减重心能级、基底权重、原始行号及旋转过程。eV/meV 可切换，选择可独立保存。JSON 导出完整原始值和过程；CSV 导出当前矩阵与单位；原分析产物保留。
 
-The local crystal-field eigenvalues and subspace centroids are not equivalent to PDOS global-axis nominal centroids. They come from the local rotated Wannier Hamiltonian and its subspace projections; a PDOS centroid labeled by a global orbital axis is a different quantity.
+## 顺序及适配范围
 
-The extension performs only `local_read` and `local_write`: it does not SSH, read or write remote files, run Wannier90, submit or manage scheduler jobs, or modify registries.
+依据 [Wannier90 投影文档](https://wannier90.readthedocs.io/en/latest/user_guide/wannier90/projections/) 与 [v3.1.0 投影展开源码](https://github.com/wannier-developers/wannier90/blob/v3.1.0/src/parameters.F90)：
 
-## Run from the extension root
+| 子壳 | mr 顺序 |
+|---|---|
+| s | s |
+| p | pz、px、py |
+| d | dz2、dxz、dyz、dx2−y2、dxy |
 
-```bash
-cd resources/extensions/local-crystal-field-analysis
+同一投影行按匹配原子序 → l 升序 → mr 升序 → 自旋 u/d 展开；同一行 `Fe:d;p;s` 实际为 s、p、d，多个投影行的行序保留。每个 spinor 轨道默认相邻的 u、d，不假定“全部上自旋再全部下自旋”。以实际 WF 编号取矩阵子块，显示排序后的标签与原编号。
 
-python scripts/calc_local_crystal_field.py \
-  /path/to/wannier90.1_hr.dat \
-  --poscar /path/to/POSCAR \
-  --sites 'Cr:l=2,Fe:l=2,O:l=1' \
-  --coord 'Cr:6,Fe:4' \
-  --mp-grid 8 7 7 --occ 60 --spin up
+支持任意元素、明确的 `s/p/d`、`l=0/1/2`、`mr` 子集、多个投影行、原子坐标投影中心、径向编号和投影 x/z 轴。初始映射数量必须与 `num_wann` 一致。混成/f/随机投影、自动投影、select_projections、自定义自旋量子化轴目前明确拒绝，不把它们强行套成 s/p/d。重复式同径向壳或不完整壳可以读其选定 WF 子块，但不做完整球谐旋转/立方分类。
 
-python scripts/compare_dense_coarse.py \
-  --module scripts/calc_local_crystal_field.py \
-  --coarse /path/to/coarse \
-  --dense /path/to/dense \
-  --output /path/to/dense_minus_coarse.json
-```
+## 科学边界
 
-The comparison output is indented JSON with `coarse`, `dense`, and `dense_minus_coarse` sections. The calculation entrypoint intentionally emits its report on stdout rather than JSON.
+- `R=0` Hermitian 复矩阵保留虚部；不能简单取 `.real`。超过 10⁻⁵ eV 的 Hermitian 残差会拒绝，打印精度内对称化幅度单独记录。
+- 原子完整块保留 s/p/d 壳间耦合；独立壳本征值是投影子块的谱，不等于完整块的谱。
+- 单自旋有效 onsite 分组包含杂化、交换、DFT+U 等效应，不能直接称纯静电晶场。仅在 WF 身份/相位/方向对应所声明轨道时，球谐旋转和 t₂g/eɡ 或 e/t₂ 解释才成立。
+- spinor 保留复数 2(2l+1) 维块，含 SOC 和自旋混合；不自动“去 SOC”、产生无 SOC 晶场或跨自旋平均。
+- `.wout` 的 All done、解缠结收敛、spread 收敛、中心匹配和物理模型可信度分开。明确未收敛仍可读取数学矩阵，页面警告，不能将其视为可靠物理参数。
+- 模型之间的绝对 onsite 重心/矩阵要先对齐能量参考和 Wannier gauge；本版分别展示，不自动相减或平均。近简并本征矢权重不是唯一的。
+- 本版不由固定占据带数自动计算占据矩阵，也不把单个 onsite 能级范围当作晶体带隙。
 
-## Test and validation
+数学公式、审核和真实案例见 [ALGORITHM_REVIEW.md](ALGORITHM_REVIEW.md)。测试运行 `python -m unittest discover -s tests -p 'test_onsite_core.py'`；独立 CLI 使用 `scripts/cli.py doctor|check|run --request request.json` 和 [通用协议](../../../docs/extensions-b/PROTOCOL.md)。
 
-From this directory, the synthetic test can be run without relying on the caller's current working directory:
+## 旧版保留
 
-```bash
-python tests/test_calc_local_crystal_field.py
-```
+旧 `extension.json` 及 `scripts/calc_local_crystal_field.py`、`scripts/compare_dense_coarse.py` 保留，供已有历史命令复现。它们属于旧 0.1.0 接口，固定 O 配体/部分原子与 WF 索引，存在取实部限制，不能用于任意新体系或 SOC 结果。新版只复用其中经解析证明与合成测试验证的实球谐旋转、Kabsch 真旋转拟合；不继续调用旧硬编码比较或占据逻辑。
+# 2.1.0：轨道能级与劈裂分析
 
-The extension metadata is checked separately by the plugin manager:
+本扩展有两个独立模式，按来源任务自动选择。DOS/SCF 来源进入 **PDOS 快速参考**，只需要同一任务的 DOSCAR、POSCAR（或对应 CONTCAR）和 OUTCAR，不需要 VASP–Wannier、Wannier90 或 hr.dat。Wannier90 来源进入 **哈密顿量分析**，继续使用已有同前缀 hr/win/wout，可选 centres。一次分析的多个来源必须属于同一模式。需要支持可选 `analysis_modes` 声明的宿主；旧宿主须先更新通用协议。
 
-```bash
-python \
-  ../../scripts/fpilot_extensions.py validate .
-```
+## 最简单的用法
 
-The migration intentionally excludes `prepare_remote_dense_wannier.py`, `finalize_remote_dense_analysis.sh`, every `results_*` directory/file, historical `.win`/`.wout` files, and caches.
+1. 在完成的 DOS 或 Wannier90 任务中选择本扩展并创建独立后处理。一般壳层浏览无需填写高级配位参数。
+2. 结果页选择原子、s/p/d 壳层和自旋/通道。PDOS 默认用文件保存的完整范围立即显示轨道重心；拖动区间或填写上下界即可重算。Wannier 默认展示完整子壳矩阵对角化后的能级，另可切换带轨道名称的对角元 Hₘₘ。
+3. 选择两条能级查看 B − A；勾选条目后输入组名自行分组。组重心为所选条目的算术平均，不自动套用 t₂g/e_g。切换单位、零点及区间后分组数值同步更新。
+4. 保存展示选择；导出能级 PNG、CSV 或包含原始数组、公式中间量和证据的 JSON。导出采用当前区间、单位、参考及分组。保存操作不改原分析、来源或科学验证状态。
+
+## PDOS 结果的含义
+
+每个轨道的谱重心为 `∫ E D(E)dE / ∫ D(E)dE`，使用分段线性函数的精确零阶和一阶积分，对区间端点插值。能量数组以 DOSCAR 自身 E_F 为零；能级图默认再减当前有效条目的算术平均，原始 E−E_F 数值同时列出。积分坐标始终为 eV，显示能级可切换 eV/meV（×1000），DOS 曲线保留 states/eV。
+
+完整范围仅指文件保存范围；只积分已占据部分时得到已占据谱重心。窗口、投影和杂化均会影响重心，不将它等同 Wannier 本征能级或实验激发能。只提供 l 分辨总 DOS 时，p/d 不拆分；无投影、截断、非有限值、网格或原子数不一致时明确报错，不补造轨道。负 DOS 按原值积分并提示，非正权重不生成能级。NSW>1 的可能离子步平均给出警告。
+
+普通 PDOS 标签沿用 VASP 全局坐标，不凭五条密度曲线任意旋转局域轴。共线 ↑/↓ 分开，SOC/非共线使用轨道电荷 DOS，不把 mx/my/mz 当作独立自旋谱。Wannier 模式的混合权重相对于已声明基底，初始投影不保证最终轨道身份；近简并态单条本征矢组成不唯一。矩阵、映射、中心、完整原子块和原始证据保留在高级诊断或原产物中。
+
+解析使用来源服务器已有 Python，一次生成冻结数组；展示按页加载，单片小于 9 MiB。后续调区间和分组只用冻结数据，不重复访问原始服务器。旧 2.0 onsite.json 缺少 mode 字段时按哈密顿量展示；旧脚本继续保留供复现。
+
+独立检查：`python -m unittest discover -s resources/extensions/local-crystal-field-analysis/tests -p 'test_*core.py'`；`node --test tests/orbitalLevels.test.ts`。打包：`python scripts/package-extensions.py --extension local-crystal-field-analysis`。不导入宿主 backend、不自行 SSH、不提交研究任务。
+
+以下保留 2.0 的算法边界与历史说明；新使用方式以上文为准。
+

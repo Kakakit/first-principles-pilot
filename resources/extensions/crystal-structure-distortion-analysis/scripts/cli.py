@@ -3,23 +3,16 @@ import csv,json,re,subprocess,sys
 from pathlib import Path
 from protocol_cli import main,file,dump,artifact
 from metrics import METRICS
+from polyhedron_types import parse_types
 
 def config(request):
-    option=request['options'];centers={};text=option.get('polyhedra','').strip()
-    if text:
-        for token in re.split(r'[,，;；\s]+',text):
-            if not token:continue
-            match=re.fullmatch(r'([A-Z][a-z]?)([A-Z][a-z]?)([46])',token)
-            if not match:raise ValueError('多面体请写成 CrO6, FeO4；只支持单一配体的四/六配位')
-            center,ligand,number=match.groups();spec={'ligand':ligand,'coordination':int(number)}
-            if center in centers and centers[center]!=spec:raise ValueError('同一中心元素不能指定冲突配位：'+center)
-            centers[center]=spec
-    else:
+    option=request['options'];centers=parse_types(option)
+    if not centers:
         try:centers={option['center_element']:{'coordination':option['coordination'],'ligand':option['ligand_element']}}
-        except KeyError:raise ValueError('请填写多面体类型，例如 CrO6, FeO4')
+        except KeyError:raise ValueError('请添加多面体类型，每个输入框填写一种，例如 CrO6')
     if not centers:raise ValueError('请填写至少一种多面体')
     if any(c==v['ligand'] for c,v in centers.items()):raise ValueError('中心元素与配体须不同')
-    if text and option.get('center_element'):
+    if (option.get('polyhedra') or option.get('polyhedron_types')) and option.get('center_element'):
         old={'coordination':option.get('coordination'),'ligand':option.get('ligand_element')}
         if centers.get(option['center_element'])!=old:raise ValueError('新旧配位参数冲突，请只填写一种方式')
     return {'centers':centers,'search_radius_angstrom':option.get('search_radius_angstrom',3),'shell_gap_warning_angstrom':0.15}

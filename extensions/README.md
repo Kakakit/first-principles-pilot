@@ -4,10 +4,10 @@
 
 | 扩展 | 版本 | 接口 | 下载 | 源码与说明 |
 |---|---|---|---|---|
-| 配位多面体畸变 | 2.1.0 | 工作台 ZIP 导入 | [ZIP](packages/crystal-structure-distortion-analysis-2.1.0.zip) | [README](../resources/extensions/crystal-structure-distortion-analysis/README.md) |
+| 配位多面体畸变 | 2.2.0 | 工作台 ZIP 导入 | [ZIP](packages/crystal-structure-distortion-analysis-2.2.0.zip) | [README](../resources/extensions/crystal-structure-distortion-analysis/README.md) |
 | electronic-structure-characterization | 0.3.0 | 旧版 CLI | [ZIP](packages/electronic-structure-characterization-0.3.0.zip) | [README](../resources/extensions/electronic-structure-characterization/README.md) |
 | 形式极化与双结果比较 | 2.2.0 | 工作台 ZIP 导入 | [ZIP](packages/lcalcpol-polarization-analysis-2.2.0.zip) | [README](../resources/extensions/lcalcpol-polarization-analysis/README.md) |
-| local-crystal-field-analysis | 0.1.0 | 旧版 CLI | [ZIP](packages/local-crystal-field-analysis-0.1.0.zip) | [README](../resources/extensions/local-crystal-field-analysis/README.md) |
+| 轨道占据、能级与劈裂分析 | 2.2.0 | 工作台 ZIP 导入 | [ZIP](packages/local-crystal-field-analysis-2.2.0.zip) | [README](../resources/extensions/local-crystal-field-analysis/README.md) |
 | 压力结构与 EOS 分析 | 1.0.1 | 工作台 ZIP 导入 | [ZIP](packages/pressure-structure-eos-1.0.1.zip) | [README](../resources/extensions/pressure-structure-eos/README.md) |
 | pyw90 | 0.5.1 | 旧版 CLI | [ZIP](packages/pyw90-0.5.1.zip) | [README](../resources/extensions/pyw90/README.md) |
 | 空间对称性 | 2.0.0 | 工作台 ZIP 导入 | [ZIP](packages/structure-symmetry-2.0.0.zip) | [README](../resources/extensions/structure-symmetry/README.md) |
@@ -16,8 +16,8 @@
 
 ## 安装与更新
 
-- 标记“工作台 ZIP 导入”的 6 个包：打开工作台“扩展管理” → 导入 ZIP，选择所需 ZIP；登记已有 Python 环境并检查依赖。GitHub 的 ZIP 页面选择 Download raw file 下载原文件。ZIP 不带 Python 或第三方运行环境。
-- 标记“旧版 CLI”的 3 个包尚未提供新版工作台安装清单；解压后按各自 README 使用，不承诺可以从新版扩展管理直接导入。
+- 标记“工作台 ZIP 导入”的 7 个包：打开工作台“扩展管理” → 导入 ZIP，选择所需 ZIP；登记已有 Python 环境并检查依赖。GitHub 的 ZIP 页面选择 Download raw file 下载原文件。ZIP 不带 Python 或第三方运行环境。
+- 标记“旧版 CLI”的 2 个包尚未提供新版工作台安装清单；解压后按各自 README 使用，不承诺可以从新版扩展管理直接导入。
 - EOS 的冻结重新拟合需要宿主支持 `refresh-view` 和 `view_state`；本次源码同步包含该通用接口。旧安装器不会因下载 ZIP 自动升级宿主，请使用包含本次提交的工作台源码版本。其他依赖和科学边界见各包 README。
 - 更新已有分析的交互界面时使用“更新结果展示”；不改原始研究输入，不自动重新运行分析或研究计算。
 

@@ -2,7 +2,7 @@
   "schema": "fpilot.extension.v2",
   "id": "crystal-structure-distortion-analysis",
   "name": "配位多面体畸变",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "填写 CrO6, FeO4，逐位点查看三维多面体、键长、内部角、共享配体桥角和中文指标公式。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
@@ -73,24 +73,19 @@
           4,
           6
         ]
+      },
+      "polyhedron_types": {
+        "type": "array",
+        "title": "多面体类型（每个输入框一种）",
+        "description": "点击添加，一框填写 CrO6，另一框填写 FeO4。程序按中心元素选择原子，并寻找对应配体；只支持单一配体的四配位、六配位。",
+        "maxItems": 16,
+        "default": [],
+        "items": {
+          "type": "string",
+          "title": "多面体",
+          "default": ""
+        }
       }
-    },
-    "if": {
-      "required": [
-        "center_element"
-      ]
-    },
-    "then": {
-      "required": [
-        "center_element",
-        "ligand_element",
-        "coordination"
-      ]
-    },
-    "else": {
-      "required": [
-        "polyhedra"
-      ]
     }
   },
   "ui_schema": {
@@ -98,7 +93,7 @@
       {
         "title": "分析对象",
         "fields": [
-          "polyhedra"
+          "polyhedron_types"
         ]
       },
       {
@@ -110,11 +105,11 @@
       }
     ],
     "ui:preview": [
-      "polyhedra",
+      "polyhedron_types",
       "search_radius_angstrom"
     ],
     "polyhedra": {
-      "ui:placeholder": "CrO6, FeO4"
+      "ui:widget": "hidden"
     },
     "center_element": {
       "ui:widget": "hidden"
@@ -124,6 +119,14 @@
     },
     "coordination": {
       "ui:widget": "hidden"
+    },
+    "polyhedron_types": {
+      "items": {
+        "ui:placeholder": "例如 CrO6（每框一种）"
+      },
+      "ui:options": {
+        "orderable": false
+      }
     }
   },
   "outputs": [
