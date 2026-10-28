@@ -68,7 +68,7 @@ export type PreparedBinding = {
 
 export function sameCapacityTarget(before:ServerConfig|null,after:ServerConfig):boolean {
   const scheduler=(value?:string)=>(value||'pbs').toLowerCase().replace('pbs/torque','pbs').replace('torque','pbs');
-  return Boolean(before&&before.alias===after.alias&&scheduler(before.scheduler)===scheduler(after.scheduler));
+  return Boolean(before&&before.alias===after.alias&&scheduler(before.scheduler)===scheduler(after.scheduler)&&(before.resource_policy||'wait_idle')===(after.resource_policy||'wait_idle'));
 }
 
 export function bindingFingerprint(binding: PreparedBinding | null): string {

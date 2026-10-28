@@ -228,7 +228,7 @@ def preview(project_id,kind,target_id,item_ids=None,scope='single',config_overri
             info['new_bundle_id'],info['input_diff']=_edited_bundle(info,edited,restart_mode,source_attempt_id,acknowledge_unverified)
             cache=scans.digest(servers.capacity_config(info['config']))
             purpose='wannier90' if info['window'] else 'vasp'
-            if cache not in probes:probes[cache]=servers.capacity_probe(info['config'],purpose=purpose)
+            if cache not in probes:probes[cache]=servers.dispatch_probe(info['config'],purpose=purpose)
             rendered=servers.preview_for_prepare(info['config'],probes[cache]['id'],info['node'],info['cores'],'',purpose=purpose)
             if not rendered['resource_ready'] and not candidate_pool.capacity_wait(rendered):
                 raise ValueError('资源请求不可用：'+'；'.join(rendered['blockers']))
@@ -462,7 +462,7 @@ def _dispatch(op,capacity_context=None):
                 if record is None:
                     purpose='wannier90' if info['window'] else 'vasp'
                     progress(op,info,'PROBING')
-                    probe=servers.capacity_probe(info['config'],purpose=purpose,context=capacity_context)
+                    probe=servers.dispatch_probe(info['config'],purpose=purpose,context=capacity_context)
                     choices=[{'node':info['node'],'cores':info['cores']}]
                     rendered=None
                     for choice in choices:

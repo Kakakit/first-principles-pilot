@@ -36,3 +36,14 @@ export function upgradeScan(project:Project,node:Step):Project {
  const upgraded={...node,data:{...copied,kind:'scan' as const,executionMode:'scan' as const,label:node.data.label,note:node.data.note,stageSequence:node.data.stageSequence,stageSlug:node.data.stageSlug,scanSpec:{calculationKind:base.data.kind as CalculationKind},scanDraft:node.data.scanDraft,windowScanDraft:node.data.windowScanDraft}};
  return {...project,nodes:project.nodes.map(n=>n.id===node.id?upgraded:n),edges:[...project.edges.filter(e=>e.target!==node.id),{...parents[0],source:inherited[0].source}]};
 }
+/** Commas between values split cases; quoted INCAR text keeps its own commas. */
+export function splitScanValues(text:string):string[]{
+ const values:string[]=[];let start=0,quoted=false;
+ for(let i=0;i<text.length;i++){
+  if(quoted&&text[i]==='\\'&&text[i+1]==='"'){i++;continue;}
+  if(text[i]==='"')quoted=!quoted;
+  if(text[i]===','&&!quoted){values.push(text.slice(start,i));start=i+1;}
+ }
+ values.push(text.slice(start));return values;
+}
+

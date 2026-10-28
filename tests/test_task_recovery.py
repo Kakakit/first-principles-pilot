@@ -144,8 +144,8 @@ class TaskRecoveryTests(unittest.TestCase):
         facts={'CPUS_TOTAL':'48','CPUS_FREE':'0','STATUS':'DOWN','GPU_ACTIVE_PROCESSES':'4','GPUS_TOTAL':'2'}
         selected=servers.selector.scheduler_resources(facts,48,{'mpi_ranks':2,'gpus':2})
         self.assertEqual(selected['requested_cores'],48)
-        with self.assertRaises(ValueError):servers.selector.scheduler_resources(facts,49)
-        with self.assertRaises(ValueError):servers.selector.scheduler_resources(facts,48,{'mpi_ranks':2,'gpus':3})
+        self.assertEqual(servers.selector.scheduler_resources(facts,49)['requested_cores'],49)
+        self.assertEqual(servers.selector.scheduler_resources(facts,48,{'mpi_ranks':2,'gpus':3})['requested_gpus'],3)
 
     def test_manual_source_warning_does_not_change_automatic_eligibility(self):
         b=self.batch();r=self.record(b,0,'COMPLETED');r['job_id']='1.node01';r['path_schema']='fpilot.remote-attempt-path'
@@ -253,7 +253,7 @@ class ResourcePolicyPipelineTests(unittest.TestCase):
         queued=servers.preview({**f.config,'resource_policy':'scheduler_queue'},probe['id'],'node01')
         self.assertTrue(queued['resource_ready'],queued)
         self.assertEqual(queued['profile']['ppn'],10)
-        self.assertEqual(queued['profile']['gpus'],2)
+        self.assertEqual(queued['profile']['gpus'],1)
         self.assertTrue(any('GPU 活动进程' in w for w in queued['script_warnings']))
         record={'config':{**f.config,'resource_policy':'scheduler_queue'},'node':'node01','cores':10,'reason':'','profile':queued['profile']}
         with patch('backend.remote_transport._interpreter',return_value='/usr/bin/python3'):

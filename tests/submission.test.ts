@@ -3,6 +3,14 @@ import assert from 'node:assert/strict';
 import {newProject,makeStep,cleanWorkspace} from '../src/model.ts';
 import {independentBranch} from '../src/independentBranch.ts';
 import {runtimeFor,emptySettings} from '../src/submissionDefaults.ts';
+
+test('resource policy defaults to the scheduler but never replaces an explicit or saved idle-wait choice',()=>{
+ const config={alias:'host'},settings={...emptySettings,runtimes:{'host:vasp_std':{resource_policy:'wait_idle'}}};
+ assert.equal(runtimeFor(config,[],emptySettings,'host').resource_policy,'scheduler_queue');
+ assert.equal(runtimeFor(config,[],settings,'host').resource_policy,'wait_idle');
+ assert.equal(runtimeFor({...config,resource_policy:'wait_idle'},[],emptySettings,'host').resource_policy,'wait_idle');
+ assert.equal(runtimeFor({...config,resource_policy:'scheduler_queue'},[],settings,'host').resource_policy,'scheduler_queue');
+});
 import {effectiveParameters,checkParameters} from '../src/parameters.ts';
 import {inputForReview} from '../src/workflowUi.ts';
 test('case and planned bundles never enter the base-node single-task selector',()=>{
@@ -48,4 +56,5 @@ test('job edits and script choices retain node facts but target changes invalida
  assert.equal(sameCapacityTarget(base,{...base,alias:'other'}),false);
  assert.equal(sameCapacityTarget(base,{...base,scheduler:'slurm'}),false);
  assert.equal(sameCapacityTarget(base,{...base,scheduler:'PBS/Torque'}),true);
+ assert.equal(sameCapacityTarget({...base,resource_policy:'scheduler_queue'},{...base,resource_policy:'wait_idle'}),false);
 });

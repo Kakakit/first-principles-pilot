@@ -16,12 +16,14 @@ def batched(function, kind):
             except ValueError: pass
             else: return function(*params.args, **params.kwargs)
         with remote_transport.operation(kind+'-prepare'):
-            config = p['config']
+            # Old authorizations without this field used local idle-node waiting.
+            config = {**p['config'],'resource_policy':p['config'].get('resource_policy','wait_idle')}
+            params.arguments['config']=config
             from . import recycle
             recycle.assert_available('inputs' if kind=='vasp' else 'projects',p['bundle_id'] if kind=='vasp' else p['project']['id'])
             project = p['project'] if kind=='wannier90' else ex.frozen_project(p['bundle_id'])
             root, _ = remote_paths.project_location(project,config['alias'],config.get('remote_workspace_root'))
-            validators = [lambda: servers.capacity_probe(config, **({'purpose':'wannier90'} if kind=='wannier90' else {})),
+            validators = [lambda: {'id':p.get('probe_id') or ''} if config.get('resource_policy')=='scheduler_queue' else servers.capacity_probe(config, **({'purpose':'wannier90'} if kind=='wannier90' else {})),
                           lambda: ex.ssh(config['alias'],remote_paths.workspace_probe_command(root),timeout=30)]
             if kind == 'wannier90':
                 from . import wannier_execution as w, source_files, remote_energy, wannier_bands

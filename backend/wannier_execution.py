@@ -564,7 +564,7 @@ def submit(key):
         if actual_reference['outcar_sha256'] != bundle['energy_reference']['outcar_sha256'] or not math.isclose(
                 actual_reference['fermi_eV'], bundle['energy_reference']['fermi_eV'], abs_tol=1e-9):
             raise ValueError('来源 OUTCAR 能量参考已变化，请重新准备')
-    fresh = {'id':record['probe_id']} if fast else servers.capacity_probe(record['config'], purpose='wannier90')
+    fresh = {'id':record['probe_id']} if fast or record['config'].get('resource_policy')=='scheduler_queue' else servers.capacity_probe(record['config'], purpose='wannier90')
     resource = {'resource_ready':True,'profile':record['profile']} if fast else servers.preview(record['config'], fresh['id'], record['node'], record['cores'], record['reason'], purpose='wannier90')
     if not resource['resource_ready'] or resource['profile'] != record['profile']:
         raise ValueError('Wannier90 实时资源已变化，请重新准备')

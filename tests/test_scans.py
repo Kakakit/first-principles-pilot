@@ -72,7 +72,7 @@ class ScanTests(unittest.TestCase):
                 {'kind':'incar','tag':'SIGMA','sampling':'list','values':['0.05', '0.1', '0.2']}]
         report = scans.preview(self.project, 'scan', 'c', dims)
         expected = [('520','0.05'), ('520','0.1'), ('520','0.2'),
-                    ('400','0.05'), ('400','0.1'), ('400','0.2')]
+                    ('4e2','0.05'), ('4e2','0.1'), ('4e2','0.2')]
         self.assertTrue(report['ready'])
         self.assertEqual(report['case_count'], 6)
         self.assertEqual([tuple(p['value'] for p in case['parameters']) for case in report['cases']], expected)
@@ -96,17 +96,17 @@ class ScanTests(unittest.TestCase):
         self.assertEqual(scans.axis({'kind':'u','element':'Si','sampling':'list','values':['0','2.5']}, 'scf'), ['0','2.5'])
         self.assertEqual(scans.axis({'kind':'j','element':'Si','sampling':'list','values':['0']}, 'scf'), ['0'])
 
-    def test_lists_keep_numeric_validation_and_case_limits(self):
+    def test_raw_incar_lists_keep_assignment_validation_and_case_limits(self):
         dim = {'kind':'incar','tag':'ENCUT','sampling':'list'}
         for values in (None, '400,500', [], ['400']*65, [''], ['400',''],
-                       ['NaN'], ['Infinity'], ['1e13'], [400], ['4e2','400.0']):
+                       ['400; SIGMA=1'], ['400\nSIGMA=1'], ['400 # hidden comment'], [400], ['400','400']):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 scans.axis({**dim, 'values':values}, 'scf')
         for patch, values in (({'kind':'u','element':'Si'}, ['-1']),
-                              ({'kind':'poscar'}, ['0']),
-                              ({'kind':'incar','tag':'NSW'}, ['1.5'])):
+                              ({'kind':'poscar'}, ['0'])):
             with self.subTest(patch=patch), self.assertRaises(ValueError):
                 scans.axis({**dim, **patch, 'values':values}, 'scf')
+        self.assertEqual(scans.axis({**dim,'values':['4e2','400.0']},'scf'),['4e2','400.0'])
         with self.assertRaisesRegex(ValueError, '64'):
             scans.preview(self.project, 'scan', 'c', [
                 {**dim,'values':[str(i) for i in range(400,409)]},
@@ -118,6 +118,46 @@ class ScanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'64'):scans.preview(self.project,'scan','c',[base,{'kind':'kmesh','meshes':[[i,i,i] for i in range(1,10)]}])
         with self.assertRaisesRegex(ValueError,'网格'):scans.preview(self.project,'scan','c',[{'kind':'kmesh','meshes':[[4,0,4]]}])
         with self.assertRaises(ValueError):scans.preview(self.project,'scan','c',[{'kind':'incar','tag':'NSW','start':'0','end':'1','step':'0.5'}])
+
+    def test_generic_raw_tags_freeze_enums_booleans_custom_values_without_changing_base(self):
+        from backend.incar_text import parse
+        original=json.dumps(self.project,sort_keys=True)
+        dims=[{'kind':'incar','tag':'algo','sampling':'list','values':['Normal','Fast']},
+              {'kind':'incar','tag':'LREAL','sampling':'list','values':['.TRUE.','.FALSE.']},
+              {'kind':'incar','tag':'MY_CUSTOM_TAG','sampling':'list','values':['a b','c d']}]
+        preview=scans.preview(self.project,'scan','c',dims)
+        self.assertTrue(preview['ready'],preview['cases'])
+        self.assertEqual(preview['case_count'],8)
+        self.assertTrue(any('MY_CUSTOM_TAG' in w for w in preview['cases'][0]['warnings']))
+        batch=scans.freeze(self.project,'scan','c',dims,'原文迭代',preview['definition_hash'])
+        for case in batch['cases']:
+            tags=parse(ex.bundle(case['bundle_id'])[1]['INCAR'].decode())[0]
+            for p in case['parameters']:self.assertEqual(tags[p['key']],p['value'])
+        self.assertEqual(json.dumps(self.project,sort_keys=True),original)
+
+    def test_vector_and_repeat_syntax_survive_actual_soc_freeze(self):
+        layer=self.project['nodes'][1]['data']['parameters']
+        layer['manualIncarText']='LSORBIT=.TRUE.\nLNONCOLLINEAR=.TRUE.\nMAGMOM=0 0 1 0 0 -1\n'
+        dims=[{'kind':'incar','tag':'SAXIS','sampling':'list','values':['0 0 1','1 0 0']}]
+        report=scans.preview(self.project,'scan','c',dims)
+        self.assertTrue(report['ready'],report['cases'])
+        batch=scans.freeze(self.project,'scan','c',dims,'不同磁化方向')
+        self.assertTrue(batch['requires_ncl'])
+        for case in batch['cases']:
+            self.assertIn(('SAXIS = '+case['parameters'][0]['value']).encode(),ex.bundle(case['bundle_id'])[1]['INCAR'])
+
+    def test_custom_numeric_ranges_nested_tags_and_single_assignment_boundaries(self):
+        self.assertEqual(scans.axis({'kind':'incar','tag':'CUSTOM_RANGE','start':'0','end':'0.2','step':'0.1'},'scf'),['0','0.1','0.2'])
+        for tag,value in [('MAGMOM','2*5 -2*5'),('SYSTEM','"a,b"'),('PLUGINS/STRUCTURE','T')]:
+            self.assertEqual(scans.axis({'kind':'incar','tag':tag.lower(),'sampling':'list','values':[value]},'scf'),[value])
+        for tag in ['','A=B','A;B','A\nB','/A','1ABC']:
+            with self.subTest(tag=tag),self.assertRaises(ValueError):scans.axis({'kind':'incar','tag':tag,'sampling':'list','values':['1']},'scf')
+        with self.assertRaisesRegex(ValueError,'重复'):
+            scans.preview(self.project,'scan','c',[{'kind':'incar','tag':tag,'sampling':'list','values':['500']} for tag in ['ENCUT','encut']])
+
+    def test_raw_and_element_hubbard_dimensions_cannot_silently_overwrite_each_other(self):
+        dims=[{'kind':'incar','tag':'LDAUU','sampling':'list','values':['1']}, {'kind':'u','element':'Si','start':'1','end':'2','step':'1'}]
+        with self.assertRaisesRegex(ValueError,'覆盖'):scans.preview(self.project,'scan','c',dims)
 
     def test_four_dimensions_and_decimal_endpoint(self):
         dims=[{'kind':'incar','tag':'ENCUT','start':'400','end':'450','step':'50'},

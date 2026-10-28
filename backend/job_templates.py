@@ -219,7 +219,7 @@ def save_template(script, name, scheduler, alias, program, source, prepared=Fals
 def render_pbs(text, values, indexes):
     lines = text.splitlines(keepends=True)
     node_spec = 'nodes={node}:ppn={ppn}'.format(**values)
-    if values.get('mpi_ranks') and values.get('gpu_resource_registered') == 'yes':
+    if values.get('mpi_ranks') and (values.get('gpu_resource_registered') == 'yes' or values.get('allocation')=='requested'):
         node_spec += ':gpus=' + str(values['gpus'])
     elif values.get('gpus') and not values.get('mpi_ranks'):
         node_spec += ':gpus=' + str(values['gpus'])
@@ -257,13 +257,14 @@ def render_slurm(text, values):
     known = re.compile(r'^\s*#SBATCH\s+(?:--(?:job-name|partition|nodelist|ntasks|time|nodes)\b|-(?:J|p|w|N|n|t)(?:\b|[0-9]))')
     lines = [line for line in lines if not known.match(line)]
     if values.get('mpi_ranks'):
-        lines = [line for line in lines if not re.match(r'^\s*#SBATCH\s+--(?:gpus(?:-per-node)?|gres|exclusive)(?:=|\s|$)', line)]
+        lines = [line for line in lines if not re.match(r'^\s*#SBATCH\s+--(?:gpus(?:-per-node)?|gres)(?:=|\s|$)', line)]
     directives = [f'#SBATCH --job-name={values["name"]}\n', f'#SBATCH --partition={values["queue"]}\n',
                   f'#SBATCH --nodelist={values["node"]}\n', f'#SBATCH --nodes=1\n',
-                  f'#SBATCH --ntasks={values.get("mpi_ranks", values["ppn"])}\n', f'#SBATCH --time={values["walltime"]}\n']
+                  f'#SBATCH --ntasks={values["ppn"] if values.get("allocation")=="requested" else values.get("mpi_ranks",values["ppn"])}\n', f'#SBATCH --time={values["walltime"]}\n']
     if values.get('mpi_ranks'):
         gpu_type = (values['gpu_type'] + ':') if values.get('gpu_type') else ''
-        directives += ['#SBATCH --exclusive\n', '#SBATCH --gres=gpu:' + gpu_type + str(values['gpus']) + '\n']
+        if values.get('allocation','whole_node')=='whole_node' and not any(re.match(r'^\s*#SBATCH\s+--exclusive(?:=|\s|$)',line) for line in lines):directives += ['#SBATCH --exclusive\n']
+        directives += ['#SBATCH --gres=gpu:' + gpu_type + str(values['gpus']) + '\n']
     offset = 1 if lines and lines[0].startswith('#!') else 0
     lines[offset:offset] = directives
     return ''.join(lines)
@@ -311,6 +312,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     values, parsed_blockers, indexes = parse(execution_original, record['scheduler'])
     blockers = []
     values.update(overrides)
+    if (config or {}).get('resource_policy')=='scheduler_queue':values['allocation']='requested'
     selected = alias or record['alias']
     if selected != record['alias']: blockers.append('模板主机绑定不一致')
     if config and servers.normalize_scheduler(config.get('scheduler')) != record['scheduler']:

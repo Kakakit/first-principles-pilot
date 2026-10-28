@@ -227,7 +227,7 @@ def template(config):
 
 def resources(batch, config, candidates):
     if config['alias']!=batch['source']['alias']:raise ValueError('窗口任务须使用矩阵来源服务器')
-    probe=servers.probe(config,purpose='wannier90')
+    probe=servers.submission_probe(config,purpose='wannier90')
     from .candidate_pool import validate
     return {'previews':{c['node']:render(config,probe['id'],c['node'],c['cores'],c.get('reason',''),template(config)) for c in validate(candidates)}}
 
@@ -237,7 +237,7 @@ def authorize(batch, project_id, case_table_hash, config, candidates, reviewed, 
     if batch['project_id']!=project_id or batch['state']!='FROZEN' or batch['case_table_hash']!=case_table_hash:raise ValueError('冻结 case 表已变化')
     recycle.assert_available('scans',batch['id'],batch)
     checked=candidate_pool.approve(candidate_pool.validate(candidates),resources(batch,config,candidates)['previews'],reviewed)
-    if type(max_parallel) is not int or not 1<=max_parallel<=len(checked):raise ValueError('同时运行上限须在候选数量内')
+    if type(max_parallel) is not int or not 1<=max_parallel<=100000:raise ValueError('在途上限须为正整数')
     source={'id':batch['source_frozen_id'],**w90.configuration(batch['source_frozen_id'])}
     _source(source,batch['scan_node_id'])
     branch_bindings.check(source['project'],batch['base_node_id'],config['alias'],scope=batch['scan_node_id'])

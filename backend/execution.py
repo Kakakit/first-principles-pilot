@@ -917,7 +917,7 @@ def submit(key):
     # Fresh resource probe before every dispatch; unchanged rendered resources required.
     from . import fast_dispatch
     fast=fast_dispatch.enabled(record)
-    fresh={'id':record['probe_id']} if fast else servers.capacity_probe(record['config'])
+    fresh={'id':record['probe_id']} if fast or record['config'].get('resource_policy')=='scheduler_queue' else servers.capacity_probe(record['config'])
     checked_config = record['config']
     if not record.get('template_snapshot') and not checked_config.get('runtime_source'):
         checked_config = {**checked_config, 'runtime_source': 'registered'}

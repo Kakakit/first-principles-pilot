@@ -614,16 +614,28 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if config['scheduler']=='custom':
         from .custom_commands import preview
         return preview(config)
-    if not re.fullmatch('[a-f0-9]{64}',probe_id):raise ValueError('请先运行诊断')
-    raw=(ROOT/'server-probes'/probe_id).read_bytes()
-    if hashlib.sha256(raw).hexdigest()!=probe_id:raise ValueError('诊断记录校验失败')
-    report=json.loads(raw)
-    if capacity_config(report['config'])!=capacity_config(config):raise ValueError('服务器或调度器已改变，请检测新服务器')
-    from .site_registration import connection_identity
-    if report.get('connection') and report['connection']!=connection_identity(config['alias']):raise ValueError('实际 SSH 目标已改变，请重新检测节点')
-    if node in excluded_nodes(config):raise ValueError(node+' 已由此服务器的配置排除')
-    nodes=[n for h in report['preflight']['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==node]
     queued=config.get('resource_policy')=='scheduler_queue'
+    if queued:
+        report={'config':config,'preflight':{'hosts':[]},'queues':[], 'checks':{},
+                'diagnostics':{'exit_code':0},'availability':{'exit_code':0}}
+        if probe_id and re.fullmatch('[a-f0-9]{64}',probe_id):
+            path=ROOT/'server-probes'/probe_id
+            if path.exists():
+                try:
+                    cached=json.loads(path.read_text())
+                    if capacity_config(cached['config'])==capacity_config(config): report=cached
+                except (ValueError,KeyError,OSError): pass
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+',node or ''):raise ValueError('请填写计算节点名称')
+    else:
+        if not re.fullmatch('[a-f0-9]{64}',probe_id):raise ValueError('请先运行诊断')
+        raw=(ROOT/'server-probes'/probe_id).read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=probe_id:raise ValueError('诊断记录校验失败')
+        report=json.loads(raw)
+        if capacity_config(report['config'])!=capacity_config(config):raise ValueError('服务器或调度器已改变，请检测新服务器')
+        from .site_registration import connection_identity
+        if report.get('connection') and report['connection']!=connection_identity(config['alias']):raise ValueError('实际 SSH 目标已改变，请重新检测节点')
+        if node in excluded_nodes(config):raise ValueError(node+' 已由此服务器的配置排除')
+    nodes=[n for h in report['preflight']['hosts'] for n in h.get('nodes',[]) if n.get('NODE')==node]
     if len(nodes)!=1 and not (queued and re.fullmatch(r'[A-Za-z0-9_.-]+',node) and type(cores) is int and cores>0):raise ValueError('请选择本次诊断中的节点，或填写明确节点和请求核数')
     facts=nodes[0] if len(nodes)==1 else {'NODE':node,'CPUS_TOTAL':str(cores),'STATUS':'UNKNOWN'}
     blockers=[]; selection=None
@@ -651,7 +663,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
         blockers.append('walltime 超过分区上限')
     if scheduler=='slurm' and facts.get('PARTITIONS') and config['queue'] not in facts['PARTITIONS'].split(','):
         blockers.append('所选节点不属于该 Slurm 分区')
-    check_program=purpose=='vasp' and config.get('runtime_source')!='script'
+    check_program=not queued and purpose=='vasp' and config.get('runtime_source')!='script'
     if check_program and runtime_config(report['config'])!=runtime_config(config):
         # Only changed runtime paths are checked. Keep the node/queue observation.
         cached=_runtime_cache(config,purpose)
@@ -673,9 +685,11 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if report['availability']['exit_code']!=0: blockers.append('容量诊断异常')
     warnings=list(blockers) if queued else []
     if queued:
+        if str(facts.get('CPUS_TOTAL','')).isdigit() and ppn>int(facts['CPUS_TOTAL']):warnings.append('请求 CPU 核数超过缓存中的节点总量；提交由调度器决定')
+        if gpu and str(facts.get('GPUS_TOTAL','')).isdigit() and gpu['gpus']>int(facts['GPUS_TOTAL']):warnings.append('请求 GPU 数量超过缓存中的节点总量；提交由调度器决定')
         if facts.get('STATUS')!='FULLY_IDLE':warnings.append('节点当前状态 '+str(facts.get('STATUS') or '未知')+'；按明确请求交由调度器决定')
         if facts.get('GPU_ACTIVE_PROCESSES') not in (None,'','0'):warnings.append('GPU 活动进程 '+str(facts['GPU_ACTIVE_PROCESSES'])+'；直接提交可能等待或遇到已有进程占用')
-        if gpu and facts.get('GPUS_TOTAL') in (None,'','unknown'):warnings.append('调度器 GPU 总量未知，按明确卡数与整节点 CPU 请求提交；不能据此确认 GPU 空闲')
+        if gpu and facts.get('GPUS_TOTAL') in (None,'','unknown'):warnings.append('调度器 GPU 总量未知，按填写的 CPU 与 GPU 数量提交，由调度器决定分配')
     if queued:
         if selection is None:raise ValueError('请求资源无效：'+'；'.join(blockers))
         blockers=[]
@@ -683,7 +697,7 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
     if gpu and selection:
         p.update(resource_mode='gpu', mpi_ranks=gpu['mpi_ranks'], gpus=selection['requested_gpus'],
                  required_gpus=gpu['gpus'], gpu_resource_registered=selection['gpu_resource_registered'],
-                 resource_request=gpu, allocation='whole_node')
+                 resource_request=gpu, allocation='requested' if queued else 'whole_node')
         if gpu.get('gpu_type'): p['gpu_type'] = gpu['gpu_type']
     renderer=pbs.render_script if scheduler=='pbs' else slurm.render_script
     script='' if config.get('runtime_source')=='script' else renderer(p)
@@ -705,7 +719,24 @@ def preview(config, probe_id, node, cores=None, reason='', purpose='vasp'):
             'capacity_wait': bool(blockers) and all(str(v).startswith(selector.CAPACITY_BLOCKERS) for v in blockers),
             'node_status':facts.get('STATUS'),
             'resource_ready':not blockers,'submission_enabled':False,'probe_id':probe_id,
-            'note':'资源与脚本预览已生成。提交前仍需绑定冻结输入、完成输入审查，并再次检查所选节点容量。'}
+            'note':'资源与脚本预览已生成；提交由调度器接收并决定排队，节点诊断仅供参考。' if queued else '资源与脚本预览已生成；派发前会再次检查节点容量。'}
+
+
+def dispatch_probe(config, purpose='vasp', context=None):
+    """Submission uses explicit requests; diagnostics remain a separate user action."""
+    if config.get('resource_policy')=='scheduler_queue':
+        return {'id':'','config':config,'preflight':{'hosts':[]}}
+    return capacity_probe(config,purpose=purpose,context=context)
+
+
+def submission_probe(config,purpose='vasp'):
+    if config.get('resource_policy')=='scheduler_queue':return dispatch_probe(config,purpose)
+    return probe(config,purpose=purpose)
+
+
+def dispatch_probes(configs):
+    if all(c.get('resource_policy')!='scheduler_queue' for c in configs):return probe_many(configs)
+    return {config_hash(config):dispatch_probe(config) for config in configs}
 
 
 def preview_for_prepare(config, probe_id, node, cores=None, reason='', purpose='vasp'):

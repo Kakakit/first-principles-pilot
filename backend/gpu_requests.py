@@ -42,13 +42,11 @@ def resolve(config, record=None):
     inferred = record.get('resource_request') if record else None
     if not inferred and supplied.get('mode') != 'gpu': return None
     if inferred and supplied.get('mode') == 'cpu': raise ValueError('GPU 脚本不能使用 CPU 资源模式')
-    request = {**(inferred or {}), **supplied, 'mode': 'gpu', 'allocation': 'whole_node'}
+    request = {**(inferred or {}), **supplied, 'mode': 'gpu', 'allocation': 'requested' if config.get('resource_policy')=='scheduler_queue' else 'whole_node'}
     # Device masks and typed GRES are properties of the selected immutable body.
     for key in ('devices', 'gpu_type'):
         if inferred and key in inferred: request[key] = inferred[key]
         else: request.pop(key, None)
-    if supplied.get('allocation', 'whole_node') != 'whole_node':
-        raise ValueError('GPU 任务当前仅支持整节点占用')
     for key in ('mpi_ranks', 'gpus'):
         value = request.get(key)
         if type(value) is not int or not 1 <= value <= 100000:

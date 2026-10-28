@@ -1,5 +1,5 @@
 import type {ServerConfig} from './executionUi';
-export type ResourceRequest={mode:'gpu';allocation:'whole_node';mpi_ranks:number|null;gpus:number|null;devices?:string[];gpu_type?:string};
+export type ResourceRequest={mode:'gpu';allocation:'whole_node'|'requested';mpi_ranks:number|null;gpus:number|null;devices?:string[];gpu_type?:string};
 export type ScriptRecord={id:string;name:string;alias:string;scheduler:string;program:string;source:string;original_text?:string;resources?:Record<string,string|number>;resource_request?:ResourceRequest;compatible_programs?:string[];availability?:string;parent_id?:string;program_conflict?:string;verification_status?:'candidate'|'historical'|'user_imported'};
 export const programLabels:Record<string,string>={vasp_std:'VASP 常规',vasp_ncl:'VASP SOC／非共线',gpu_vasp:'GPU VASP',wannier90:'Wannier90',other:'其他程序'};
 export const schedulerName=(value:string)=>(value||'pbs').toLowerCase().replace('pbs/torque','pbs').replace('torque','pbs');

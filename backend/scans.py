@@ -8,6 +8,7 @@ import json
 import re
 import uuid
 from contextlib import closing
+from collections import Counter
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
 
@@ -36,6 +37,26 @@ def decimal(raw):
     return value
 
 
+def incar_tag(raw):
+    if not isinstance(raw, str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*(?:/[A-Za-z][A-Za-z0-9_]*)*', raw.strip()) or len(raw.strip()) > 200:
+        raise ValueError('INCAR tag 须为字母开头的参数名，可包含数字、下划线或层级斜线')
+    return raw.strip().upper()
+
+
+
+def incar_value(tag, raw):
+    """Use the existing INCAR parser; one list item is exactly one assignment."""
+    if not isinstance(raw, str) or not raw.strip() or len(raw.encode()) > 20000 or any(c in raw for c in '\r\n\0'):
+        raise ValueError('INCAR 列表项须为非空的单行原文（最多 20 KiB）')
+    from .incar_text import statements
+    value = raw.strip()
+    entries, malformed = statements(tag + ' = ' + value + '\n')
+    if malformed or len(entries) != 1 or entries[0]['tag'] != tag or entries[0]['value'] != value:
+        raise ValueError('每个列表项只能包含当前 tag 的值，不能另写赋值、注释或未闭合的引号')
+    return value
+
+
+
 def axis(dimension, stage):
     kind = dimension.get('kind')
     if kind == 'kmesh':
@@ -45,10 +66,8 @@ def axis(dimension, stage):
         values = [' '.join(map(str, m)) for m in meshes]
     else:
         if kind == 'incar':
-            tag = dimension.get('tag')
+            tag = incar_tag(dimension.get('tag'))
             definition = parameter_catalog.DEFINITIONS.get(tag)
-            if not definition or definition['type'] not in ('number', 'integer', 'ediffg') or tag in parameter_catalog.MANAGED | parameter_catalog.CONTRACT_LOCKED or definition.get('applies_to') and stage not in definition['applies_to']:
-                raise ValueError('只能扫描当前阶段已登记的数值型 INCAR 参数')
         elif kind in ('u', 'j'):
             if not re.fullmatch(r'[A-Z][a-z]?', str(dimension.get('element', ''))):
                 raise ValueError('U/J 元素无效')
@@ -62,7 +81,14 @@ def axis(dimension, stage):
         if sampling == 'list':
             raw_values = dimension.get('values')
             if not isinstance(raw_values, list) or not 1 <= len(raw_values) <= 64:
-                raise ValueError('数值列表须包含 1–64 个值，用逗号分隔')
+                raise ValueError('取值列表须包含 1–64 个值，用逗号分隔')
+            if kind == 'incar':
+                values = []
+                for index, raw in enumerate(raw_values, 1):
+                    try: values.append(incar_value(tag, raw))
+                    except ValueError as error: raise ValueError(f'INCAR 列表第 {index} 项：{error}') from error
+                if len(values) != len(set(values)): raise ValueError('扫描维度值重复')
+                return values
             grid = []
             for index, value in enumerate(raw_values, 1):
                 try: grid.append(decimal(value))
@@ -92,7 +118,8 @@ def axis(dimension, stage):
         for current in grid:
             value = format(current.normalize(), 'f')
             if value == '-0': value = '0'
-            if kind == 'incar': parameter_catalog.validate_value(tag, value)
+            if kind == 'incar' and definition and definition['type'] == 'integer' and current != current.to_integral_value():
+                raise ValueError(tag + ' 的数值范围必须生成整数；原文取值可使用列表')
             if kind in ('u', 'j') and current < 0: raise ValueError('U/J 不得为负')
             if kind == 'poscar' and current <= 0: raise ValueError('POSCAR 扫描值必须大于零；目标体积填写正数，输出为负 scale')
             values.append(value)
@@ -137,10 +164,12 @@ def case_project(project, base_id, dimensions, values, baseline=None):
         kind = dimension['kind']
         if kind == 'incar':
             from .incar_text import parse, replace
-            tag = dimension['tag']
-            layer.setdefault('values', {})[tag] = value
-            if tag in parse(layer.get('manualIncarText',''))[0]:
-                layer['manualIncarText'] = replace(layer['manualIncarText'],tag,value)
+            tag = incar_tag(dimension['tag'])
+            value = incar_value(tag, value)
+            definition = parameter_catalog.DEFINITIONS.get(tag)
+            if definition and definition['type'] in ('number','integer','ediffg') and len(value) <= 200:
+                layer.setdefault('values', {})[tag] = value
+            layer['manualIncarText'] = replace(layer.get('manualIncarText',''),tag,value)
         elif kind in ('u', 'j'):
             element = dimension['element']
             row = layer.setdefault('hubbard', {}).setdefault(element, copy.deepcopy(base_hubbard.get(element, {'l':'-1','u':'0','j':'0'})))
@@ -203,8 +232,12 @@ def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', f
         raise ValueError('迭代节点须直接连接一个 relax 或 SCF 基础节点')
     if not isinstance(dimensions, list) or not 1 <= len(dimensions) <= 4 or any(not isinstance(d, dict) for d in dimensions):
         raise ValueError('请输入 1–4 个扫描维度')
+    dimensions = [{**d, 'tag':incar_tag(d.get('tag'))} if d.get('kind') == 'incar' else d for d in dimensions]
     keys = [(d.get('kind'), None if d.get('kind') == 'poscar' else d.get('tag') or d.get('element')) for d in dimensions]
     if len(keys) != len(set(keys)): raise ValueError('扫描维度重复')
+    for kind, tag in (('u','LDAUU'), ('j','LDAUJ')):
+        if any(d['kind'] == kind for d in dimensions) and any(d['kind'] == 'incar' and d['tag'] == tag for d in dimensions):
+            raise ValueError('不能同时迭代 '+tag+' 原文与对应的元素 '+kind.upper()+'，两者会覆盖同一个值')
     if any(d['kind'] in ('u','j') for d in dimensions):
         effective = inputs.generate(project,base_node_id)['parameters']
         if effective.get('LDAU',{}).get('value') != 'true': raise ValueError('U/J 扫描要求基础计算启用 LDAU')
@@ -222,6 +255,9 @@ def preview(project, scan_node_id, base_node_id, dimensions=None, mode='vasp', f
     for index, values in enumerate(itertools.product(*axes)):
         case = case_project(project, base_node_id, dimensions, values, baseline)
         report = inputs.generate(case, base_node_id)
+        for dimension in dimensions:
+            if dimension['kind'] == 'incar' and dimension['tag'] not in parameter_catalog.KNOWN and dimension['tag'] not in parameter_catalog.DEFINITIONS:
+                report['warnings'].append(dimension['tag']+' 为自定义 INCAR tag，已按原文写入；目标 VASP 是否识别需自行确认')
         geometry_scan = next(n for n in case['nodes'] if n['id'] == base_node_id)['data'].get('poscarScan') if baseline else None
         if geometry_scan and report['files']:
             report['files']['POSCAR'] = report['files'].pop('POSCAR.reference', report['files'].get('POSCAR', ''))
@@ -359,6 +395,7 @@ def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_def
     project=source_project(project,scan_node_id,base_node_id)
     if not isinstance(reason,str) or len(reason)>2000: raise ValueError('备注最多 2000 字')
     report = preview(project,scan_node_id,base_node_id,dimensions,_include_baseline=True)
+    dimensions = report['dimensions']
     baseline = report.pop('_geometry_baseline')
     if expected_definition_hash is not None and report['definition_hash']!=expected_definition_hash:
         raise ValueError('基础输入或扫描定义已变化，请重新预览')
@@ -388,7 +425,7 @@ def resource_preview(batch_id, project_id, config, candidates):
     from . import wannier_scans
     if wannier_scans.is_window(batch):return wannier_scans.resources(batch,config,candidates)
     candidates = candidate_pool.validate(candidates)
-    probe = servers.probe(config)
+    probe = servers.submission_probe(config)
     return {'previews': candidate_pool.previews(config, probe, candidates)}
 
 
@@ -409,14 +446,14 @@ def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None
     for case in batch['cases']:
         manifest,_=ex.bundle(case['bundle_id'],allow_dependencies=True)
         branch_bindings.check(ex.frozen_project(case['bundle_id']),batch['base_node_id'],config['alias'],manifest.get('source_contract'),batch['scan_node_id'])
-    probe = servers.probe(config)
+    probe = servers.submission_probe(config)
     checked = None
     if candidates is not None:
         candidates = candidate_pool.validate(candidates)
         checked = candidate_pool.approve(candidates, candidate_pool.previews(config, probe, candidates), approved_previews)
         if max_parallel is None: max_parallel = len(checked)
-        if type(max_parallel) is not int or not 1 <= max_parallel <= len(checked):
-            raise ValueError('本批同时运行上限须在 1 与候选节点数量之间')
+        if type(max_parallel) is not int or not 1 <= max_parallel <= 100000:
+            raise ValueError('本批在途上限须为正整数')
     else:
         # Already frozen older clients/authorizations keep their single-node contract.
         rendered = servers.preview(config,probe['id'],node,cores,reason)
@@ -565,10 +602,10 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
                     return existing['state'] not in ('UNKNOWN','DISPATCHING')
         probe=None
         if waiting['state']=='PENDING' or auth.get('candidates'):
-            probe=(servers.capacity_probe(auth['config'],context=capacity_context,**({'purpose':purpose} if window_mode else {})) if auth.get('candidates')
-                   else servers.probe(auth['config']))
+            probe=(servers.dispatch_probe(auth['config'],context=capacity_context,**({'purpose':purpose} if window_mode else {})) if auth.get('candidates')
+                   else servers.submission_probe(auth['config']))
         if waiting['state']=='PENDING':
-            occupied={r.get('node') for r in same}
+            occupied=Counter(r['node'] for r in same if r.get('node'))
             choice,message=candidate_pool.select(auth['config'],probe,choices,occupied,**({'render':render} if window_mode else {}))
             if choice is None:
                 batch['waiting_reason']=message;save(batch);return False
@@ -587,7 +624,7 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
             if auth.get('candidates') and (not allowed or prepared.get('profile')!=allowed['profile']):
                 raise ValueError('准备记录已偏离本批候选池；请核查准确 attempt')
             if allowed and auth.get('candidates'):
-                _,message=candidate_pool.select(auth['config'],probe,[allowed],{r.get('node') for r in same},**({'render':render} if window_mode else {}))
+                _,message=candidate_pool.select(auth['config'],probe,[allowed],Counter(r['node'] for r in same if r.get('node')),**({'render':render} if window_mode else {}))
                 if message: batch['waiting_reason']=message;save(batch);return False
             cap=limits['max_cores_per_host']
             counts=[r.get('profile',{}).get('ppn',r.get('profile',{}).get('ntasks')) for r in same+[prepared]]
@@ -612,7 +649,7 @@ def _tick_batch_once(batch_id,capacity_context,dispatched):
             # Keep the exact unsubmitted attempt; other contract changes block.
             prepared=ex.get(waiting['attempt_id'])
             try:
-                fresh=servers.capacity_probe(auth['config'],**({'purpose':purpose} if window_mode else {}))
+                fresh=servers.dispatch_probe(auth['config'],**({'purpose':purpose} if window_mode else {}))
                 current=(render or servers.preview)(auth['config'],fresh['id'],prepared['node'],prepared['cores'],prepared['reason'])
                 if candidate_pool.capacity_wait(current) and current['profile']==prepared['profile']:
                     batch['waiting_reason']='原准备节点暂时占用，等待空闲后提交同一个 attempt';save(batch);return False

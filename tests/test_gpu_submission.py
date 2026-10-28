@@ -55,6 +55,39 @@ class GpuSubmissionTests(unittest.TestCase):
             'queues':[{'name':'batch','enabled':'True','started':'True','available':'up','time_limit':'infinite'}],
             'diagnostics':{'exit_code':0,'stdout':'','stderr':''},'availability':{'exit_code':0,'stdout':text,'stderr':''}})
     def render(self,probe):return servers.preview(self.config,probe['id'],'node01')
+    def test_queue_preview_without_probe_uses_requested_cpu_and_gpu_only(self):
+        config={**self.config,'resource_policy':'scheduler_queue'}
+        with patch.object(servers,'run',side_effect=AssertionError('resource preview must be local')):
+            value=servers.preview(config,'','node01',3)
+        self.assertTrue(value['resource_ready'],value['blockers'])
+        self.assertEqual(value['profile']['ppn'],3)
+        self.assertEqual(value['profile']['gpus'],1)
+        self.assertIn('nodes=node01:ppn=3:gpus=1',value['script'])
+        self.assertIn('CUDA_VISIBLE_DEVICES=1',value['script'])
+        self.assertEqual(job_templates.get_template(self.record['id'])['original_text'],PBS)
+
+    def test_queue_gpu_profile_does_not_depend_on_diagnostic_snapshot(self):
+        config={**self.config,'resource_policy':'scheduler_queue','resource_request':{'mode':'gpu','allocation':'requested','mpi_ranks':1,'gpus':1}}
+        self.assertEqual(gpu_requests.resolve(config,self.record)['allocation'],'requested')
+        self.assertEqual(gpu_requests.resolve({**config,'resource_policy':'wait_idle'},self.record)['allocation'],'whole_node')
+        cached=servers.preview(config,self.probe()['id'],'node01',3)
+        without=servers.preview(config,'','node01',3)
+        self.assertEqual(cached['profile'],without['profile'])
+        self.assertEqual(cached['script'],without['script'])
+        invalid={**config,'resource_request':{**config['resource_request'],'mpi_ranks':4}}
+        with self.assertRaisesRegex(ValueError,'资源'):servers.preview(invalid,'','node01',3)
+
+    def test_slurm_queue_does_not_add_exclusive_and_preserves_explicit_exclusive(self):
+        self.scheduler='slurm'
+        for exclusive in ('','\n#SBATCH --exclusive\n'):
+            record=job_templates.import_template(SLURM.replace('cd $SLURM_SUBMIT_DIR',exclusive+'cd $SLURM_SUBMIT_DIR'),'gpu','gpu_vasp','fixture','GPU request')
+            config={**self.config,'scheduler':'slurm','template_id':record['id'],'resource_policy':'scheduler_queue'}
+            result=servers.preview(config,'','gpu-node',6)
+            self.assertTrue(result['resource_ready'],result['blockers'])
+            self.assertEqual(result['profile']['gpus'],2)
+            self.assertIn('#SBATCH --ntasks=6\n',result['script'])
+            self.assertEqual(result['script'].count('#SBATCH --exclusive'),bool(exclusive))
+
     def test_pbs_full_reservation_keeps_one_rank_and_original_mask(self):
         result=self.render(self.probe())
         self.assertTrue(result['resource_ready'],result['blockers'])

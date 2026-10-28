@@ -437,7 +437,7 @@ def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, a
     checked = {}
     if run.get('reuse_bindings') and config.get('alias') != run.get('source_alias'):
         raise ValueError('执行主机须与冻结的历史来源主机一致')
-    probes = servers.probe_many([_node_config(config, resources[key]) for key in run['node_ids']])
+    probes = servers.dispatch_probes([_node_config(config, resources[key]) for key in run['node_ids']])
     by_id = {step['node_id']: step for step in run['steps']}
     for key in run['node_ids']:
         choice = resources[key]
@@ -524,7 +524,7 @@ def resource_preview(run_id, project_id, config, resources):
     if run.get('reuse_bindings') and config.get('alias') != run.get('source_alias'):
         raise ValueError('执行主机须与冻结的历史来源主机一致')
     configs = {step['node_id']: _node_config(config, resources[step['node_id']]) for step in run['steps']}
-    probes = servers.probe_many(list(configs.values()))
+    probes = servers.dispatch_probes(list(configs.values()))
     cache, result = {}, {}
     for step in run['steps']:
         key = step['node_id']
@@ -827,7 +827,7 @@ def _advance(run_id,capacity_context=None):
                     run = save(run)
                 probe_key = digest(node_config)
                 if probe_key not in probes:
-                    probes[probe_key] = servers.capacity_probe(node_config, context=capacity_context)
+                    probes[probe_key] = servers.dispatch_probe(node_config, context=capacity_context)
                 probe = probes[probe_key]
                 candidates = resource.get('candidates') or [resource]
                 from .candidate_pool import select

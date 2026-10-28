@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 import test_scans as fixtures
@@ -43,6 +44,35 @@ class PoolTests(unittest.TestCase):
         with patch.object(scans.servers,'capacity_probe',return_value={'id':'live'}),patch.object(scans.servers,'preview',side_effect=self.rendered),patch.object(scans.control,'settings',return_value=limits or {'max_inflight_total':4,'max_inflight_per_host':4,'max_cores_per_host':None}),patch('backend.extension_runs.active_usage',return_value=[]),patch.object(ex,'prepare',side_effect=self.prepare) as prepare,patch.object(ex,'submit',side_effect=self.submit) as submit:
             scans.tick()
             return prepare.call_count,submit.call_count
+
+    def test_queue_batch_balances_more_jobs_than_candidate_nodes(self):
+        batch=self.approved(4)
+        batch['authorization']['config']['resource_policy']='scheduler_queue';scans.save(batch)
+        self.assertEqual(self.run_tick({'max_inflight_total':8,'max_inflight_per_host':8,'max_cores_per_host':None}),(4,4))
+        nodes=[ex.get(c['attempt_id'])['node'] for c in scans.get(batch['id'])['cases']]
+        self.assertEqual(nodes,['node01','node02','node01','node02'])
+
+    def test_queue_prefers_fewer_local_jobs_and_idle_wait_still_holds_occupied_nodes(self):
+        config={'alias':'jutai-1','resource_policy':'scheduler_queue'}
+        candidates=[]
+        for name in ['node01','node02']:
+            value=self.rendered(config,'probe',name,4)
+            candidates.append({'node':name,'cores':4,'reason':'','profile':value['profile'],'script_sha256':hashlib.sha256(value['script'].encode()).hexdigest()})
+        loads=Counter({'node01':4,'node02':1})
+        self.assertEqual(candidate_pool.select(config,{'id':'probe'},candidates,loads,self.rendered)[0]['node'],'node02')
+        choice,message=candidate_pool.select({**config,'resource_policy':'wait_idle'},{'id':'probe'},candidates,loads,self.rendered)
+        self.assertIsNone(choice);self.assertIn('占用',message)
+
+    def test_node_loads_count_queued_and_running_receipts_across_projects(self):
+        for index,(node,state,alias,released) in enumerate([
+            ('node01','RUNNING','jutai-1',False),('node01','QUEUED','jutai-1',False),
+            ('node02','SUBMITTED','jutai-1',False),('node01','UNKNOWN','jutai-1',True),
+            ('node02','RUNNING','other-host',False),('node01','CANCELLED','jutai-1',False)]):
+            key=format(index+1,'032x')
+            record=self.prepare('bundle',{'alias':alias},'probe',node,4,'',None,attempt_id=key)
+            record.update(state=state,quota_released=released);ex.save(record)
+        self.assertEqual(candidate_pool.node_loads('jutai-1'),Counter({'node01':2,'node02':1}))
+        self.assertEqual(candidate_pool.occupied_nodes('jutai-1'),{'node01','node02'})
 
     def test_authorization_uses_busy_candidates_and_exact_script_per_node(self):
         self.busy_nodes={'node01'}

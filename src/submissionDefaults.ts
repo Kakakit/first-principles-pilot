@@ -3,7 +3,8 @@ export type WorkbenchSettings={version:number;runtimes:Record<string,ServerConfi
 export function runtimeFor(config:ServerConfig,profiles:RegisteredProfile[],settings:WorkbenchSettings,alias:string,program='vasp_std'):ServerConfig {
  const profile=profiles.find(item=>item.alias===alias);
  const registered=profile?{...config,alias,scheduler:profile.scheduler.toLowerCase(),queue:profile.queue,remote_workspace_root:profile.remote_workspace_root||'',pyw90_python:profile.pyw90_python||'',pyw90_package:profile.pyw90_package||'',mpi_executable:profile.mpi_executable,vasp_executable:program==='vasp_ncl'?profile.ncl_executable||'':profile.vasp_executable,environment_script:profile.environment_script,module:profile.module,launcher:profile.launcher,runtime_environment:profile.runtime_environment,pmi_library:profile.pmi_library,pmi_type:profile.pmi_type}:config;
- const next:ServerConfig={...registered,...settings.runtimes[alias+':'+program],program};
+ const saved=settings.runtimes[alias+':'+program];
+ const next:ServerConfig={...registered,...saved,program,resource_policy:config.resource_policy||saved?.resource_policy||'scheduler_queue'};
  if(profile)for(const key of ['pyw90_python','pyw90_package'] as const)if(typeof profile[key]==='string')next[key]=profile[key]!;
  if(profile?.remote_workspace_root)next.remote_workspace_root=profile.remote_workspace_root;
  delete next.template_id;delete next.script_templates;

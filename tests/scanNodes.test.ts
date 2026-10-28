@@ -17,3 +17,12 @@ test('explicit legacy upgrade copies settings and reconnects upstream without ch
  assert.deepEqual(p,original);assert.equal(calculationKind(changed,result),'relax');assert.equal(result.edges.find(e=>e.target===scan.id)!.source,s.id);
  assert.equal(changed.data.parameters!.values.ENCUT,'520');assert.equal(changed.data.stageSequence,scan.data.stageSequence);assert.deepEqual(result.nodes.find(n=>n.id===base.id),base);
 });
+
+import {splitScanValues} from '../src/scanNodes.ts';
+test('scan value lists preserve vectors, VASP quotes and incomplete editing text',()=>{
+ assert.deepEqual(splitScanValues('Normal, Fast'),['Normal',' Fast']);
+ assert.deepEqual(splitScanValues('0 0 1, 1 0 0'),['0 0 1',' 1 0 0']);
+ assert.deepEqual(splitScanValues('"a,b", "c,d"'),['"a,b"',' "c,d"']);
+ assert.deepEqual(splitScanValues('400,'),['400','']);
+ assert.deepEqual(splitScanValues('"incomplete,'),['"incomplete,']);
+});
