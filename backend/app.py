@@ -1235,6 +1235,21 @@ def workspace_revision(revision: int):
         raise HTTPException(404, str(exc)) from exc
 
 
+class WorkspaceCheckpoint(BaseModel):
+    expected_revision: int = Field(ge=1)
+    label: str = Field(default='', max_length=200)
+
+
+@app.post('/api/workspace/checkpoints')
+def workspace_checkpoint(payload: WorkspaceCheckpoint):
+    try:
+        return WorkspaceStore().checkpoint(payload.expected_revision, payload.label)
+    except ConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 from .inputs import upload_potcar, assemble_potcar, generate, freeze, digest, ROOT, history
 from . import potcar_library
 from . import servers

@@ -1,11 +1,19 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {WorkspacePersistence,WorkspaceRequestError,workspaceRequest,workspaceSerializer} from '../src/workspacePersistence.ts';
+import {WorkspacePersistence,WorkspaceRequestError,workspaceRequest,workspaceSerializer,autosaveDelay,AUTOSAVE_IDLE_MS} from '../src/workspacePersistence.ts';
 import {demoWorkspace,cleanWorkspace} from '../src/model.ts';
 import {pollSerial} from '../src/pollSerial.ts';
 
 const initial=()=>JSON.stringify(cleanWorkspace(demoWorkspace()));
 const changed=(body:string,name:string)=>{const value=JSON.parse(body);value.projects[0].name=name;return JSON.stringify(value);};
+
+test('autosave waits for 30 seconds of idle editing and continuous edits cannot postpone it past two minutes',()=>{
+ assert.equal(AUTOSAVE_IDLE_MS,30_000);
+ assert.equal(autosaveDelay(0,0),30_000);
+ assert.equal(autosaveDelay(0,110_000),10_000);
+ assert.equal(autosaveDelay(0,120_000),0);
+ assert.equal(autosaveDelay(0,150_000),0);
+});
 
 test('lost successful save receipt is reconciled before newer edits are saved',async()=>{
  const base=initial(),first=changed(base,'first'),second=changed(base,'second');

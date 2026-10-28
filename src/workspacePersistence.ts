@@ -1,6 +1,10 @@
 import {cleanWorkspace} from './model';
 import type {Workspace} from './model';
 
+export const AUTOSAVE_IDLE_MS=30_000;
+export const AUTOSAVE_MAX_WAIT_MS=120_000;
+export const autosaveDelay=(dirtySince:number,now:number)=>Math.max(0,Math.min(AUTOSAVE_IDLE_MS,AUTOSAVE_MAX_WAIT_MS-(now-dirtySince)));
+
 export class WorkspaceRequestError extends Error {
   constructor(message:string, public retryable=false, public status=0){super(message);}
 }

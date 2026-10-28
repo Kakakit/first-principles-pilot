@@ -300,7 +300,7 @@ def restore(root, manifest, objects, expected_revision, pause_automatic=False):
             operation.update(state='PAUSED',paused_at=datetime.now(timezone.utc).isoformat(),snapshot_pause_reason='项目快照还原')
             from .execution_control import write_json
             write_json(saved,operation)
-    with closing(sqlite3.connect(root / 'execution.sqlite3', timeout=10)) as db:
+    with store.snapshot_lock, closing(sqlite3.connect(root / 'execution.sqlite3', timeout=10)) as db:
         # Problems and workspace revision change in the same SQLite transaction.
         db.execute('ATTACH DATABASE ? AS notebook', (str(root / 'problem-records.sqlite3'),))
         db.execute('ATTACH DATABASE ? AS workspace_index', (str(root / 'index.sqlite3'),))
@@ -403,4 +403,5 @@ def restore(root, manifest, objects, expected_revision, pause_automatic=False):
         for project in workspace['projects']:
             db.execute('INSERT INTO workspace_index.projects VALUES(?,?,?)', (project['id'], project['name'], revision))
         db.commit()
+        store.checkpoint(revision, '跨设备还原')
     return store.read()

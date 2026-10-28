@@ -3,7 +3,8 @@ import type {Dispatch,SetStateAction} from 'react';
 import {cleanWorkspace,parseWorkspace} from './model';
 import type {Workspace} from './model';
 import {verifySource} from './structure';
-import {WorkspacePersistence,WorkspaceRequestError,workspaceRequest,workspaceSerializer} from './workspacePersistence';
+import {WorkspacePersistence,WorkspaceRequestError,workspaceRequest,workspaceSerializer,autosaveDelay,AUTOSAVE_IDLE_MS} from './workspacePersistence';
+import {requestJson} from './apiClient';
 
 export const MAX_BACKUP_BYTES=32*1024*1024;
 export async function checkedWorkspace(value:unknown) {
@@ -16,6 +17,7 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
   const [error,setError]=useState(''),[path,setPath]=useState(''),[retry,setRetry]=useState(0);
   const latest=useRef(workspace),persistence=useRef(new WorkspacePersistence()),serialize=useRef(workspaceSerializer()),running=useRef<Promise<void>|null>(null),paused=useRef(false);
   const mounted=useRef(true),failures=useRef(0);
+  const savedWorkspace=useRef<Workspace|null>(null),dirtySince=useRef<number|null>(null);
   const timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined),drain=useRef(false),flushLatest=useRef<()=>Promise<void>>(()=>Promise.resolve());
   latest.current=workspace;
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;clearTimeout(timer.current);};},[]);
@@ -35,6 +37,7 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
       }
       if(!active)return;
       persistence.current.initialize(serialize.current(w),result.revision);paused.current=false;failures.current=0;
+      savedWorkspace.current=w;dirtySince.current=null;
       setWorkspace(w);setPath(result.path);setReady(true);setStatus('已保存到本机工作区');
     })().catch(e=>{if(active){const detail=e instanceof DOMException||e instanceof TypeError?'无法连接本机工作台；请确认工作台启动窗口仍在运行。':(e as Error).message;setError(detail);setStatus('工作区未连接');}});
     return()=>{active=false;controller.abort();};
@@ -48,17 +51,19 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
     const save=async()=>{
       try{
         while(true){
-          const body=serialize.current(latest.current);
+          const candidate=latest.current,body=serialize.current(candidate);
           if(body===persistence.current.saved&&persistence.current.pendingBody===null)break;
           if(new TextEncoder().encode(body).length>MAX_BACKUP_BYTES)throw new Error('工作区超过 32 MiB，请先导出并拆分项目。');
           setStatus('正在保存到本机…');
           await persistence.current.save(body);
+          savedWorkspace.current=candidate;
           if(!mounted.current)return;
           failures.current=0;setError('');
           if(!drain.current&&serialize.current(latest.current)!==body){
-            setStatus('有修改待保存');timer.current=setTimeout(()=>void flushLatest.current(),1000);return;
+            dirtySince.current=Date.now();setStatus('有修改待保存');timer.current=setTimeout(()=>void flushLatest.current(),AUTOSAVE_IDLE_MS);return;
           }
         }
+        savedWorkspace.current=latest.current;dirtySince.current=null;
         failures.current=0;setError('');setStatus('已保存到本机工作区');
       }catch(e){
         if(!mounted.current)return;
@@ -73,9 +78,10 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
     running.current=Promise.resolve().then(save);return running.current;
   },[ready]);
   flushLatest.current=flush;
-  useEffect(()=>{if(!ready)return;setStatus('有修改待保存');timer.current=setTimeout(()=>void flush(),1000);return()=>clearTimeout(timer.current);},[workspace,ready,flush]);
+  useEffect(()=>{if(!ready)return;if(workspace===savedWorkspace.current&&persistence.current.pendingBody===null&&!running.current){dirtySince.current=null;setStatus('已保存到本机工作区');return;}dirtySince.current??=Date.now();setStatus('有修改待保存');timer.current=setTimeout(()=>void flush(),autosaveDelay(dirtySince.current,Date.now()));return()=>clearTimeout(timer.current);},[workspace,ready,flush]);
   const finishEditing=useCallback(()=>{drain.current=true;void flush();},[flush]);
   useEffect(()=>{const hidden=()=>{if(document.hidden)finishEditing();};document.addEventListener('visibilitychange',hidden);return()=>document.removeEventListener('visibilitychange',hidden);},[finishEditing]);
+  useEffect(()=>{const save=(event:KeyboardEvent)=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void flush(true);}};window.addEventListener('keydown',save);return()=>window.removeEventListener('keydown',save);},[flush]);
   useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(ready&&(serialize.current(latest.current)!==persistence.current.saved||persistence.current.pendingBody!==null)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[ready]);
   const exclusive=async<T,>(action:()=>Promise<T>):Promise<T>=>{
     await flush(true);
@@ -84,5 +90,10 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
     try{return await action();}
     finally{setRetry(n=>n+1);}
   };
-  return {ready,status,error,path,flush,finishEditing,exclusive,reload:()=>setRetry(n=>n+1)};
+  const checkpoint=async(label='')=>{
+    await flush(true);
+    if(paused.current||persistence.current.pendingBody!==null||serialize.current(latest.current)!==persistence.current.saved)throw new Error('当前草稿尚未保存，不能建立检查点。');
+    await requestJson('/api/workspace/checkpoints',{expected_revision:persistence.current.revision,label});
+  };
+  return {ready,status,error,path,flush,checkpoint,finishEditing,exclusive,reload:()=>setRetry(n=>n+1)};
 }

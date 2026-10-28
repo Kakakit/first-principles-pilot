@@ -1,0 +1,21 @@
+.workspace-recovery-dialog{width:640px;max-width:calc(100vw - 32px);max-height:calc(100vh - 48px);overflow:auto;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border);border-radius:var(--radius);box-shadow:0 15px 35px hsla(0,0%,0%,.2);padding:24px}
+.workspace-recovery-dialog>header,.workspace-recovery-actions,.workspace-history-heading,.workspace-checkpoint-create{display:flex;align-items:center;gap:12px;justify-content:space-between}
+.workspace-recovery-dialog h2{margin:0;font-size:20px;font-weight:600}
+.workspace-recovery-dialog .disk-controls{padding:0;border:0}
+.workspace-recovery{font-size:14px;line-height:1.5}
+.workspace-recovery h3{font-size:16px;font-weight:600;margin:0}
+.workspace-recovery>p,.workspace-recovery-location p{color:var(--color-muted-text);margin:8px 0}
+.workspace-recovery-actions,.workspace-checkpoint-create{margin:16px 0}
+.workspace-checkpoint-create input{flex:1;min-width:0}
+.workspace-recovery-feedback{min-height:24px;color:var(--color-warning);overflow-wrap:anywhere}
+.workspace-recovery-list{max-height:256px;overflow:auto;border-block:1px solid var(--ui-divider,var(--color-border))}
+.workspace-checkpoint-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;align-items:center;width:100%;padding:12px 0;background:none;border:0;border-bottom:1px solid var(--ui-divider,var(--color-border));color:inherit;text-align:left;cursor:pointer}
+.workspace-checkpoint-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.workspace-checkpoint-row time{font-variant-numeric:tabular-nums;color:var(--color-muted-text)}
+.workspace-checkpoint-row>span{color:var(--color-primary)}
+.workspace-recovery-preview{margin-top:24px;padding-top:16px;border-top:1px solid var(--ui-divider,var(--color-border))}
+.workspace-recovery-preview label{display:grid;gap:8px;margin-top:12px}
+.workspace-recovery-preview ul{max-height:128px;overflow:auto;padding-left:24px}
+.workspace-recovery-location{margin-top:24px}
+.statusbar .workspace-recovery-trigger{border:0;background:none;color:var(--color-text);padding:0 4px;white-space:nowrap;cursor:pointer;font-size:14px}
+@media(max-width:640px){.workspace-checkpoint-row{grid-template-columns:minmax(0,1fr) auto}.workspace-checkpoint-row time{grid-row:2;grid-column:1/-1}.workspace-recovery-actions,.workspace-checkpoint-create{flex-wrap:wrap}.workspace-recovery-dialog{padding:16px}}

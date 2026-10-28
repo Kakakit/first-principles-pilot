@@ -6,11 +6,14 @@ import os
 import re
 import sqlite3
 import uuid
+import logging
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from .structure_edit import source_bytes, input_geometry
 from .file_cache import ByteCache, read_bytes
+from filelock import FileLock
+from . import workspace_checkpoints as checkpoints
 
 _structures = ByteCache(8 * 1024 * 1024, max_entries=64)
 
@@ -99,14 +102,20 @@ class WorkspaceStore:
         self.root = Path(root)
         for part in ('snapshots', 'originals'):
             (self.root / part).mkdir(parents=True, exist_ok=True)
-        with closing(self.connect()) as db:
+        self.snapshot_lock = FileLock(str(self.root / 'workspace-snapshots.lock'), timeout=10)
+        with self.snapshot_lock, closing(self.connect()) as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS revisions (
                     revision INTEGER PRIMARY KEY AUTOINCREMENT,
                     digest TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS current (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, revision INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS workspace_checkpoints (
+                    revision INTEGER PRIMARY KEY, content_digest TEXT, reason TEXT NOT NULL, label TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT '');
             ''')
+            if 'created_at' not in {row[1] for row in db.execute('PRAGMA table_info(workspace_checkpoints)')}:
+                db.execute("ALTER TABLE workspace_checkpoints ADD COLUMN created_at TEXT NOT NULL DEFAULT ''")
             db.commit()
 
     def connect(self):
@@ -131,6 +140,10 @@ class WorkspaceStore:
         return digest
 
     def read(self, revision=None):
+        with self.snapshot_lock:
+            return self._read(revision)
+
+    def _read(self, revision=None):
         with closing(self.connect()) as db:
             if revision is None:
                 row = db.execute('SELECT revision FROM current WHERE id=1').fetchone()
@@ -179,13 +192,15 @@ class WorkspaceStore:
                 nodes.append(node)
             packed['projects'].append({**project, 'nodes': nodes})
         raw = json.dumps(packed, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
-        with closing(self.connect()) as db:
+        with self.snapshot_lock, closing(self.connect()) as db:
             db.execute('BEGIN IMMEDIATE')
+            checkpoints.seed(db)
             current = db.execute('SELECT revision FROM current WHERE id=1').fetchone()
             current = current[0] if current else 0
             digest = hashlib.sha256(raw).hexdigest()
             previous = db.execute('SELECT digest FROM revisions WHERE revision=?', (current,)).fetchone()
             if previous and previous[0] == digest:
+                db.commit()
                 return {'revision': current, 'path': str(self.root)}
             if expected_revision != current:
                 raise ConflictError('磁盘版本已变化。请先导出当前编辑，再重新载入磁盘版本。')
@@ -198,17 +213,50 @@ class WorkspaceStore:
                         structure = n['data']['structure']
                         self.put_file('originals', validated_structure(structure), structure['source']['sha256'])
             self.put_file('snapshots', raw, digest)
+            created_at = datetime.now(timezone.utc).isoformat()
             cursor = db.execute('INSERT INTO revisions(digest,created_at,reason) VALUES (?,?,?)',
-                                (digest, datetime.now(timezone.utc).isoformat(), reason))
+                                (digest, created_at, reason))
             revision = cursor.lastrowid
             db.execute('INSERT OR REPLACE INTO current(id,revision) VALUES(1,?)', (revision,))
             db.execute('DELETE FROM projects')
             db.executemany('INSERT INTO projects(id,name,revision) VALUES(?,?,?)',
                            [(p['id'], p['name'], revision) for p in workspace['projects']])
+            checkpoints.remember(db, self.root, revision, packed, created_at, reason)
+            checkpoints.trim(db, self.root)
             db.commit()
+            self._collect(db)
         return {'revision': revision, 'path': str(self.root)}
 
     def history(self):
-        with closing(self.connect()) as db:
-            rows = db.execute('SELECT revision,created_at,reason FROM revisions ORDER BY revision DESC LIMIT 100').fetchall()
-        return [{'revision': r, 'created_at': t, 'reason': s} for r,t,s in rows]
+        with self.snapshot_lock, closing(self.connect()) as db:
+            checkpoints.seed(db)
+            rows = db.execute('''SELECT r.revision,COALESCE(NULLIF(c.created_at,''),r.created_at),c.reason,c.label FROM workspace_checkpoints c
+                JOIN revisions r ON r.revision=c.revision ORDER BY r.revision DESC LIMIT ?''', (checkpoints.MAX_CHECKPOINTS,)).fetchall()
+            db.commit()
+        return [{'revision': r, 'created_at': t, 'reason': s, 'label': label} for r,t,s,label in rows]
+
+    def checkpoint(self, expected_revision, label=''):
+        with self.snapshot_lock, closing(self.connect()) as db:
+            db.execute('BEGIN IMMEDIATE')
+            current = db.execute('SELECT revision FROM current WHERE id=1').fetchone()
+            if not current or current[0] != expected_revision:
+                raise ConflictError('磁盘版本已变化，请重新载入后建立检查点。')
+            checkpoints.seed(db)
+            db.execute('INSERT OR REPLACE INTO workspace_checkpoints VALUES(?,?,?,?,?)',
+                       (current[0], None, '手动检查点', label.strip()[:200], datetime.now(timezone.utc).isoformat()))
+            checkpoints.trim(db, self.root)
+            db.commit()
+            self._collect(db)
+        return {'revision': current[0], 'path': str(self.root)}
+
+    def _collect(self, db):
+        try:
+            # Older service processes also publish payloads inside this SQLite
+            # write transaction. Do not collect between their file and row writes.
+            db.execute('BEGIN IMMEDIATE')
+            checkpoints.collect(db, self.root)
+            db.commit()
+        except (OSError, sqlite3.Error) as exc:
+            db.rollback()
+            # The save already committed. A cleanup problem must not masquerade as a failed save.
+            logging.getLogger(__name__).warning('旧工作区草稿清理未完成，将在下次保存重试：%s', exc)

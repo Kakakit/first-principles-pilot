@@ -45,6 +45,8 @@ class DiskStoreTests(unittest.TestCase):
   self.assertEqual(reopened.read()['workspace'],w);self.assertEqual(reopened.read(1)['workspace'],original)
   self.assertEqual(len(list((Path(self.temp.name)/'originals').iterdir())),1)
   self.assertTrue(all('base64' not in p.read_text() for p in (Path(self.temp.name)/'snapshots').iterdir()))
+  self.assertEqual(len(reopened.history()),1)  # An autosaved draft is not a recovery checkpoint.
+  reopened.checkpoint(second['revision'],'edited')
   self.assertEqual(len(reopened.history()),2)
   with sqlite3.connect(str(Path(self.temp.name)/'index.sqlite3')) as db:self.assertEqual(db.execute('SELECT name,revision FROM projects').fetchone(),('edited',second['revision']))
  def test_conflict_invalid_original_and_failed_write_keep_prior(self):
