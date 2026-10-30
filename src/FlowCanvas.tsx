@@ -34,7 +34,7 @@ function StepCard({data, selected}: NodeProps<Step>) {
 const nodeTypes={step:StepCard};
 const multiSelectionKeys=['Meta','Control'];
 
-export default function FlowCanvas({project,nodes,edgeId=null,onChange,onSelectionChange,onNodeClick,onEdgeClick,onPaneClick,onConnect,onDragStart,initialViewport,onViewportChange,focusNode,mode='edit'}:{project:Project;nodes:Step[];edgeId?:string|null;onChange?:(nodes:Step[])=>void;onSelectionChange?:(ids:string[])=>void;onNodeClick:(id:string)=>void;onEdgeClick?:(id:string)=>void;onPaneClick?:()=>void;onConnect?:(c:Connection)=>void;onDragStart?:()=>void;initialViewport?:Viewport;onViewportChange?:(viewport:Viewport)=>void;focusNode?:{id:string;sequence:number};mode?:'edit'|'chain-select'}){
+export default function FlowCanvas({project,nodes,edgeId=null,onChange,onSelectionChange,onNodeClick,onNodeOpen,onEdgeClick,onPaneClick,onConnect,onDragStart,initialViewport,onViewportChange,focusNode,mode='edit'}:{project:Project;nodes:Step[];edgeId?:string|null;onChange?:(nodes:Step[])=>void;onSelectionChange?:(ids:string[])=>void;onNodeClick:(id:string)=>void;onNodeOpen?:(id:string)=>void;onEdgeClick?:(id:string)=>void;onPaneClick?:()=>void;onConnect?:(c:Connection)=>void;onDragStart?:()=>void;initialViewport?:Viewport;onViewportChange?:(viewport:Viewport)=>void;focusNode?:{id:string;sequence:number};mode?:'edit'|'chain-select'}){
  const {theme}=useAppearance();
  const editing=mode==='edit',dragging=useRef(false);
  const container=useRef<HTMLDivElement>(null);const [flow,setFlow]=useState<ReactFlowInstance<Step>|null>(null);
@@ -58,6 +58,7 @@ export default function FlowCanvas({project,nodes,edgeId=null,onChange,onSelecti
   selectNodesOnDrag={false}
   selectionKeyCode={editing?'Shift':null} multiSelectionKeyCode={editing?multiSelectionKeys:null}
   onNodeDragStart={beginDrag} onSelectionDragStart={beginDrag} onNodeDragStop={endDrag} onSelectionDragStop={endDrag}
+  onNodeDoubleClick={(event,node)=>{if(!editing||!onNodeOpen||(event.target as HTMLElement).closest('button,a,input,select,textarea'))return;event.preventDefault();event.stopPropagation();onNodeOpen(node.id);}}
   onNodeClick={(event,node)=>{if(editing&&project.nodes.some(item=>item.id===node.id))onSelectionChange?.(event.metaKey||event.ctrlKey?(selectedIds.includes(node.id)?selectedIds.filter(id=>id!==node.id):[...selectedIds,node.id]):[node.id]);onNodeClick(node.id);}} onEdgeClick={editing?(_,edge)=>onEdgeClick?.(edge.id):undefined} onPaneClick={onPaneClick} onConnect={editing?onConnect:undefined} isValidConnection={connection=>editing&&canConnect(project.nodes,project.edges,connection.source,connection.target)}
   fitView={!initialViewport} fitViewOptions={{padding:0.15,minZoom:editing?.8:undefined,maxZoom:editing?1:undefined,nodes:editing?project.nodes.slice(0,3):undefined}} minZoom={0.25} maxZoom={1.7} deleteKeyCode={null} defaultEdgeOptions={{type:'smoothstep'}} proOptions={{hideAttribution:false}} aria-label={editing?'计算流程画布':'计算链节点选择画布'}>
   <Background gap={20} size={1} color={theme.colors.canvasGrid}/><Controls showInteractive={false}/><MiniMap nodeColor={node=>catalog[(node.data as Step['data']).kind].color} maskColor={theme.colors.canvas+'b3'} bgColor={theme.colors.surface} pannable zoomable/>

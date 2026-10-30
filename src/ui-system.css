@@ -39,3 +39,9 @@
 .app-shell .workspace-save-feedback{height:24px;min-height:24px;flex-shrink:0;overflow:hidden;padding:0 16px;line-height:24px}
 .ui-feedback{min-height:32px;display:flex;align-items:flex-start;gap:8px;font-size:var(--ui-control);line-height:1.6;margin:8px 0;overflow-wrap:anywhere}.app-shell .ui-feedback:empty{display:none}.ui-feedback [role=alert]{color:var(--color-danger)}
 @media(prefers-reduced-motion:reduce){.app-shell *{scroll-behavior:auto!important;transition:none!important}}
+
+/* Project tools are offset above the continuous calculation navigation. */
+.app-shell .project-structure-shortcut{display:inline-flex;align-items:center;gap:8px;flex-shrink:0;padding:4px 8px;font-size:var(--ui-control);border:1px solid var(--ui-control-border);border-radius:var(--radius);background:var(--color-surface);color:var(--color-text)}
+.app-shell .project-structure-shortcut[aria-pressed=true]{background:var(--color-accent-soft);border-color:var(--color-accent);color:var(--color-accent)}
+.app-shell .breadcrumbs{min-width:0;gap:12px}.app-shell .compact-project-name{min-width:0}
+.app-shell .summary-config-action{margin:12px 0 16px;width:100%;justify-content:space-between}
