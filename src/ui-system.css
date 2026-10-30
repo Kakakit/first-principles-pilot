@@ -49,3 +49,5 @@
 .app-shell .structure-origin-summary{display:grid;gap:8px;margin-top:16px;padding:12px 0;border-top:1px solid var(--ui-divider);font-size:var(--ui-control)}
 .app-shell .structure-origin-summary>span{overflow-wrap:anywhere}
 
+.app-shell .node-inheritance{min-height:24px;display:flex;align-items:center;padding:4px 0;font-size:var(--ui-caption);line-height:1.5;color:var(--node-color)}
+.app-shell .node-inheritance>span{overflow-wrap:anywhere}

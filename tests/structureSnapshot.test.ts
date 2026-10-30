@@ -3,6 +3,7 @@ import {newProject,makeStep,uid,parseWorkspace,cleanWorkspace,canConnect,inspect
 import {addStructureSnapshot,checkedStructureSnapshot} from '../src/structureSnapshot.ts';
 import type {StructureSnapshot} from '../src/structureSnapshot.ts';
 import {structureOriginEdges} from '../src/structureOrigin.ts';
+import {nodeInheritance,sourceSummaryGraph} from '../src/nodeInheritance.ts';
 const structure=JSON.parse(fs.readFileSync(new URL('./fixtures/Si.structure.json',import.meta.url),'utf8'));
 function fixture(){const project=newProject('来源分支');project.nodes[0].data.structure=structure;const calculation=makeStep('relax',{x:400,y:80});project.nodes.push(calculation);project.edges=[{id:uid(),source:project.nodes[0].id,target:calculation.id}];const snapshot:StructureSnapshot={structure,origin:{version:1,project_id:project.id,node_id:calculation.id,attempt_id:'a'.repeat(32),job_id:'9.mock',alias:'offline',path:'CONTCAR',sha256:structure.source.sha256,input_note:'冻结备注',state:'FAILED',program_done:false,extracted_at:'2026-10-30T00:00:00Z',observed_at:'',cached:true},warnings:['来源未收敛']};return {project,snapshot};}
 test('structure copy keeps original bytes and lineage separate from all executable edges',async()=>{
@@ -26,4 +27,10 @@ test('wrong project and corrupt original identity cannot attach a structure',asy
  const {project,snapshot}=fixture(),wrong=structuredClone(snapshot);wrong.origin.project_id='other';assert.throws(()=>addStructureSnapshot(project,wrong),/当前项目/);
  const corrupt=structuredClone(snapshot);corrupt.origin.sha256='0'.repeat(64);assert.throws(()=>addStructureSnapshot(project,corrupt),/不一致/);
  const badBytes=structuredClone(snapshot);badBytes.structure.source.base64=btoa('wrong');await assert.rejects(checkedStructureSnapshot(badBytes),/SHA-256/);
+});
+test('card only names actual inherited files; dragging never changes the request graph',()=>{
+ const {project}=fixture(),node=project.nodes[1],graph=JSON.stringify(sourceSummaryGraph(project));node.position.x+=300;node.data.label='改名';assert.equal(JSON.stringify(sourceSummaryGraph(project)),graph);
+ const view=nodeInheritance({files:['CONTCAR','CHGCAR']});assert.equal(view.text,'继承：CONTCAR、CHGCAR');assert(!view.text.includes('WAVECAR'));
+ assert.equal(nodeInheritance({files:['CONTCAR','CHGCAR','WAVECAR']}).text,'继承：CONTCAR、CHGCAR、WAVECAR');
+ assert.equal(nodeInheritance({files:[]}).text,'');
 });

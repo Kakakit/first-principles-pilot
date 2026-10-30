@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import patch
 import test_scans
-from backend import execution as ex, artifacts, inputs, storage, structure_snapshots as snapshots
+from backend import execution as ex, artifacts, inputs, storage, structure_snapshots as snapshots, source_summary
 
 
 class StructureSnapshotTests(unittest.TestCase):
@@ -73,3 +73,29 @@ class StructureSnapshotTests(unittest.TestCase):
         frozen=inputs.freeze(project,'next',reason='派生结构新输入')
         self.assertNotEqual(frozen['id'],self.bundle['id'])
         self.assertEqual(ex.get(self.key)['state'],'FAILED')
+
+
+class SourceSummaryTests(unittest.TestCase):
+    def test_plans_are_the_actual_policy_without_file_or_input_reads(self):
+        nodes=[{'id':key,'data':{'kind':kind}} for key,kind in [('s','structure'),('r','relax'),('c','scf'),('b','bands')]]
+        project={'nodes':nodes,'edges':[{'source':'s','target':'r'},{'source':'r','target':'c'},{'source':'c','target':'b'}]}
+        with patch.object(ex,'ssh',side_effect=AssertionError('No SSH')),patch.object(inputs,'generate',side_effect=AssertionError('No input generation')):
+            result=source_summary.project(project)['nodes']
+            self.assertEqual(result['r']['files'],[])
+            self.assertEqual(result['c']['files'],['CONTCAR'])
+            self.assertEqual(result['b']['files'],['POSCAR','CHGCAR'])
+            nodes[2]['data']['sourceDraft']={'mode':'upstream','purpose':'charge','files':'both'}
+            self.assertEqual(source_summary.project(project)['nodes']['c']['files'],['CONTCAR','CHGCAR','WAVECAR'])
+            nodes[2]['data']['sourceDraft']['mode']='new'
+            self.assertEqual(source_summary.project(project)['nodes']['c']['files'],['CONTCAR'])
+
+    def test_legacy_scan_reuses_base_source_policy_and_unconnected_nodes_are_explicit(self):
+        project={'nodes':[{'id':'s','data':{'kind':'structure'}},{'id':'c','data':{'kind':'scf'}},{'id':'scan','data':{'kind':'scan'}}],
+                 'edges':[{'source':'s','target':'c'},{'source':'c','target':'scan'}]}
+        result=source_summary.project(project)['nodes']
+        self.assertEqual(result['scan']['files'],result['c']['files'])
+        self.assertEqual(result['scan']['files'],[])
+        self.assertTrue(result['c']['has_parent'])
+        project['edges']=[]
+        self.assertFalse(source_summary.project(project)['nodes']['c']['has_parent'])
+

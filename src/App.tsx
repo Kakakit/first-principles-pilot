@@ -1,3 +1,6 @@
+import {calculationKind} from './scanNodes';
+import {sourceSummaryGraph,nodeInheritance} from './nodeInheritance';
+import type {SourcePlanSummary} from './nodeInheritance';
 import {addStructureSnapshot} from './structureSnapshot';
 import type {StructureSnapshot} from './structureSnapshot';
 import {rememberWorkspace} from './workspaceHistory';
@@ -117,9 +120,13 @@ export default function App() {
   const stateRef=useRef(workspace); stateRef.current=workspace;
   const project=workspace.projects.find(p=>p.id===workspace.activeId)!;
   useEffect(()=>{setCanvasSelectedIds(selected&&project.nodes.some(node=>node.id===selected)?[selected]:[]);},[project.id]);
+  const graph=sourceSummaryGraph(project),graphKey=JSON.stringify(graph);
+  const [sourcePlans,setSourcePlans]=useState<{key:string;nodes:Record<string,SourcePlanSummary>}>({key:'',nodes:{}});
+  useEffect(()=>{if(tab!=='flow')return;const controller=new AbortController();void requestJson('/api/projects/source-plan-summary',{project:graph},undefined,{signal:controller.signal}).then(value=>{if(!controller.signal.aborted)setSourcePlans({key:graphKey,nodes:value.nodes});}).catch(()=>{if(!controller.signal.aborted)setSourcePlans({key:graphKey,nodes:{}});});return()=>controller.abort();},[tab,graphKey]);
   const projectAttemptStates=attemptProjectId===project.id?attemptStates:{};
   const canvasNodes:Step[]=project.nodes.map(n=>({...n,selected:canvasSelectedIds.includes(n.id),data:{...n.data,
     openStructure:n.data.kind==='structure'?()=>openWorkspace('structure',n.id):undefined,
+    inheritance:calculationKind(n,project)==='wannier90'?undefined:nodeInheritance(sourcePlans.key===graphKey?sourcePlans.nodes[n.id]:undefined),
     resultState:projectAttemptStates[n.id],chainState:chainStates[n.id],
     openChain:chainStates[n.id]?()=>{setSelected(n.id);openRun('chain');}:undefined,
     attemptStatus:attemptProjectId===project.id?attemptStatus:'loading',

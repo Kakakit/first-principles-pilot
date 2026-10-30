@@ -2182,3 +2182,9 @@ def attempt_structure_snapshot(key: str, payload: StructureSnapshotRequest):
     try:return snapshot(payload.project_id,key,payload.path)
     except (ValueError,KeyError,OSError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
 
+
+@app.post('/api/projects/source-plan-summary')
+def project_source_plan_summary(payload: dict):
+    from .source_summary import project
+    try:return project(payload['project'])
+    except (ValueError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
