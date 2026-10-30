@@ -87,6 +87,12 @@ def validate_workspace(w):
                 if n['data']['kind'] != 'structure':
                     raise ValueError('结构只能绑定输入结构节点。')
                 validated_structure(n['data']['structure'])
+            if 'structureOrigin' in n['data']:
+                from .structure_snapshots import validate_origin
+                if n['data']['kind']!='structure' or 'structure' not in n['data']:raise ValueError('来源记录只属于已有结构节点')
+                validate_origin(n['data']['structureOrigin'],n['data']['structure'])
+            if 'structureOriginNodeId' in n['data'] and ('structureOrigin' not in n['data'] or not isinstance(n['data']['structureOriginNodeId'],str) or not 1<=len(n['data']['structureOriginNodeId'])<=200):
+                raise ValueError('结构来源连线引用无效')
         if any(e['source'] not in nodes or e['target'] not in nodes for e in p['edges']):
             raise ValueError('连接引用不存在的节点。')
     if w.get('activeId') not in ids:

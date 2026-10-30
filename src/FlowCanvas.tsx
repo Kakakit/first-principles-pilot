@@ -1,3 +1,4 @@
+import {structureOriginEdges} from './structureOrigin';
 import {NodeIcon,nodePalette} from './nodeAppearance';
 import {ReactFlow,Background,Controls,MiniMap,Handle,Position,applyNodeChanges} from '@xyflow/react';
 import type {Connection,NodeProps,NodeChange,Viewport,ReactFlowInstance} from '@xyflow/react';
@@ -20,6 +21,7 @@ function StepCard({data, selected}: NodeProps<Step>) {
   return <div className={`step-card ${selected?'is-selected':''} ${data.kind==='scan'&&data.expanded?'scan-expanded':''} ${chainSelection?'chain-'+chainSelection:''}`} style={{'--node-color':palette.ink,'--node-fill':palette.fill,'--node-border':palette.border} as React.CSSProperties}
     role={toggleChain?'button':undefined} tabIndex={toggleChain&&!chainLocked?0:undefined} aria-pressed={toggleChain?selected:undefined} aria-disabled={toggleChain?chainLocked:undefined}
     onKeyDown={event=>{if(toggleChain&&!chainLocked&&(event.key==='Enter'||event.key===' ')){event.preventDefault();event.stopPropagation();toggleChain();}}}>
+    {data.kind==='structure'&&Boolean(data.structureOrigin)&&<Handle id="structure-origin" type="target" position={Position.Left} isConnectable={false} style={{opacity:0}}/>}
     {data.kind!=='structure' && <Handle type="target" position={Position.Left} aria-label={`${data.label}输入`}/>}
     <div className="step-top"><span className="step-icon"><NodeIcon kind={data.kind} size={24}/></span><span className="step-en">{meta.label}</span></div>
     <strong title={data.label}>{data.label}</strong>{data.kind==='structure'&&<p>{data.params.material||'未指定结构'}</p>}
@@ -53,13 +55,13 @@ export default function FlowCanvas({project,nodes,edgeId=null,onChange,onSelecti
   const positions=changes.filter(change=>change.type==='position'&&change.position&&Number.isFinite(change.position.x)&&Number.isFinite(change.position.y)&&project.nodes.some(node=>node.id===change.id)) as NodeChange<Step>[];
   if(positions.length)onChange?.(applyNodeChanges(positions,project.nodes));
  };
- return <div className="workflow-canvas-root" ref={container}><ReactFlow<Step> key={project.id} onInit={setFlow} onMoveEnd={(_,viewport)=>onViewportChange?.(viewport)} defaultViewport={initialViewport} colorMode={theme.appearance} nodes={renderNodes} edges={project.edges.map(edge=>({...edge,selected:editing&&edge.id===edgeId,style:{stroke:theme.colors.canvasEdge,strokeWidth:1.7}}))} nodeTypes={nodeTypes} onNodesChange={changeNodes}
+ return <div className="workflow-canvas-root" ref={container}><ReactFlow<Step> key={project.id} onInit={setFlow} onMoveEnd={(_,viewport)=>onViewportChange?.(viewport)} defaultViewport={initialViewport} colorMode={theme.appearance} nodes={renderNodes} edges={project.edges.map(edge=>({...edge,selected:editing&&edge.id===edgeId,style:{stroke:theme.colors.canvasEdge,strokeWidth:1.7}})).concat(structureOriginEdges(project).map(edge=>({...edge,selected:false,style:{stroke:theme.colors.canvasEdge,strokeWidth:1.5,strokeDasharray:'4 4'},labelStyle:{fill:theme.colors.text,fontSize:12},labelBgStyle:{fill:theme.colors.surface},labelBgPadding:[8,4] as [number,number]})))} nodeTypes={nodeTypes} onNodesChange={changeNodes}
   nodesDraggable={editing} nodesConnectable={editing} edgesReconnectable={editing} elementsSelectable={editing} nodesFocusable={editing} edgesFocusable={editing}
   selectNodesOnDrag={false}
   selectionKeyCode={editing?'Shift':null} multiSelectionKeyCode={editing?multiSelectionKeys:null}
   onNodeDragStart={beginDrag} onSelectionDragStart={beginDrag} onNodeDragStop={endDrag} onSelectionDragStop={endDrag}
   onNodeDoubleClick={(event,node)=>{if(!editing||!onNodeOpen||(event.target as HTMLElement).closest('button,a,input,select,textarea'))return;event.preventDefault();event.stopPropagation();onNodeOpen(node.id);}}
-  onNodeClick={(event,node)=>{if(editing&&project.nodes.some(item=>item.id===node.id))onSelectionChange?.(event.metaKey||event.ctrlKey?(selectedIds.includes(node.id)?selectedIds.filter(id=>id!==node.id):[...selectedIds,node.id]):[node.id]);onNodeClick(node.id);}} onEdgeClick={editing?(_,edge)=>onEdgeClick?.(edge.id):undefined} onPaneClick={onPaneClick} onConnect={editing?onConnect:undefined} isValidConnection={connection=>editing&&canConnect(project.nodes,project.edges,connection.source,connection.target)}
+  onNodeClick={(event,node)=>{if(editing&&project.nodes.some(item=>item.id===node.id))onSelectionChange?.(event.metaKey||event.ctrlKey?(selectedIds.includes(node.id)?selectedIds.filter(id=>id!==node.id):[...selectedIds,node.id]):[node.id]);onNodeClick(node.id);}} onEdgeClick={editing?(_,edge)=>{if(project.edges.some(item=>item.id===edge.id))onEdgeClick?.(edge.id);}:undefined} onPaneClick={onPaneClick} onConnect={editing?onConnect:undefined} isValidConnection={connection=>editing&&canConnect(project.nodes,project.edges,connection.source,connection.target)}
   fitView={!initialViewport} fitViewOptions={{padding:0.15,minZoom:editing?.8:undefined,maxZoom:editing?1:undefined,nodes:editing?project.nodes.slice(0,3):undefined}} minZoom={0.25} maxZoom={1.7} deleteKeyCode={null} defaultEdgeOptions={{type:'smoothstep'}} proOptions={{hideAttribution:false}} aria-label={editing?'计算流程画布':'计算链节点选择画布'}>
   <Background gap={20} size={1} color={theme.colors.canvasGrid}/><Controls showInteractive={false}/><MiniMap nodeColor={node=>catalog[(node.data as Step['data']).kind].color} maskColor={theme.colors.canvas+'b3'} bgColor={theme.colors.surface} pannable zoomable/>
  </ReactFlow></div>;

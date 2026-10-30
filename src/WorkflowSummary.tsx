@@ -1,3 +1,4 @@
+import type {StructureOrigin} from './structureOrigin';
 import {useEffect,useRef,useState} from 'react';
 import ExecutionEvidence from './ExecutionEvidence';
 import {ArrowRight} from 'lucide-react';
@@ -53,17 +54,17 @@ export default function WorkflowSummary({project,node,rows,scan,onOpen,onRefresh
  },[key,version,retry,node.data.kind]);
  const evidence=summary?.evidence||current?.evidence||{};
  const parents=project.edges.filter(e=>e.target===node.id).map(e=>project.nodes.find(n=>n.id===e.source)?.data.label).filter(Boolean);
- const structure=node.data.structure;
+ const structure=node.data.structure,origin=node.data.structureOrigin as StructureOrigin|undefined;
  return <div className="workflow-summary">
   <div className="workflow-node-title"><NodeIcon kind={node.data.kind} size={24}/><h2>{node.data.label}</h2></div>
   {node.data.kind!=='structure'&&<button className="button primary summary-config-action" onClick={()=>onOpen('config',node.id)}>打开计算配置<ArrowRight size={16}/></button>}
-  {node.data.kind==='structure'?<><div className="workflow-structure-facts"><strong>{structure?.formula||node.data.params.material||'尚未导入结构'}</strong>{structure&&<><span>{structure.atoms.length} 个原子</span><span>体积 {formatValue(structure.volume)} Å³</span><span className="summary-file">{structure.source.filename}</span></>}</div><button className="button primary" onClick={()=>onOpen('structure',node.id)}>打开结构详情<ArrowRight size={16}/></button></>
+  {node.data.kind==='structure'?<><div className="workflow-structure-facts"><strong>{structure?.formula||node.data.params.material||'尚未导入结构'}</strong>{structure&&<><span>{structure.atoms.length} 个原子</span><span>体积 {formatValue(structure.volume)} Å³</span><span className="summary-file">{structure.source.filename}</span></>}</div><button className="button primary" onClick={()=>onOpen('structure',node.id)}>打开结构详情<ArrowRight size={16}/></button>{origin&&<div className="structure-origin-summary"><details><summary>来源记录</summary><p>{origin.path}<br/>{origin.alias} · {origin.job_id||origin.attempt_id.slice(0,8)} · {statusLabel(origin.state)}</p>{origin.input_note&&<p>{origin.input_note}</p>}</details>{node.data.note&&<p className="structure-warning">{node.data.note}</p>}{structure?.edit&&<span>结构已编辑，原来源记录保留</span>}{origin.project_id===project.id&&project.nodes.some(n=>n.id===origin.node_id)&&<button className="text-button" onClick={()=>onOpen('results',origin.node_id,origin.attempt_id)}>查看来源任务</button>}</div>}</>
    :node.data.kind==='scan'?<><ScanSummary cases={scan||[]} attempts={attempts} onCase={id=>onOpen('results',node.id,id)}/><button className="button primary" onClick={()=>onOpen('run',node.id)}>查看扫描批次<ArrowRight size={16}/></button></>
    :<><label className="summary-record-select">运行记录<select aria-label="节点摘要运行记录" value={current?.id||''} title={current?attemptLabel(current,undefined,true):''} onChange={e=>{setChosen(e.target.value);setRetry(0);}}>{!current&&<option value="">{loading?'正在读取本机记录':'尚无运行记录'}</option>}{attempts.map(a=><option key={a.id} value={a.id}>{attemptLabel(a)}</option>)}</select></label>
    {current?<><ExecutionEvidence attempt={current} evidence={evidence}/><dl className="workflow-facts"><div><dt>{current.input_note?'冻结备注':current.chain_run_id?'作业名称':'冻结备注'}</dt><dd>{attemptName(current)}</dd></div><div><dt>主机</dt><dd>{current.config?.alias||'未记录'}</dd></div><div><dt>job ID</dt><dd><code>{current.job_id||'未取得 job ID'}</code></dd></div></dl><div className="workflow-metrics">{([['energy','总能','eV/cell'],['magnetization','磁矩','μB/cell'],['elapsed','用时','s']] as const).map(([metric,label,unit])=>{const m=summary?.metrics?.[metric] as Scalar;return <div key={metric}><span>{label}</span><strong>{m?formatValue(m.value):'—'}</strong><small>{m?.unit||unit}</small></div>;})}</div>{!summary?.metrics&&<p className="summary-muted">尚无已缓存指标</p>}{current.state==='UNKNOWN'&&<p className="summary-warning">提交结果待核查，原记录保持。</p>}<button className="button" onClick={()=>onOpen('results',node.id,current.id)}>查看完整结果与回执<ArrowRight size={16}/></button></>:<p className="summary-muted">当前节点尚未准备或提交任务。</p>}
 </>}
   {error&&<div className="summary-warning" role="alert">{error}<button className="text-button" onClick={()=>setRetry(n=>n+1)}>重试本机摘要</button></div>}
   {failed&&<button className="text-button" onClick={onRefresh}>重新读取本机记录</button>}
-  <div className="workflow-upstream"><span>直接上游</span><strong>{parents.join('、')||'独立输入结构'}</strong></div>
+  <div className="workflow-upstream"><span>{origin?'结构模式':'直接上游'}</span><strong>{origin?'独立结构副本':parents.join('、')||'独立输入结构'}</strong></div>
  </div>;
 }

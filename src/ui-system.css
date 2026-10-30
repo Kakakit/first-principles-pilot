@@ -45,3 +45,7 @@
 .app-shell .project-structure-shortcut[aria-pressed=true]{background:var(--color-accent-soft);border-color:var(--color-accent);color:var(--color-accent)}
 .app-shell .breadcrumbs{min-width:0;gap:12px}.app-shell .compact-project-name{min-width:0}
 .app-shell .summary-config-action{margin:12px 0 16px;width:100%;justify-content:space-between}
+
+.app-shell .structure-origin-summary{display:grid;gap:8px;margin-top:16px;padding:12px 0;border-top:1px solid var(--ui-divider);font-size:var(--ui-control)}
+.app-shell .structure-origin-summary>span{overflow-wrap:anywhere}
+

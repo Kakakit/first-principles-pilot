@@ -1,3 +1,5 @@
+import type {StructureOrigin} from './structureOrigin';
+import {validateStructureOrigin} from './structureOrigin';
 import {calculationKind,independentScan,calculationKinds} from './scanNodes';
 import {validateLayer} from './parameters';
 import type {ParameterLayer,ParameterProject} from './parameters';
@@ -67,6 +69,8 @@ export function parseWorkspace(raw: string): Workspace {
       if(p.stagePolicy==='kind-fixed-v1'&&n.data.stageSequence!==STAGE_SEQUENCES[n.data.kind as Kind])throw new Error('新项目阶段编号须与节点类型一致。');
       if(n.data.scanSpec!==undefined&&(n.data.kind!=='scan'||!calculationKinds.includes(n.data.scanSpec.calculationKind)))throw new Error('迭代计算类型无效。');
       if(n.data.structure!==undefined) {if(n.data.kind!=='structure')throw new Error('结构只能绑定输入结构节点。');validateStructure(n.data.structure);}
+      if(n.data.structureOrigin!==undefined){if(n.data.kind!=='structure')throw new Error('来源记录只属于结构节点');validateStructureOrigin(n.data.structureOrigin,n.data.structure);}
+      if(n.data.structureOriginNodeId!==undefined&&(!n.data.structureOrigin||!nonempty(n.data.structureOriginNodeId)))throw new Error('结构来源连线引用无效');
       if(n.data.parameters!==undefined)validateLayer(n.data.parameters);
       if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
       nodeIds.add(n.id);
@@ -113,7 +117,7 @@ export function mergeWorkspace(current: Workspace, imported: Workspace, workspac
   const projects = imported.projects.map(p=>{
     const ids = new Map(p.nodes.map(n=>[n.id,uid()]));
     const id=uid(),base=(p.remoteSlug||slugify(p.name)||'project').slice(0,55).replace(/-+$/,'');
-    return {...p,id,remotePathPolicy:'project-directory-v2' as const,remoteWorkspaceRoot:workspaceRoot,remoteDirectories:{},stagePolicy:'kind-fixed-v1' as const,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data=clearExecutionBindings(n.data);if(Object.keys(staticDefaults(data.kind)).length)data.parameters={...data.parameters,values:{...staticDefaults(data.kind),...data.parameters?.values}};data.stageSequence=STAGE_SEQUENCES[data.kind];return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
+    return {...p,id,remotePathPolicy:'project-directory-v2' as const,remoteWorkspaceRoot:workspaceRoot,remoteDirectories:{},stagePolicy:'kind-fixed-v1' as const,remoteSlug:`${base}-${id.slice(0,8)}`,name:`${p.name.slice(0,190)} · 导入`,nodes:p.nodes.map(n=>{const data=clearExecutionBindings(n.data);if(Object.keys(staticDefaults(data.kind)).length)data.parameters={...data.parameters,values:{...staticDefaults(data.kind),...data.parameters?.values}};data.stageSequence=STAGE_SEQUENCES[data.kind];const origin=data.structureOrigin as StructureOrigin|undefined,originNode=typeof data.structureOriginNodeId==='string'?data.structureOriginNodeId:origin?.project_id===p.id?origin.node_id:undefined;if(originNode&&ids.has(originNode))data.structureOriginNodeId=ids.get(originNode);else delete data.structureOriginNodeId;return {...n,id:ids.get(n.id)!,data};}),edges:p.edges.map(e=>({...e,id:uid(),source:ids.get(e.source)!,target:ids.get(e.target)!}))};
   });
   if(current.projects.length+projects.length>100) throw new Error('最多保存 100 个项目，请先导出备份并整理。');
   return {...current,activeId:projects[0].id,projects:[...current.projects,...projects]};

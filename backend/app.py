@@ -2169,3 +2169,16 @@ async def interactive_plot_save_binary(request: Request, metadata: str):
         try:return await run_in_threadpool(interactive_plots.save,payload.cache_id,payload.project_id,payload.selected,
             payload.emin,payload.emax,'','',payload.title,payload.point_size_scale,png_file=path)
         except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+class StructureSnapshotRequest(BaseModel):
+    project_id: str
+    path: str
+
+
+@app.post('/api/execution/{key}/structure-snapshot')
+def attempt_structure_snapshot(key: str, payload: StructureSnapshotRequest):
+    from .structure_snapshots import snapshot
+    try:return snapshot(payload.project_id,key,payload.path)
+    except (ValueError,KeyError,OSError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
