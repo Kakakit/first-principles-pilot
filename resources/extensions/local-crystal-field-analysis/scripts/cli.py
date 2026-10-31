@@ -19,6 +19,8 @@ def collect(request,parse=True):
     from occupation_core import analyze_occupation
     from polyhedron_types import parse_types
     parse_types(request['options'])
+    from local_reference import decode_reference,inherit,export_reference,BUNDLE
+    imported=decode_reference(request['options'].get('local_reference'))
     outputs=[]
     stages={s.get('stage') for s in request['sources']}
     if stages<={'dos','scf'}:mode='vasp'
@@ -32,6 +34,7 @@ def collect(request,parse=True):
     for source in request['sources']:
         if source.get('state')!='COMPLETED':raise ValueError('请选择已完成的来源')
         if mode=='vasp':
+            if imported:raise ValueError('VASP阶段请移除导入参考；局域参考在Wannier阶段使用')
             dos=selected(request,'doscar',source,False);structure=selected(request,'structure',source);outcar=selected(request,'outcar',source)
             choice=request['options'].get('vasp_quantity','auto')
             if choice not in ('auto','occupation','pdos'):raise ValueError('VASP分析内容选项无效')
@@ -61,6 +64,9 @@ def collect(request,parse=True):
         frozen=source.get('input_summary') or {}
         if frozen.get('seed') and frozen['seed']!=seed:raise ValueError('文件通道与冻结 Wannier seed 不符')
         if source.get('state')!='COMPLETED' or source.get('stage')!='wannier90':raise ValueError('请选择已完成的 Wannier90 来源')
+        if not parse and imported:
+            from onsite_core import win_model
+            inherit(request['options'],win_model(win)['structure'])
         if parse:
             data=analyze_files(hr,win,wout,centres,request['options']);data.update(source=source,seed=seed);outputs.append(data)
     if mode=='vasp':
@@ -71,17 +77,23 @@ def collect(request,parse=True):
     return {'schema':'fpilot.occupation-bundle.v1' if mode=='occupation' else 'fpilot.pdos-bundle.v1' if mode=='pdos' else 'fpilot.onsite-bundle.v2','mode':mode,'models':outputs,'comparison':'分来源展示；PDOS 重心与 Wannier 局域能级含义不同，不做自动跨方法相减或自旋平均'}
 
 def check(request):
-    data=collect(request,parse=False);return f"{len(request['sources'])} 个 {data['mode']} 来源的冻结文件可用；运行时解析数值，物理有效性需另行审核"
+    data=collect(request,parse=False);return f"{len(request['sources'])} 个 {data['mode']} 来源的冻结文件可用；{'已核对导入参考的结构与局域轴；' if request['options'].get('local_reference') else ''}运行时解析数值，物理有效性需另行审核"
 
 def analyze(request):
+    from local_reference import export_reference,BUNDLE
     data=collect(request);out=Path(request['output_dir'])
     if data['mode']=='occupation':
+        references=[]
+        for model in data['models']:
+            if model.get('structure') and any(a.get('geometry') for a in model['atoms']):
+                model['local_reference']=export_reference(model);references.append(model['local_reference'])
         dump(out/'occupation.json',data)
+        if references:dump(out/'local-orbital-reference.json',references[0] if len(references)==1 else {'schema':BUNDLE,'references':references})
         rows=[{'source':m['source'].get('name','来源'),'site':a['label'],'polyhedron':a['polyhedron'],'spin':sp['label'],'n_d':sp['global']['trace']} for m in data['models'] for a in m['atoms'] for sp in a['spins']]
         columns=[{'key':k,'label':label,'unit':u} for k,label,u in [('source','来源',''),('site','原子',''),('polyhedron','多面体',''),('spin','自旋',''),('n_d','d壳占据','电子')]]
         with (out/'occupation.csv').open('w',newline='',encoding='utf-8-sig') as f:
             writer=csv.DictWriter(f,fieldnames=[c['key'] for c in columns]);writer.writeheader();writer.writerows(rows)
-        return {'summary':f"已读取 {len(rows)//3} 个位点的最终VASP占据矩阵；占据不是晶场能量",'scientific_validation':'INSUFFICIENT','warnings':list(dict.fromkeys(w for m in data['models'] for w in m['warnings'])),'tables':[{'title':'最终 d 壳占据','columns':columns,'rows':rows}],'artifacts':[artifact(out/'occupation.json','完整占据矩阵、局域配位架与来源证据'),artifact(out/'occupation.csv','逐位点占据汇总','text/csv')]}
+        return {'summary':f"已读取 {len(rows)//3} 个位点的最终VASP占据矩阵；占据不是晶场能量",'scientific_validation':'INSUFFICIENT','warnings':list(dict.fromkeys(w for m in data['models'] for w in m['warnings'])),'tables':[{'title':'最终 d 壳占据','columns':columns,'rows':rows}],'artifacts':[artifact(out/'occupation.json','完整占据矩阵、局域配位架与来源证据'),artifact(out/'occupation.csv','逐位点占据汇总','text/csv')]+([artifact(out/'local-orbital-reference.json','导出至Wannier阶段的局域轨道参考')] if references else [])}
     if data['mode']=='pdos':
         dump(out/'pdos.json',data)
         return {'summary':f"已解析 {len(data['models'])} 个逐原子 PDOS 来源；可直接浏览并调整重心积分区间",'scientific_validation':'INSUFFICIENT','warnings':list(dict.fromkeys(w for m in data['models'] for w in m['warnings'])),'artifacts':[artifact(out/'pdos.json','冻结逐原子 PDOS、全范围重心及来源证据')]}

@@ -201,7 +201,10 @@ def wout_centres(text,model):
 
 
 def analyze_files(hr,win,wout=None,centres=None,options=None):
-    options=options or {};model=win_model(win);h0,evidence=read_onsite(hr)
+    options=options or {};model=win_model(win)
+    from local_reference import inherit,public_options
+    options,reference,reference_sites=inherit(options,model['structure'])
+    h0,evidence=read_onsite(hr)
     if len(h0)!=model['num_wann']:raise ValueError('hr.dat 与 .win num_wann 不符')
     wtext=Path(wout).read_text(errors='replace') if wout else ''
     complete=bool(re.search('All done',wtext,re.I));final=bool(re.search('Final State',wtext,re.I))
@@ -245,7 +248,13 @@ def analyze_files(hr,win,wout=None,centres=None,options=None):
             report['global_axes_candidate']=shell_report(global_h,l,model['spinors'])
             if l==2 and report['element'] in coordination:
                 local_ligands=[specs[report['element']]['ligand']] if specs else ligands
-                q,geometry=neighbors(model['structure'],atom-1,local_ligands,coordination[report['element']]);r=rotation(l,q)
+                if atom in reference_sites:
+                    import copy
+                    geometry=copy.deepcopy(reference_sites[atom]['geometry']);q=np.asarray(geometry['axes'])
+                    report['reference_alignment']={'status':'REFERENCE_FRAME_MATCHED_WF_UNVERIFIED','source':reference['source'],'meaning':'继承几何轴；最终WF轨道身份仍需独立核验，不套用自然占据本征矢'}
+                    report['occupation_reference']=reference_sites[atom].get('occupation_reference',[])
+                else:q,geometry=neighbors(model['structure'],atom-1,local_ligands,coordination[report['element']])
+                r=rotation(l,q)
                 if specs:
                     if max(v['distance_ang'] for v in geometry['neighbors'])>float(options.get('search_radius_angstrom',3)):raise ValueError(report['label']+' 在搜索距离内配体不足，请检查多面体类型或调整最大键长')
                     report['polyhedron']=polyhedron_label(report['element'],specs[report['element']])
@@ -255,7 +264,11 @@ def analyze_files(hr,win,wout=None,centres=None,options=None):
                 report['transforms']['global_to_coordination']={'orbital_rotation':r.tolist(),'formula':'H_local_candidate = R_local @ H_global_candidate @ R_local.T'}
                 rotated=r@global_h@r.T
                 report['coordination_candidate']={'geometry':geometry,'coordination':coordination[report['element']],'metrics':shell_report(rotated,l,model['spinors'])}
+        if report.get('coordination_candidate'):
+            report['reference_alignment']=report.get('reference_alignment',{'status':'GEOMETRY_FRAME_ONLY','meaning':'未导入VASP参考；配位架独立拟合，轨道名称为初始投影候选'})
         reports.append(report)
+    if reference:
+        warnings.append('已继承VASP冻结配位架；结构匹配不证明最终WF身份、同一电子态或能带拟合质量。')
     if centers and centers['max_distance_ang']>float(options.get('centre_tolerance_ang',0.5)):warnings.append('有 WF 中心偏离所分配原子，轨道映射需重新审核')
     if re.search(r'Disentanglement convergence criteria not satisfied',wtext,re.I):warnings.append('解缠结明确未收敛；停止标志单独保留，请结合能带拟合与局域轨道特征判断，不单凭此标志排除结果')
     if model['spinors']:warnings.append('SOC/spinor 保留复数 2(2l+1) 块；不把其劈裂冒充无 SOC 的 eg/t2g 晶场或自动去除 SOC')
@@ -263,4 +276,4 @@ def analyze_files(hr,win,wout=None,centres=None,options=None):
     for atom in sorted({e['atom'] for e in model['mapping'] if not targets or e['element'] in targets}):
         entries=[e for e in model['mapping'] if e['atom']==atom];indices=[e['wf']-1 for e in entries]
         site_blocks.append({'atom':atom,'element':entries[0]['element'],'wf_indices':[i+1 for i in indices],'labels':[e['orbital']+('('+e['spin']+')' if e['spin'] else '') for e in entries],'metrics':shell_report(h0[np.ix_(indices,indices)],-1,model['spinors'])})
-    return {'schema':'fpilot.onsite-analysis.v2','unit':'eV','mapping':model['mapping'],'mapping_evidence':'Wannier90 .win 初始投影展开：行序→同元素原子序→l→mr→自旋 u/d；不是最终 WF 身份验证','spinors':model['spinors'],'lattice_ang':model['structure'].lattice.matrix.tolist(),'atoms':[{'element':a.specie.symbol,'cart_ang':a.coords.tolist()} for a in model['structure']],'source_files':{'hr':str(hr),'win':str(win),'wout':str(wout) if wout else None,'centres':str(centres) if centres else None},'hr_evidence':evidence,'centres':centers,'localization':{'program_finished':complete,'final_state_recorded':final,'disentanglement_converged':False if re.search('Disentanglement convergence criteria not satisfied',wtext,re.I) else True if re.search('Disentanglement convergence criteria satisfied',wtext,re.I) else None,'spread_convergence':'NOT_ESTABLISHED_BY_ALL_DONE','physical_validation':'NOT_PERFORMED'},'reports':reports,'site_blocks':site_blocks,'warnings':warnings,'options':options}
+    return {'local_reference':reference,'schema':'fpilot.onsite-analysis.v2','unit':'eV','mapping':model['mapping'],'mapping_evidence':'Wannier90 .win 初始投影展开：行序→同元素原子序→l→mr→自旋 u/d；不是最终 WF 身份验证','spinors':model['spinors'],'lattice_ang':model['structure'].lattice.matrix.tolist(),'atoms':[{'element':a.specie.symbol,'cart_ang':a.coords.tolist()} for a in model['structure']],'source_files':{'hr':str(hr),'win':str(win),'wout':str(wout) if wout else None,'centres':str(centres) if centres else None},'hr_evidence':evidence,'centres':centers,'localization':{'program_finished':complete,'final_state_recorded':final,'disentanglement_converged':False if re.search('Disentanglement convergence criteria not satisfied',wtext,re.I) else True if re.search('Disentanglement convergence criteria satisfied',wtext,re.I) else None,'spread_convergence':'NOT_ESTABLISHED_BY_ALL_DONE','physical_validation':'NOT_PERFORMED'},'reports':reports,'site_blocks':site_blocks,'warnings':warnings,'options':public_options(options)}

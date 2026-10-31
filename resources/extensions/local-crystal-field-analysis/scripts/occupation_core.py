@@ -82,6 +82,7 @@ def analyze_occupation(structure,outcar,options=None):
 def analyze_records(atoms,records,settings,evidence,options=None):
     """Same numerical path for previously frozen matrix extracts; caller retains lineage."""
     options=options or {}
+    if options.get('local_reference'):raise ValueError('VASP占据阶段请移除导入参考，参考应在Wannier阶段使用')
     specs=parse_types(options);targets=[v.strip() for v in options.get('elements','').split(',') if v.strip()]
     if specs and (targets or options.get('coordination') or options.get('ligands')):raise ValueError('多面体列表与旧配位/元素参数请只使用一种方式')
     if any(a>len(atoms) for a in records):raise ValueError('OUTCAR 原子编号超出对应结构')
@@ -108,4 +109,5 @@ def analyze_records(atoms,records,settings,evidence,options=None):
                 diag=np.asarray(local['diagonal']);group={'e_label':'eɡ' if specs[symbol]['coordination']==6 else 'e','t_label':'t₂g' if specs[symbol]['coordination']==6 else 't₂','e_occupation':float(diag[[0,3]].sum()),'t_occupation':float(diag[[1,2,4]].sum()),'interpretation':'所选配位架下的近似子空间分组，不证明严格点群对称性'}
             spins.append({'id':spin,'label':{'up':'↑','down':'↓','total':'↑ + ↓'}[spin],'global':global_report,'local':local,'groups':group})
         reports.append({'atom':atom,'element':symbol,'label':symbol+str(atom),'polyhedron':polyhedron_label(symbol,specs[symbol]) if symbol in specs else None,'orbital_labels':ORBITALS[2],'spins':spins,'spin_moment_d':float(np.trace(mats['up']-mats['down'])),'geometry':geometry,'orbital_rotation':r.tolist() if r is not None else None,'source_lines':[record['line'],record['last_line']],'raw_text':record['raw_text']})
-    return {'schema':'fpilot.vasp-occupation.v1','mode':'occupation','atoms':reports,'settings':settings,'evidence':evidence,'options':options,'warnings':warnings,'unit':'electron','physical_validation':'NOT_PERFORMED'}
+    from local_reference import structure_record
+    return {'structure':structure_record(atoms),'schema':'fpilot.vasp-occupation.v1','mode':'occupation','atoms':reports,'settings':settings,'evidence':evidence,'options':options,'warnings':warnings,'unit':'electron','physical_validation':'NOT_PERFORMED'}

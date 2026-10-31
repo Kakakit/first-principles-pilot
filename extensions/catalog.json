@@ -423,13 +423,13 @@
     {
       "id": "local-crystal-field-analysis",
       "name": "轨道占据、能级与劈裂分析",
-      "version": "2.2.0",
+      "version": "2.3.0",
       "schema": "fpilot.extension.v2",
       "install_mode": "workbench-v2",
       "source": "resources/extensions/local-crystal-field-analysis",
-      "package": "extensions/packages/local-crystal-field-analysis-2.2.0.zip",
-      "sha256": "68b5f0bd242ef2963203b3b29d8035eb48ff209a197aa10c858669866a5d677b",
-      "size_bytes": 79073,
+      "package": "extensions/packages/local-crystal-field-analysis-2.3.0.zip",
+      "sha256": "906a4c5caf2dee8cc61521184aec3cb4e2133d5f031731ed3c32de731418f7c6",
+      "size_bytes": 88672,
       "files": [
         {
           "path": "ALGORITHM_REVIEW.md",
@@ -437,7 +437,7 @@
         },
         {
           "path": "README.md",
-          "sha256": "903cc1c985d73efebc90ad2b4327b14980edd8296bfb308d30c604515697d1b8"
+          "sha256": "68ca41af0acfcb2d8e116d44e8e1e98ef607338e50c5156f537e6936275cb5be"
         },
         {
           "path": "extension.json",
@@ -445,7 +445,7 @@
         },
         {
           "path": "extension.manifest.json",
-          "sha256": "f67f847409aba784b5fac787393b60dbc293b8f66f9c3da88db6f21e33e8fe1e"
+          "sha256": "71cf474e74ea71271c512ce82f0a75260c9e1b31d95fe3b4ce8063504b7adbb3"
         },
         {
           "path": "fixtures/pdos/DOSCAR",
@@ -477,19 +477,23 @@
         },
         {
           "path": "scripts/cli.py",
-          "sha256": "d1f1212d93e2e37ca5cfd1309c2d50c868f33fbdbb9204679143a6f343ee9748"
+          "sha256": "ebe32f89534ebd70065a233dff99ae78d82b73d56b5eba258aa21358d6027acf"
         },
         {
           "path": "scripts/compare_dense_coarse.py",
           "sha256": "072dcded4e73ba7ae932286cc48be5a7b4f35da1803f2be31ca709f5fb30589f"
         },
         {
+          "path": "scripts/local_reference.py",
+          "sha256": "0e9a34abc6c62cba11ba57f37b857a386e9e1736a3806c44ef8d7b12f16aed76"
+        },
+        {
           "path": "scripts/occupation_core.py",
-          "sha256": "9a7fe4e0257a09269b40fac94951ccbae9128f3d90fb519adb1881bf657e093d"
+          "sha256": "f1054d54dcda411c4ca18369928fa7f3b4ec7a081e0bd659be4bd6aaf0201507"
         },
         {
           "path": "scripts/onsite_core.py",
-          "sha256": "64b0aa81a45ac3b2a87d327069d0bfd5efba36420cc33fd089d07a5a0f47f93a"
+          "sha256": "53b5459f515f5173a3762b1ebb28a9d4379d158bb7b78ff3e86ffc576bf9bd79"
         },
         {
           "path": "scripts/pdos_core.py",
@@ -512,6 +516,10 @@
           "sha256": "3d65d7d39621cee469033fe2d829601c97f9a723a74b7c7fb3925fd0b0333a04"
         },
         {
+          "path": "tests/test_local_reference.py",
+          "sha256": "3313ad6590d19de2929b2e62b4f43dc26679a12a5e42f443ad85b18985081646"
+        },
+        {
           "path": "tests/test_occupation_core.py",
           "sha256": "75bd45cfc98fc0adf04c77dddadec51c62e39e9fe9821f31c8e79a1e8848812b"
         },
@@ -525,7 +533,7 @@
         },
         {
           "path": "viewer/main.js",
-          "sha256": "f300eecdb0e6cc2358b5e63169ff0e437e31251f9432752c614c4ebf3da6a436"
+          "sha256": "ac7cfdef2a5f7b43d11989fdf9daba374893f1b090f6d6509856d31b08d0b319"
         },
         {
           "path": "viewer/math.mjs",
@@ -533,7 +541,7 @@
         },
         {
           "path": "viewer/occupation-main.js",
-          "sha256": "dc2e7a7111123e4f92989243456cb804defeba982376be96bbcf00c4a557fd34"
+          "sha256": "2527ab6136bd1c480271835b30ab516d924a3ed0b041c0fe7af435259e1a0470"
         },
         {
           "path": "viewer/occupation-model.mjs",
@@ -541,11 +549,11 @@
         },
         {
           "path": "viewer/occupation-shell.html",
-          "sha256": "9ce55b67be506f4b19d6841c39df03831b1df806981f6cbb23211ba92cce5cb8"
+          "sha256": "f7322d87c00f03d00d2fbbed19ac3088df7c1706e700302be3ee6185c29d5782"
         },
         {
           "path": "viewer/shell.html",
-          "sha256": "ee9b9e0fc30bde4cf5b22f76cc9a91cb036dab12100a912a51834485d66a3293"
+          "sha256": "1deaf81d6f73025c0bc73974f2b530d80a84441955d3099b3787f1f6c6435cc6"
         }
       ]
     },

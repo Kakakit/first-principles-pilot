@@ -7,7 +7,7 @@
 | 配位多面体畸变 | 2.2.0 | 工作台 ZIP 导入 | [ZIP](packages/crystal-structure-distortion-analysis-2.2.0.zip) | [README](../resources/extensions/crystal-structure-distortion-analysis/README.md) |
 | electronic-structure-characterization | 0.3.0 | 旧版 CLI | [ZIP](packages/electronic-structure-characterization-0.3.0.zip) | [README](../resources/extensions/electronic-structure-characterization/README.md) |
 | 形式极化与双结果比较 | 2.2.0 | 工作台 ZIP 导入 | [ZIP](packages/lcalcpol-polarization-analysis-2.2.0.zip) | [README](../resources/extensions/lcalcpol-polarization-analysis/README.md) |
-| 轨道占据、能级与劈裂分析 | 2.2.0 | 工作台 ZIP 导入 | [ZIP](packages/local-crystal-field-analysis-2.2.0.zip) | [README](../resources/extensions/local-crystal-field-analysis/README.md) |
+| 轨道占据、能级与劈裂分析 | 2.3.0 | 工作台 ZIP 导入 | [ZIP](packages/local-crystal-field-analysis-2.3.0.zip) | [README](../resources/extensions/local-crystal-field-analysis/README.md) |
 | 压力结构与 EOS 分析 | 1.0.1 | 工作台 ZIP 导入 | [ZIP](packages/pressure-structure-eos-1.0.1.zip) | [README](../resources/extensions/pressure-structure-eos/README.md) |
 | pyw90 | 0.5.1 | 旧版 CLI | [ZIP](packages/pyw90-0.5.1.zip) | [README](../resources/extensions/pyw90/README.md) |
 | 空间对称性 | 2.0.0 | 工作台 ZIP 导入 | [ZIP](packages/structure-symmetry-2.0.0.zip) | [README](../resources/extensions/structure-symmetry/README.md) |

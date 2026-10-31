@@ -2,8 +2,8 @@
   "schema": "fpilot.extension.v2",
   "id": "local-crystal-field-analysis",
   "name": "轨道占据、能级与劈裂分析",
-  "version": "2.2.0",
-  "description": "VASP 完成即可分析无 SOC 占据矩阵或 PDOS；Wannier hr 可按逐项多面体配置分析局域能级。",
+  "version": "2.3.0",
+  "description": "VASP导出冻结局域配位与占据参考；Wannier核对结构并继承局域轴，轨道身份保留候选状态。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
     "attempt"
@@ -170,6 +170,13 @@
         "maximum": 20,
         "default": 3,
         "description": "只接受此距离内的配体构成四/六配位。下一近邻仍用于壳层间隔诊断；不足时明确报错，不静默选择远处原子。"
+      },
+      "local_reference": {
+        "type": "string",
+        "format": "data-url",
+        "title": "导入 VASP 局域轨道参考（可选）",
+        "description": "选择占据结果导出的 local-orbital-reference.json。匹配同一晶胞、原子顺序及冻结坐标后继承配位与局域轴；类型留空自动继承。不是最终WF身份验证；不传递自然占据本征矢。移除文件即可独立分析Wannier。",
+        "maxLength": 2800000
       }
     },
     "required": [
@@ -183,6 +190,12 @@
         "title": "分析对象",
         "fields": [
           "polyhedron_types"
+        ]
+      },
+      {
+        "title": "VASP → Wannier 参考衔接（可选）",
+        "fields": [
+          "local_reference"
         ]
       },
       {
@@ -210,7 +223,13 @@
     "ui:preview": [
       "polyhedron_types",
       "vasp_quantity"
-    ]
+    ],
+    "local_reference": {
+      "ui:widget": "file",
+      "ui:options": {
+        "accept": ".json,application/json"
+      }
+    }
   },
   "outputs": [
     "table",
