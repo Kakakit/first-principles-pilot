@@ -86,7 +86,7 @@ class ExtensionHostTests(unittest.TestCase):
         record=runs.get(receipt['analysis_id']);self.assertEqual(record['state'],'FAILED');self.assertEqual(record['sources'][0]['poscar'],SI);self.assertEqual(record['error'],'fixture failure')
     def mock_attempts(self,files,stage='scf',state='COMPLETED',evidence=None):
         evidence=evidence if evidence is not None else {'vasp_timing':True,'ediff_reached':True}
-        self.stack.enter_context(patch.object(ex,'get',side_effect=lambda key:{'id':key,'project_id':'project','node_id':'node-'+key,'stage':stage,'state':state,'config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','evidence':evidence}))
+        self.stack.enter_context(patch.object(ex,'get',side_effect=lambda key:{'id':key,'project_id':'project','node_id':'node-'+key,'stage':stage,'state':state,'config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','remote_project_path_absolute':'/workspace/project','evidence':evidence}))
         self.stack.enter_context(patch.object(ex,'attempt_path',return_value={'root':'/workspace','relative':'source','shell':'/workspace/source'}))
         self.stack.enter_context(patch.object(artifacts,'listing',side_effect=lambda key:{'files':[{'name':name,'path':name,'size_bytes':len(data),'modified_at':'2026-10-01T00:00:00+00:00'} for name,data in files[key].items()]}))
         def pull(source,name,target):raw=files[source['attempt_id']][name];target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw);return raw
@@ -170,12 +170,94 @@ class ExtensionHostTests(unittest.TestCase):
             receipt=runs.preview(self.payload(location='ssh',alias='jutai-1'))
         self.assertTrue(receipt['ready']);self.assertIn('analyses/analysis-preview',receipt['script'])
         self.assertIn('doctor.json',receipt['script']);self.assertNotIn('#PBS',receipt['script']);probe.assert_not_called()
+    def test_source_project_wins_over_home_runtime_and_current_project_settings(self):
+        self.install();self.mock_attempts({'aa':{'POSCAR':SI.encode()}})
+        runtime=self.runtime();runtime['config']['remote_workspace_root']='$HOME'
+        p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
+        payload=self.payload(project_id='project',sources=[{'kind':'attempt','attempt_id':'aa'}],location='ssh',alias='jutai-1')
+        with patch.object(runs,'WorkspaceStore') as store:
+            preview=runs.preview(payload);payload['preview_id']=preview['preview_id'];key=runs.start(payload)['analysis_id']
+            store.assert_not_called()
+        self.assertEqual(preview['remote_analysis_root'],'/workspace/project/analyses')
+        self.assertIn('/workspace/project/analyses/analysis-preview',preview['script'])
+        self.assertIn('/workspace/project/analyses',preview['reason'])
+        record=runs.get(key);self.assertEqual(remote.analysis_directory(record),'/workspace/project/analyses/'+key)
+        # Waiting analyses keep the approved path even after project/runtime edits.
+        with patch.object(remote,'stage',return_value='/workspace/project/analyses/'+key) as stage,patch.object(remote,'direct',side_effect=ValueError('fixture disconnect')):
+            runs._execute(key)
+        self.assertEqual(stage.call_args.args[0]['remote_analysis_root'],'/workspace/project/analyses')
+        self.assertIn('cd /workspace/project/analyses/'+key,(runs.directory(key)/'launch.sh').read_text())
+        self.assertNotIn('$HOME/analyses',(runs.directory(key)/'launch.sh').read_text())
+    def test_structure_project_layout_and_changes_require_new_preview(self):
+        from unittest.mock import MagicMock
+        self.install();runtime=self.runtime();runtime['config']['remote_workspace_root']='$HOME'
+        p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
+        project={'id':'project','remoteSlug':'sample','remotePathPolicy':'project-directory-v2','remoteWorkspaceRoot':'/work/research'}
+        store=MagicMock();store.read.side_effect=lambda:{'workspace':{'projects':[project]}}
+        payload=self.payload(project_id='project',location='ssh',alias='jutai-1')
+        with patch.object(runs,'WorkspaceStore',return_value=store):
+            preview=runs.preview(payload);self.assertEqual(preview['remote_analysis_root'],'/work/research/sample/analyses')
+            payload['preview_id']=preview['preview_id'];project['remoteWorkspaceRoot']='/work/moved'
+            with self.assertRaisesRegex(ValueError,'分析目录.*重新预览'):runs.start(payload)
+            project['remoteDirectories']={'jutai-1':'/scratch/custom-project'}
+            preview=runs.preview(payload);self.assertEqual(preview['remote_analysis_root'],'/scratch/custom-project/analyses')
+            payload['preview_id']=preview['preview_id'];key=runs.start(payload)['analysis_id']
+            project['remoteDirectories']['jutai-1']='/scratch/later'
+        self.assertEqual(remote.analysis_directory(runs.get(key)),'/scratch/custom-project/analyses/'+key)
+        project.pop('remoteDirectories');project.pop('remotePathPolicy')
+        with patch.object(runs,'WorkspaceStore',return_value=store):
+            self.assertEqual(runs.preview(payload)['remote_analysis_root'],'/work/moved/material-projects/sample/analyses')
+            with self.assertRaisesRegex(ValueError,'项目不存在'):runs.preview({**payload,'project_id':'missing'})
+    def test_old_attempt_layout_and_multiple_source_roots_follow_primary(self):
+        runtime=self.runtime();sources=[{'kind':'attempt','attempt_id':'aa','remote_root':'/old/project/flows/single/stages/scf/attempts/first'},
+                                        {'kind':'attempt','attempt_id':'bb','remote_root':'/new/project/flows/main/stages/02-scf/attempts/second'}]
+        with patch.object(ex,'get',side_effect=lambda key:{'project_id':'project'}):
+            self.assertEqual(runs._analysis_root({},sources,runtime),'/old/project/analyses')
+            self.assertEqual(runs._analysis_root({},list(reversed(sources)),runtime),'/new/project/analyses')
+    def test_project_override_stages_and_runs_actual_shell_in_isolated_directory(self):
+        from unittest.mock import MagicMock
+        self.install();runtime=self.runtime();runtime['config']['remote_workspace_root']='$HOME'
+        p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
+        project_root=self.root.resolve()/"remote project's data"
+        project={'id':'project','remoteSlug':'sample','remoteDirectories':{'jutai-1':str(project_root)}}
+        store=MagicMock();store.read.return_value={'workspace':{'projects':[project]}}
+        payload=self.payload(project_id='project',location='ssh',alias='jutai-1')
+        with patch.object(runs,'WorkspaceStore',return_value=store):
+            payload['preview_id']=runs.preview(payload)['preview_id'];key=runs.start(payload)['analysis_id']
+        def ssh(alias,command,data=None,**kwargs):
+            response=subprocess.run(['bash','-c',command],input=data,capture_output=True,timeout=30)
+            return {'exit_code':response.returncode,'stdout':response.stdout.decode(),'stderr':response.stderr.decode()}
+        def direct(record):
+            response=subprocess.run(['bash',record['remote_dir']+'/launch.sh'],capture_output=True,text=True,timeout=30)
+            return {'exit_code':response.returncode,'stdout':response.stdout,'stderr':response.stderr}
+        def pull(record,name,target):
+            target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(Path(record['remote_dir'])/name,target);return target
+        with patch.object(ex,'ssh',side_effect=ssh),patch.object(remote,'direct',side_effect=direct),patch.object(remote,'pull',side_effect=pull):
+            runs._execute(key)
+        record=runs.get(key);self.assertEqual(record['state'],'COMPLETED',record.get('error'))
+        destination=project_root/'analyses'/key
+        self.assertEqual(record['remote_dir'],str(destination));self.assertTrue((destination/'outputs/result.json').is_file())
+        self.assertEqual(json.loads((destination/'request.json').read_text())['output_dir'],str(destination/'outputs'))
+        self.assertEqual(record['runtime']['config']['remote_workspace_root'],'$HOME')
+    def test_unbound_home_and_unfrozen_legacy_dispatch_do_not_create_remote_directory(self):
+        self.install();runtime=self.runtime();runtime['config']['remote_workspace_root']='$HOME'
+        p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
+        with self.assertRaisesRegex(ValueError,'指定项目目录或工作区'):runs.preview(self.payload(location='ssh',alias='jutai-1'))
+        payload=self.remote_payload();payload['preview_id']=runs.preview(payload)['preview_id']
+        approval=self.root/'analysis-previews'/(payload['preview_id']+'.json');old=json.loads(approval.read_text())
+        old['binding'].pop('remote_analysis_root');p.atomic_json(approval,old)
+        with self.assertRaisesRegex(ValueError,'重新预览'):runs.start(payload)
+        with patch.object(ex,'ssh') as ssh:
+            with self.assertRaisesRegex(ValueError,'未冻结项目分析目录'):
+                remote.stage({'id':'a'*32,'runtime':runtime},self.root,{})
+            ssh.assert_not_called()
     def test_old_scheduler_unknown_only_recovers_original_receipt(self):
         control.save_settings({'max_inflight_total':2,'max_inflight_per_host':1,'max_cores_per_host':None})
         payload=self.remote_payload();key=runs.start(payload)['analysis_id']
-        record=runs.get(key);record.update(location='scheduler',state='UNKNOWN',submission_started=True,remote_dir='/workspace/analyses/'+key);runs.save(record)
-        with patch.object(remote,'inspect',return_value={'job_id':'731.server','exit':None}),patch.object(remote,'queued',return_value=True),patch.object(remote,'submit') as submit:
+        record=runs.get(key);record.pop('remote_analysis_root');record.update(location='scheduler',state='UNKNOWN',submission_started=True,remote_dir='/workspace/analyses/'+key);runs.save(record)
+        with patch.object(runs,'_analysis_root',side_effect=AssertionError('historical path must stay frozen')),patch.object(remote,'inspect',return_value={'job_id':'731.server','exit':None}) as inspect,patch.object(remote,'queued',return_value=True),patch.object(remote,'submit') as submit:
             self.assertEqual(runs.refresh(key)['job_id'],'731.server');self.assertEqual(runs.get(key)['state'],'SUBMITTED');submit.assert_not_called()
+            self.assertEqual(inspect.call_args.args[0]['remote_dir'],'/workspace/analyses/'+key)
         with closing(ex.db()) as db:
             with self.assertRaisesRegex(ValueError,'在途'):control.enforce_limits(db,{'id':'other','config':{'alias':'jutai-1'},'profile':{'ppn':2}})
 
@@ -257,8 +339,8 @@ class ExtensionHostTests(unittest.TestCase):
         self.install();self.mock_attempts({'aa':{'POSCAR':SI.encode()}});self.runtime()
         payload={'extension_id':'structure-volume-statistics','project_id':'project','sources':[{'kind':'attempt','attempt_id':'aa'}],'options':{'include_elements':True},'location':'ssh','alias':'jutai-1'}
         payload['preview_id']=runs.preview(payload)['preview_id'];receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);dest=runs.directory(record['id']);request=runs._input_request(record,dest);(dest/'launch.sh').write_text('fixture')
-        with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'/workspace/analyses/'+record['id']+'\n'}) as ssh:remote.stage(record,dest,request)
-        text=ssh.call_args.args[1];self.assertIn('stat -c',text);self.assertIn('cp --',text);self.assertNotIn('sha256',text);self.assertNotIn('ln ',text)
+        with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'/workspace/project/analyses/'+record['id']+'\n'}) as ssh:remote.stage(record,dest,request)
+        text=ssh.call_args.args[1];self.assertIn('dest=/workspace/project/analyses/'+record['id'],text);self.assertIn('stat -c',text);self.assertIn('cp --',text);self.assertNotIn('sha256',text);self.assertNotIn('ln ',text)
 
     def test_active_unknown_analysis_counts_core_budget(self):
         payload=self.remote_payload();receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);record.update(location='scheduler',state='UNKNOWN',requested_cores=2);runs.save(record)
@@ -308,6 +390,7 @@ class ExtensionHostTests(unittest.TestCase):
         files={key:{i['name']:Path(i['path']).read_bytes() for values in req['inputs'].values() for i in values}}
         self.mock_attempts(files,stage='wannier90',evidence={'wannier_all_done':True})
         frozen={'id':key,'kind':'wannier90','project_id':'project','node_id':'w90-node','state':'COMPLETED','config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','evidence':{'wannier_all_done':True},'seed':'wannier90','parent_attempt_id':'parent','source_snapshot':{'seed':'wannier90','spinors':True,'parameters':{'num_wann':8}},'live_energy_reference':source['input_summary']['energy_reference']}
+        frozen['remote_project_path_absolute']='/workspace/project'
         self.stack.enter_context(patch.object(ex,'get',return_value=frozen));self.runtime();runtime=remote.runtimes()['jutai-1'];runtime.update(node='',cores=None,reason='');p.atomic_json(self.root/'extensions-v2/runtimes.json',{'jutai-1':runtime})
         payload={'extension_id':'sample-analysis','project_id':'project','sources':[{'kind':'attempt','attempt_id':key}],'options':req['options'],'location':'ssh','alias':'jutai-1'}
         with patch.object(remote,'resource_preview',side_effect=AssertionError('no node probe in direct SSH')):

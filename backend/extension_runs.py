@@ -268,6 +268,35 @@ def preview_binding(binding, manifest):
     return {**binding, 'sources': normalized}
 
 
+def _analysis_root(payload,sources,runtime):
+    """Follow the primary source's frozen project, or the current project layout."""
+    from . import remote_paths
+    project_id=payload.get('project_id')
+    primary=next((s for s in sources if s['kind']=='attempt'),None)
+    if primary:
+        attempt=ex.get(primary['attempt_id'])
+        project_id=project_id or attempt.get('project_id')
+        project_root=attempt.get('remote_project_path_absolute')
+        if not project_root:
+            # Older attempts can lack the project field. Infer only the known
+            # layout; arbitrary source directories are never treated as projects.
+            match=re.fullmatch(r'(.+)/flows/[^/]+/stages/[^/]+/attempts/[^/]+',primary['remote_root'])
+            if match:project_root=match.group(1)
+    else:project_root=None
+    if not project_root and project_id and project_id!='geometry':
+        workspace=WorkspaceStore(ROOT).read()['workspace'] or {}
+        project=next((v for v in workspace.get('projects',[]) if v['id']==project_id),None)
+        if project is None:raise ValueError('项目不存在，无法确定分析目录')
+        root,relative=remote_paths.project_location(project,runtime['alias'],runtime['config'].get('remote_workspace_root'))
+        project_root=remote_paths.project_path(root,relative)
+    elif not project_root:
+        project_root=remote_paths.validate_root(runtime['config'].get('remote_workspace_root'))
+    project_root=remote_paths.validate_root(project_root)
+    if project_root in ('$HOME','/'):
+        raise ValueError('请先指定项目目录或工作区目录，分析不能直接保存在 HOME 或文件系统根目录下')
+    return remote_paths.join_workspace(project_root,'analyses')
+
+
 def start(payload):
     receipt=p.installed(payload['extension_id']);manifest=receipt['manifest']
     if not receipt['enabled']:raise ValueError('扩展已停用')
@@ -277,12 +306,15 @@ def start(payload):
     if reasons:raise ValueError('；'.join(reasons))
     runtime=environments.resolve(manifest['id'],location,payload.get('alias',''))
     environments.expected(runtime,payload)
+    remote_binding={}
+    if location!='local':
+        if any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
+        remote_binding={'remote_analysis_root':_analysis_root(payload,sources,runtime),'project_id':payload.get('project_id')}
     if location!='local' or payload.get('preview_id'):
         approval=json.loads((ROOT/'analysis-previews'/(payload.get('preview_id','')+'.json')).read_text()) if __import__('re').fullmatch(r'[a-f0-9]{32}',payload.get('preview_id','')) else None
-        binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
-        if not approval or preview_binding(approval['binding'],manifest)!=preview_binding(binding,manifest):raise ValueError('来源、选项或运行环境已改变，请重新预览')
+        binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime,**remote_binding}
+        if not approval or preview_binding(approval['binding'],manifest)!=preview_binding(binding,manifest):raise ValueError('来源、选项、分析目录或运行环境已改变，请重新预览')
         runtime=copy.deepcopy(runtime)
-        if location!='local' and any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
     environment=p.doctor(receipt,python=runtime['python']) if location=='local' else None
     if environment is not None and not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
     key=uuid.uuid4().hex;dest=directory(key);dest.mkdir(parents=True)
@@ -291,6 +323,7 @@ def start(payload):
             'extension_id':manifest['id'],'manifest':manifest,'revision':receipt['revision'],'sources':sources,'options':options,
             'location':location,'runtime':runtime,'runtime_doctor':environment,'state':'QUEUED','created_at':now(),'result':None,'outputs':[],
             'scientific_validation':'NOT_PERFORMED','verification':'小型本地输入内容身份；远端输入来源与大小/修改时间核验'}
+    if remote_binding:record['remote_analysis_root']=remote_binding['remote_analysis_root']
     save(record);schedule(key)
     return {'analysis_id':key,'state':'QUEUED'}
 
@@ -456,7 +489,7 @@ def _remote(record):
     dest=directory(record['id']);cores=None
     record.update(state='DISPATCHING',dispatch_started_at=now());save(record)
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
-    text=remote.script(record['runtime'],record['runtime']['config'].get('remote_workspace_root','$HOME').rstrip('/')+'/analyses/'+record['id'],record['manifest']['entrypoint'],record['location'],cores,record['manifest']['execution']['timeout_seconds'])
+    text=remote.script(record['runtime'],remote.analysis_directory(record),record['manifest']['entrypoint'],record['location'],cores,record['manifest']['execution']['timeout_seconds'])
     (dest/'launch.sh').write_text(text);record['script']=text
     shutil.copy2(Path(__file__).with_name('extension_process.py'),dest/'extension-runner.py')
     assert_available('analyses',record['id'],record)
@@ -541,12 +574,13 @@ def preview(payload):
         p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':{'ready':True}})
         return {'preview_id':key,'ready':True,'runtime':runtime,'options':copy.deepcopy(options),'reason':'使用选定本地解释器，在独立目录运行'}
     if any(s.get('alias') and s['alias']!=runtime['alias'] for s in sources):raise ValueError('远端来源需与运行主机相同')
+    analysis_root=_analysis_root(payload,sources,runtime)
     resources={'ready':True}
     if not resources['ready']:return resources
-    key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime}
+    key=uuid.uuid4().hex;binding={'revision':receipt['revision'],'sources':sources,'options':options,'location':location,'runtime':runtime,'remote_analysis_root':analysis_root,'project_id':payload.get('project_id')}
     p.atomic_json(ROOT/'analysis-previews'/(key+'.json'),{'created_at':now(),'binding':binding,'resources':resources})
-    text=remote.script(runtime,(runtime['config'].get('remote_workspace_root') or '$HOME').rstrip('/')+'/analyses/analysis-preview',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
-    return {'preview_id':key,'ready':True,'resources':resources,'runtime':runtime,'script':text,'reason':'将在独立 analyses 目录执行 doctor、check、run；来源文件只读','options':copy.deepcopy(options)}
+    text=remote.script(runtime,analysis_root+'/analysis-preview',manifest['entrypoint'],location,(resources.get('selection') or {}).get('requested_cores'),manifest['execution']['timeout_seconds'])
+    return {'preview_id':key,'ready':True,'resources':resources,'runtime':runtime,'script':text,'remote_analysis_root':analysis_root,'reason':'分析保存位置：'+analysis_root+'/<analysis ID>。将在独立子目录执行 doctor、check、run；来源文件只读','options':copy.deepcopy(options)}
 
 
 def stop_local(key):

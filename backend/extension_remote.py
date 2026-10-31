@@ -121,9 +121,17 @@ def script(runtime, directory, entrypoint, mode, cores=None, timeout=300):
     return '\n'.join(header)+'\n'
 
 
+def analysis_directory(record):
+    """Use the destination frozen at preview/start, never a runtime HOME default."""
+    root=record.get('remote_analysis_root')
+    if not root:
+        raise ValueError('此分析未冻结项目分析目录，请重新预览并新建分析；原记录保留')
+    if not re.fullmatch(r'[a-f0-9]{32}',record['id']):raise ValueError('analysis ID 无效')
+    return remote_paths.join_workspace(root,record['id'])
+
+
 def stage(record,directory,request):
-    runtime=record['runtime'];raw_root=runtime['config'].get('remote_workspace_root') or remote_paths.DEFAULT_WORKSPACE_ROOT
-    remote_dir=remote_paths.validate_root(raw_root).rstrip('/')+'/analyses/'+record['id']
+    runtime=record['runtime'];remote_dir=analysis_directory(record)
     request=copy.deepcopy(request)
     request['output_dir']='__WORKDIR__/outputs';request['result_file']='__WORKDIR__/outputs/result.json'
     copies=[]
