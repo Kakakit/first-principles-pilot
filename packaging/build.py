@@ -3,7 +3,7 @@ import argparse,hashlib,json,re,shutil,zipfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-FILES={'launch.py':'launch.py','scripts/watch_execution.py':'scripts/watch_execution.py',
+FILES={'LICENSE':'LICENSE','launch.py':'launch.py','scripts/watch_execution.py':'scripts/watch_execution.py',
        'scripts/collect_diagnostics.py':'scripts/collect_diagnostics.py',
        'packaging/icons/fpilot.ico':'branding/fpilot.ico',
        'packaging/icons/fpilot.icns':'branding/fpilot.icns',
@@ -54,7 +54,7 @@ def licenses(dest):
                 target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(path,target)
         rows.append('| '+name.removeprefix('node_modules/')+' | '+value.get('version','')+' | '+str(value.get('license','see package license'))+' |')
     text='# Third party components\n\nThe prebuilt frontend uses the following locked npm packages. Available license texts are in THIRD_PARTY_LICENSES.\n\n| Package | Version | License |\n|---|---|---|\n'+'\n'.join(rows)
-    text+='\n\nPython dependencies are installed separately from PyPI with their original licenses; no Python runtime or dependency binaries are redistributed in this ZIP. filelock 3.19.1 uses the Unlicense.\n\nThis private testing bundle does not grant licenses to VASP, POTCAR datasets or external analysis tools.\n'
+    text+='\n\nPython dependencies are installed separately from PyPI with their original licenses; no Python runtime or dependency binaries are redistributed in this ZIP. filelock 3.19.1 uses the Unlicense.\n\nFPilot original code is MIT licensed; third-party components retain their licenses. VASP, POTCAR datasets and external analysis tools require their own licenses.\n'
     (dest/'THIRD_PARTY_NOTICES.md').write_text(text,encoding='utf-8')
 
 

@@ -1,6 +1,6 @@
 {
-  "version": "1.1.0-beta.3",
-  "name": "Mac 浏览器工作台安装测试版",
+  "version": "1.1.0-beta.4",
+  "name": "Apple Silicon macOS Beta",
   "prerelease": true,
-  "macos_build": "1103"
+  "macos_build": "1104"
 }

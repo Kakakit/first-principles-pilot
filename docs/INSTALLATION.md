@@ -2,25 +2,26 @@
 
 安装后点击 First Principles Pilot 图标，浏览器自动打开工作台。包内自带 Python 和锁定依赖，无需安装 Node、Python 或运行 npm。界面和计算逻辑共用一份代码，安装包按系统/架构分别构建。
 
-## v1.1.0-beta.3 更新
+## v1.1.0-beta.4 更新
 
-本次仅发布 Apple Silicon Mac 的 DMG，内置 Python 3.11 与锁定依赖。Windows 用户继续使用 beta.2；本次不生成 Windows 或 Intel Mac 安装包。
+本次仅发布 Apple Silicon Mac 的 DMG，内置 Python 3.11 与锁定依赖。Windows 历史版保留 beta.2；本次不生成 Windows 或 Intel Mac 安装包。
 
-- 绿色工作台、融合项目流程、节点摘要与结构直达，运行记录显示冻结备注。
-- 单项重算与批次恢复、参数迭代列表取值、可调监控周期，以及 SSH 和文件读取减负。
-- 同源 DFT 路径及基础窗口检查脱离 PyW90；投影能带内置流式 PROCAR 解析，不再执行 VASPKIT。
-- 修复非有限运行证据导致 HTTP 500，以及选择计算链时画布覆盖配置页面。
-- 扩展独立发布，主程序不再从旧扩展源码目录加载科学实现；扩展从 extensions 分支导入。
+- 导航与结构管理整理，支持从任务 POSCAR / CONTCAR 提取独立结构；卡片直接列出实际继承文件。
+- 自动保存与检查点分离，减少编辑期间保存开销，支持命名检查点与恢复为新项目。
+- INCAR 参数列表迭代与节点池等待 / 排队策略，保留实际冻结输入和资源预览。
+- 修复 Wannier 比较的起始带号与部分覆盖统计；保留局部覆盖的解释边界。
+- 远端扩展分析跟随来源计算的项目目录保存，旧分析仍按原路径读取。
+- 重写开源项目首页，补充贡献指南与 MIT License，安装包保留第三方声明。
 
 ## 下载与安装
 
-从本仓库 GitHub Releases 下载对应安装包。仓库为私有，须先登录获授权的 GitHub 账号。不要下载页面自动生成的 Source code ZIP 作为运行包。
+从本仓库 GitHub Releases 下载对应安装包。不要下载页面自动生成的 Source code ZIP 作为运行包。
 
 - **Windows 10/11 x64**：下载 `FPilot-1.1.0-beta.2-Windows-x64-Setup.exe`，双击安装。默认安装到当前用户的应用目录，无需管理员权限。开始菜单有启动、停止和导出诊断三个入口，可创建桌面快捷方式。
 - **Apple Silicon Mac**：下载名称含 `macos-arm64` 的 DMG，打开并把应用拖入 Applications。
-- beta.3 只提供 Apple Silicon Mac；Windows x64 保留 beta.2，暂不提供 Intel Mac 安装包。
+- beta.4 只提供 Apple Silicon Mac；Windows x64 保留 beta.2，暂不提供 Intel Mac 安装包。
 
-这是未使用商业代码签名证书的测试版。Windows SmartScreen/macOS Gatekeeper 可能提示发布者未验证；核对这是自己授权仓库的发布和 SHA256 后决定是否允许运行。Mac 的临时签名不等于 Developer ID 签名或公证。本版在开发者的 Apple Silicon Mac 隔离安装与配置验收；其他 Mac 的 Gatekeeper 与实际科研环境仍需使用者核对。
+这是未使用商业代码签名证书的测试版。Windows SmartScreen/macOS Gatekeeper 可能提示发布者未验证；核对这是本仓库的正式发布和 SHA256 后决定是否允许运行。Mac 的临时签名不等于 Developer ID 签名或公证。本版在开发者的 Apple Silicon Mac 隔离安装与配置验收；其他 Mac 的 Gatekeeper 与实际科研环境仍需使用者核对。
 
 ## 启动、停止和重启
 

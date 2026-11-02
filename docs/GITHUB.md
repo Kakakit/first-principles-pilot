@@ -2,7 +2,7 @@
 
 > 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
 
-私有仓库：https://github.com/Kakakit/first-principles-pilot 。仅获授权账号可访问。首个源码提交包含当前完整业务代码、长期回归用例、扩展、必要说明和跨平台打包入口；没有导入旧开发 Git 历史。
+源码仓库：https://github.com/Kakakit/first-principles-pilot 。项目原创代码采用 MIT License，见根目录 LICENSE。首个源码提交包含当前完整业务代码、长期回归用例、扩展、必要说明和跨平台打包入口；没有导入旧开发 Git 历史。
 
 2026-10-05 的源码更新包含默认脚本方式服务器配置、提交页脚本选择和编辑保留节点；使用与验收见 [本轮记录](submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)。已有运行 ZIP 不会自动随源码更新，其他设备更新后按下面步骤重新构建/打包。
 
@@ -42,6 +42,6 @@ python packaging/build.py --target windows --output C:/你的空输出目录/Win
 
 服务器在软件设置中登记，保存在本机数据目录。可选的内置登记表 `resources/preflight/hpc_cluster_registry.json` 不入库；缺少时读取空白 `.example.json`。私人 PBS/Slurm 原稿从设置导入，不提交到仓库。POTCAR、SSH 密钥、实际研究结果、缓存、node_modules、dist、运行 ZIP 和旧验收截图不入库。
 
-当前开发机仍保留旧本地 Git 基线与未提交改动。此次通过 GitHub 插件发布经过筛选的当前源码；后续插件同步以远端 main 的准确提交为父提交，使用相同排除规则，不强推旧本地历史。若改用 Git CLI 日常开发，请从此私有仓库新克隆开始，不在旧开发目录直接 push/pull 两套不同历史。
+当前开发机仍保留旧本地 Git 基线与未提交改动。此次通过 GitHub 插件发布经过筛选的当前源码；后续插件同步以远端 main 的准确提交为父提交，使用相同排除规则，不强推旧本地历史。若改用 Git CLI 日常开发，请从此仓库新克隆开始，不在旧开发目录直接 push/pull 两套不同历史。
 
 仅修改需要的模块，运行对应检查。正式来源和远端 attempt 不随代码同步迁移。新设备的 Python/SSH/POTCAR 路径在设置中单独配置。

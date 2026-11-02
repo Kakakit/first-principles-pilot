@@ -1,81 +1,107 @@
-# First Principles Pilot
+<p align="center"><img src="packaging/icons/fpilot.svg" alt="First Principles Pilot" width="88" /></p>
+<h1 align="center">First Principles Pilot</h1>
+<p align="center"><strong>A visual workbench for first-principles calculations.</strong><br />把结构、计算流程、远端任务与结果分析放在同一个工作台。</p>
+<p align="center">
+  <a href="https://github.com/Kakakit/first-principles-pilot/releases"><img src="https://img.shields.io/badge/release-1.1.0--beta.4-287965" alt="Release 1.1.0-beta.4" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" /></a>
+  <a href="https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.4"><img src="https://img.shields.io/badge/installer-macOS%20Apple%20Silicon-black?logo=apple" alt="macOS Apple Silicon" /></a>
+</p>
+<p align="center"><a href="#安装">安装</a> · <a href="#快速上手">快速上手</a> · <a href="#文档">文档</a> · <a href="https://github.com/Kakakit/first-principles-pilot/tree/extensions">扩展</a> · <a href="CONTRIBUTING.md">参与贡献</a></p>
 
-> 扩展开发已移至同仓库的 [extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)。此处保留主程序兼容快照；新版本与 ZIP 请从该分支获取。
+First Principles Pilot（FPilot）面向使用 **VASP、Wannier90 和 HPC 集群**开展材料研究的用户。你可以在本机浏览器中搭建计算流程、编辑输入、选择服务器和任务脚本，跟踪运行记录，并围绕同一份计算来源查看结果和执行后处理。
 
-个人第一性原理计算工作台：结构、完整流程画布、计算配置、运行监控与结果后处理。支持 VASP、Wannier90、链与参数迭代，保留五套主题和扩展。程序完成、数值收敛和科学结论分别记录。
+项目目前处于 **Beta** 阶段，主要界面为中文。计算程序、赝势与服务器环境由使用者自行提供；工作台负责组织和追踪计算，数值收敛与物理结论仍需按研究问题验证。
 
-## 源码与更新
+## 功能
 
-源码保存在私有仓库 [Kakakit/first-principles-pilot](https://github.com/Kakakit/first-principles-pilot)。授权账号可克隆；后续修复按提交更新。[克隆、打包与同步说明](docs/GITHUB.md)。GitHub 源码需要 Node 构建，分享给普通使用者继续采用下方运行 ZIP。
+| 工作环节 | 能做什么 |
+| --- | --- |
+| **结构与流程** | 导入和编辑晶体结构，查看三维模型，在流程画布中连接计算节点，从已有任务提取独立结构。 |
+| **输入配置** | 编辑 VASP 参数与 INCAR 原文、KPOINTS、赝势选择及 Wannier90 投影，预览并冻结实际运行输入。 |
+| **远端运行** | 通过系统 OpenSSH 连接服务器，导入 PBS / Slurm 脚本，预览资源与运行目录，提交并记录准确的任务回执。 |
+| **计算链与扫描** | 组织阶段依赖、参数列表和范围扫描，查看逐个 case 的进度、暂停原因与运行证据。 |
+| **结果与分析** | 查看结构、能量、能带、态密度与 Wannier 拟合比较；通过扩展接入更多科学后处理。 |
+| **记录与恢复** | 保留输入来源、运行身份和分析关联；自动保存草稿，使用命名检查点、项目快照和回收站恢复工作。 |
 
-## 安装使用
+一个常见流程可以是：
 
-普通使用者下载 [GitHub Release](https://github.com/Kakakit/first-principles-pilot/releases) 的浏览器安装测试版：Windows x64 安装 EXE；Apple Silicon Mac 安装 DMG。首版暂不提供 Intel Mac。安装后点击应用图标，浏览器自动打开；自带 Python 与锁定依赖，无需 Node/Python/npm。首次仍须配置自己的 SSH、合法 POTCAR 与服务器脚本。详见 [安装与测试](docs/INSTALLATION.md)。
+```mermaid
+flowchart LR
+    S[晶体结构] --> R[结构优化]
+    R --> C[自洽计算]
+    C --> B[能带 / 态密度]
+    C --> W[Wannier90]
+    W --> A[比较与扩展分析]
+```
 
-项目、配置和日志保存在独立用户数据目录，更新/卸载保留数据；旧开发目录不迁移。控制页提供停止、重启与退出，提交回执未完成时不强制停止。首版通过 Release 覆盖更新，安装测试版尚无商业签名证书，Windows/Mac 实机体验须进一步验收。
+每次运行有独立的 attempt 记录。任务回执不明时保留 `UNKNOWN` 并核查原回执；新建远端扩展分析优先保存在来源计算项目的 `analyses/` 下，便于计算与分析一一对应。
 
-## 旧版运行 ZIP
+## 安装
 
-已有 ZIP 保留供旧版本恢复。它们仍需要已有 Python，不属于新的自包含安装器。不要压缩整个开发文件夹分享。
+**Apple Silicon Mac 用户：**前往 [Releases](https://github.com/Kakakit/first-principles-pilot/releases/tag/v1.1.0-beta.4) 下载 `FPilot-1.1.0-beta.4-macos-arm64.dmg`，打开后将应用拖入 Applications。安装包内置 Python 和运行依赖，无需另装 Node.js 或 Python。
 
-- Mac：`FPilot-macOS-Test-20261004-r2.zip`（含理由输入卡顿修复）。解压后依次使用安装依赖、检查和启动三个 `.command`。[Mac 使用说明](packaging/macos/README.md)。
-- Windows：`FPilot-Windows-Test-20261004-r3.zip`（含理由输入卡顿修复）；旧包保留。[Windows 使用说明](packaging/windows/README.md)。
+| 平台 | 安装方式与状态 |
+| --- | --- |
+| macOS · Apple Silicon（M 系列） | 本次提供 DMG；详细步骤与版本边界见 [安装指南](docs/INSTALLATION.md)。 |
+| Windows x64 | 本次不发布新包；历史版本保留在 [Releases](https://github.com/Kakakit/first-principles-pilot/releases)。 |
+| Intel Mac / Linux | 本次无安装包；源码运行需自行验证相应平台与计算环境。 |
 
-运行包包含 `backend/`、预构建 `dist/`、`resources/`、示例与启动入口，不需要 Node。没有项目数据、POTCAR、私人服务器配置、开发测试、历史验收资料或 node_modules。
+当前 macOS 测试包使用临时签名，尚未经过 Apple Developer ID 公证。下载后可用随包提供的 SHA256 文件校验；GitHub 自动生成的 Source code 归档是源码，不是安装器。
 
-新设备使用自己的已有 Python、合法 POTCAR 库、SSH 配置和服务器脚本。不要复制开发机的 `fpilot.local.json`；在软件“设置”中填写这台机器的路径与服务器。分享软件和迁移项目数据是两个操作，运行包从空工作区开始。
+## 快速上手
 
-## 开发目录怎么找
+1. **启动工作台。**打开应用，在浏览器中确认本机数据目录，新建项目并导入 POSCAR 或 CIF 结构。
+2. **搭建流程。**添加计算节点，连接结构与计算来源，检查参数和预期继承的文件。
+3. **配置计算环境。**登记自己的 SSH 别名，测试免交互连接，导入服务器上可用的任务脚本，并配置合法的 POTCAR。
+4. **预览后运行。**选择服务器、节点和资源，检查冻结输入、脚本与远端目录，再确认本次提交。
+5. **查看结果。**在运行记录中分别检查调度状态、程序结束与收敛证据；进入结果页或选择扩展继续分析。
 
-| 目录 | 用途 | 分享软件时复制？ |
-|---|---|---|
-| `src/` | 前端源码 | 否，包里使用构建结果 |
-| `backend/` | 后端源码 | 打包工具自动选取 |
-| `resources/` | 运行合同、解析器、扩展资源 | 打包工具自动选取 |
-| `packaging/` | Mac/Windows 入口、依赖锁、打包工具 | 使用生成的 ZIP |
-| `tests/` | 长期回归与模拟 fixture | 否 |
-| `docs/` | 功能说明、验收证据；旧交接在 history | 否 |
-| `scripts/` | 开发启动、基准、监控与诊断辅助工具 | 打包工具选取必要部分 |
-| `workspace-data/` | 当前设备的项目、历史、冻结输入与缓存 | 软件分享时不复制 |
-| `node_modules/`、`dist/` | 开发依赖、前端构建结果 | 不手动复制 |
+仅浏览结构和编辑草稿无需提交远端任务。关闭浏览器后后台服务可继续运行；停止或更新前，请保存草稿并通过“工作台控制”正常退出。数据目录独立于应用目录，更新应用不会自动迁移旧项目。
 
-`launch.py` 是共用运行入口，`fpilot.local.json` 是本机配置。Python 环境、POTCAR 和外部研究文件继续保留原位。
+## 扩展
 
-## 开发与打包
+后处理扩展独立于主程序开发和分发，入口是同仓库的 **[extensions 分支](https://github.com/Kakakit/first-principles-pilot/tree/extensions)**。下载对应 ZIP 后，在“扩展管理”中导入，选择本地或服务器环境并检查依赖。
 
-Mac 开发目录首次运行 `npm run dev:launcher` 生成唯一的 **`First Principles 工作台.app`**，以后双击即可打开控制页。入口源码放在 `packaging/macos/dev-launcher/`，生成的应用不进入 Git 或开发副本；可在 Finder 中创建替身放到桌面。备用入口是 `打开工作台.command`。
+扩展可使用独立 Python 环境，分析记录保留实际使用的环境和输入来源。主分支中的旧扩展源码是兼容快照；新版本以扩展分支的说明和清单为准。
 
-控制页提供“打开工作台、启动、停止、重启、日志”。重复打开复用原实例；关闭网页继续保留后台服务。停止和重启前确认项目已保存；停止只暂停本机监控与后续链推进，远端作业继续运行。正在上传／提交时等待回执完成，控制中心不强杀其他程序。默认控制页 `http://127.0.0.1:5174`，网页 5173、API 8000；`fpilot.local.json` 可配置独立的 `control_port`。
+## 从源码运行
 
-命令行仍可使用 `npm start`、`npm stop`、`npm run restart`、`npm run status`。启动器从本机配置或 `FPILOT_PYTHON` 读取已有解释器，worker 只推进已明确授权的计划。Python 环境按项目登记复用，不创建新环境。控制中心日志与身份保存在忽略的 `.fpilot-runtime/`，Vite 每个目录使用独立 `.fpilot-cache/`；这两项不包含在项目同步包内。这里的新入口适用于源码开发目录，已有无需 Node 的运行 ZIP 继续使用原 `start.command`／`start.cmd`。
-
-已有前端 `dist/` 时可直接打包；只有改了前端才重新 `npm run build`。以下命令中的 `python` 应替换为登记解释器：
+准备 Node.js 22 和已有的 Python 3.11 解释器。以下 `python` 指你选定的解释器：
 
 ```sh
-python packaging/build.py --target macos --output /你的输出目录/Mac
-python packaging/build.py --target windows --output /你的输出目录/Windows
+git clone https://github.com/Kakakit/first-principles-pilot.git
+cd first-principles-pilot
+python -m pip install -r packaging/requirements-runtime.txt
+npm ci
+npm run build
+python launch.py --check
+python launch.py
 ```
 
-输出目录须为空，工具以白名单选择运行文件，生成 ZIP、文件清单和 SHA256。日常测试只检查改动范围；测试选择与精简交接规则见 [开发指南](docs/DEVELOPMENT.md)。
+前后端开发使用 `npm start`。启动器可通过 `FPILOT_PYTHON` 指定已有解释器；停止、重启与状态检查分别使用 `npm stop`、`npm run restart`、`npm run status`。配置和本机数据不应提交到 Git。
 
-## 运行约定与说明
+安装包的构建与运行方式见 [源码与打包指南](docs/GITHUB.md)，开发及测试说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-扩展管理按本地/服务器运行分类，同一扩展可支持两边。设置本地默认 Python、每台服务器默认 Python，或在扩展中单独指定已有环境；保存后检查依赖，运行时保留实际环境和历史。工作台启动环境不受影响。见 [使用与验收](docs/extensions-b/ENVIRONMENTS_ACCEPTANCE.md)。
+## 文档
 
-首次配置按“SSH 别名 → 测试免交互连接、发现已有 Python → 导入任务脚本”完成。默认使用脚本中的环境、MPI 与程序命令，无需重新填写 setvars/MPI 路径；完整运行时登记仍可在高级方式中使用。
+| 主题 | 入口 |
+| --- | --- |
+| 安装、更新、数据目录与启动诊断 | [安装指南](docs/INSTALLATION.md) |
+| 源码运行与打包 | [GitHub 与源码指南](docs/GITHUB.md) |
+| SSH、服务器与任务脚本 | [首次配置](docs/submission/SETUP_AND_SCRIPT_ACCEPTANCE.md) |
+| 计算提交与运行来源 | [提交流程](docs/submission/ACCEPTANCE.md) |
+| Wannier 能窗与拟合比较 | [Wannier 工作流](docs/wannier-window/README.md) |
+| 扩展开发与环境设置 | [扩展协议](docs/extensions-b/PROTOCOL.md) · [环境配置](docs/extensions-b/ENVIRONMENTS_ACCEPTANCE.md) |
+| 自动保存、检查点与恢复 | [保存与恢复](docs/storage/SAVE_RECOVERY_20261028.md) |
 
-提交顺序是选择冻结输入 → 选服务器与导入脚本、编辑基础字段 → 检测节点并选择资源 → 准备并确认一次。检测后修改名称、walltime、核数或同服务器脚本会保留节点选择，更新最终预览；派发前自动实时复核。计算来源在配置中冻结，UNKNOWN 核查原 job ID，不自动重投。同一远端文件依赖分支保持服务器绑定；独立分支可分别选择服务器。
+版本变化见 [更新记录](CHANGELOG.md)。
 
-新建项目时填写“远端项目目录名”和通用工作区根目录，所有服务器默认沿用，无需先选服务器。目录名默认从项目名称生成，可手动修改；窗口直接预览完整路径。导入副本使用独立目录名，保留原项目和历史。已有派发或 UNKNOWN 记录后目录名锁定；仅本地准备且确认未派发的记录不永久锁定目录名。
+## 参与贡献与反馈
 
-本机数据默认在 `workspace-data/`，也可由设置或 `FPILOT_WORKSPACE` 指定。新项目默认布局为：
+欢迎通过 [Issues](https://github.com/Kakakit/first-principles-pilot/issues) 报告问题、讨论功能，或提交 Pull Request 改进代码和文档。请附上软件版本、操作系统、复现步骤及经过脱敏的最小输入；涉及科学结果时注明单位、输入来源和收敛条件。具体流程见 [贡献指南](CONTRIBUTING.md)。
 
-```text
-<workspace-root>/<project-slug>/flows/main/stages/<NN>-<stage-slug>/attempts/<timestamp>-<suffix>/
-```
+## 许可证与致谢
 
-设置中保存所有服务器共用的新项目默认根目录，新建项目时仍可修改。可用任意绝对路径或 `$HOME` 下的路径，HOME 在各服务器解析；新目录使用英文命名，不要求包含 fpilot。单服务器项目目录覆盖保留在高级设置。旧项目保留原布局，旧 attempt 不迁移。只读检查不创建目录，确认后才创建本次运行目录。来源与冻结策略保持，大型结果留在服务器处理。回收仅隐藏本机对象、暂停后续派发，不删除研究文件或取消服务器任务。
+FPilot 的原创代码采用 **[MIT License](LICENSE)**。仓库中的第三方代码、资源与运行依赖保留各自许可证；安装包附带第三方声明和可用的许可证文本。VASP、POTCAR 及外部计算程序不包含在本项目的许可授权中。
 
-其它/自定义执行可保存原样多行命令，手动运行并查看 stdout、stderr 和退出码；不解析自定义队列或自动推进链/扫描。系统 OpenSSH 复用已有密钥、agent、跳板和认证会话，要求软件进程可免交互执行命令。详见 [通用路径与自定义命令](docs/submission/CUSTOM_PATH_COMMAND_ACCEPTANCE.md)。
-
-详细使用与证据按需查阅：[首次配置与脚本使用](docs/submission/SETUP_AND_SCRIPT_ACCEPTANCE.md)、[提交流程](docs/submission/ACCEPTANCE.md)、[能窗迭代](docs/wannier-window/README.md)、[扩展协议](docs/extensions-b/PROTOCOL.md)、[主题格式](docs/appearance/THEME_FORMAT.md)、[回收站](docs/trash-flow/ACCEPTANCE.md)、[远端性能](docs/remote-speed/ACCEPTANCE.md)、[D 包验收](docs/release-d/ACCEPTANCE.md)。历史长版说明保存在 [history](docs/history/README_through_20261004.md)。
+感谢 [pymatgen](https://github.com/materialsproject/pymatgen)、[spglib](https://github.com/spglib/spglib)、[React](https://github.com/facebook/react)、[React Flow](https://github.com/xyflow/xyflow)、[FastAPI](https://github.com/fastapi/fastapi)、[3Dmol.js](https://github.com/3dmol/3Dmol.js) 和 [Apache ECharts](https://github.com/apache/echarts) 等开源项目。

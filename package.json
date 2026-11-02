@@ -1,6 +1,6 @@
 {
   "name": "fpilot-workbench",
-  "version": "1.1.0-beta.3",
+  "version": "1.1.0-beta.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -32,5 +32,6 @@
     "tsx": "^4.20.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.0"
-  }
+  },
+  "license": "MIT"
 }
