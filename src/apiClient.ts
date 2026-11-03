@@ -17,34 +17,39 @@ export async function readJson(response: Response): Promise<any> {
   return data;
 }
 
+export const requestTimeouts={local:30_000,remote:120_000,action:180_000};
+export function requestTimeout(path:string,method:string){
+  if(method!=='GET')return requestTimeouts.action;
+  return /\/(artifacts|artifact-preview|output|source-files)(\/|\?|$)/.test(path)?requestTimeouts.remote:requestTimeouts.local;
+}
 export async function requestJson(path: string, body?: unknown, method?: string, options?: {signal?:AbortSignal;timeoutMs?:number}): Promise<any> {
-  const controller=options?.timeoutMs?new AbortController():null;
+  const verb=method||(body===undefined?'GET':'POST');
+  const timeoutMs=options?.timeoutMs??requestTimeout(path,verb);
+  const controller=timeoutMs>0?new AbortController():null;
   let expired=false;
   const abort=()=>controller?.abort();
   if(options?.signal?.aborted)abort();
   else options?.signal?.addEventListener('abort',abort,{once:true});
-  const timer=controller?setTimeout(()=>{expired=true;controller.abort();},options!.timeoutMs):null;
+  const timer=controller?setTimeout(()=>{expired=true;controller.abort();},timeoutMs):null;
   try {
     const response=await fetch(path, {
       signal:controller?.signal||options?.signal,
-      method:method||(body===undefined?'GET':'POST'),
+      method:verb,
       headers:body===undefined?undefined:{'Content-Type':'application/json'},
       body:body===undefined?undefined:JSON.stringify(body),
     }).catch(error=>{
       if(error instanceof DOMException&&error.name==='AbortError')throw error;
       throw new Error('无法连接本机 API。请检查服务是否运行；恢复后可在当前页面重试，已填写内容仍保留。');
     });
-    try {return await readJson(response);}
-    finally {
-      if(typeof window!=='undefined'&&/\/(submit|refresh|resolve-legacy)$/.test(path))
-        window.dispatchEvent(new Event('fpilot:binding-changed'));
-    }
+    return await readJson(response);
   } catch(error) {
     if(expired)throw new Error('本次请求等待超时，已结束等待，草稿保留。没有自动重试；这不代表远端程序已停止。');
     throw error;
   } finally {
     if(timer!==null)clearTimeout(timer);
     options?.signal?.removeEventListener('abort',abort);
+    if(typeof window!=='undefined'&&/\/(submit|refresh|resolve-legacy)$/.test(path))
+      window.dispatchEvent(new Event('fpilot:binding-changed'));
   }
 }
 

@@ -2,11 +2,10 @@ import {calculationKind} from './scanNodes';
 import {useEffect,useRef,useState} from 'react';
 import type {Project} from './model';
 import {requestJson,errorMessage} from './apiClient';
-import {openSettings} from './submissionDefaults';
 export type SourceDraft={mode:'new'|'self'|'upstream'|'manual';purpose:'charge'|'continue';read_charge?:boolean;files:'structure'|'charge'|'both';attempt_id?:string;scan_batch_id?:string;scan_case_id?:string;acknowledge_unverified?:boolean;acknowledge_differences?:boolean};
 type Candidate={parameter_summary?:string;case_index?:number;batch_created_at?:string;batch_reason?:string;scan_batch_id?:string;scan_case_id?:string;id:string;alias:string;state:string;job_id:string;created_at:string;eligible:boolean;can_acknowledge?:boolean;scientific_warnings?:string[];blockers:string[];differences:string[];warnings:string[];verification_status:string;verified_at?:string;structure_file?:string;observed_files:{path:string;size_bytes:number}[]};
 type Resolved={parameter_source?:{parameter_summary:string;values:Record<string,string>};draft:SourceDraft;selected_attempt_id?:string;candidates:Candidate[];blockers:string[];required_files:string[];initialization:{ISTART:number;ICHARG:number};source_plan:{structure_file?:string;electronic_usage:string}};
-export default function SourcePanel({project,nodeId,onChange,advanced=false,scopeId,allowSelf=true}:{scopeId?:string;allowSelf?:boolean;project:Project;nodeId:string;onChange:(value:SourceDraft)=>void;advanced?:boolean}){
+export default function SourcePanel({project,nodeId,onChange,advanced=true,scopeId,allowSelf=true}:{scopeId?:string;allowSelf?:boolean;project:Project;nodeId:string;onChange:(value:SourceDraft)=>void;advanced?:boolean}){
  const node=project.nodes.find(n=>n.id===nodeId)!;
  const parentId=project.edges.find(e=>e.target===nodeId)?.source;
  const parent=project.nodes.find(n=>n.id===parentId);
@@ -51,6 +50,6 @@ export default function SourcePanel({project,nodeId,onChange,advanced=false,scop
    {resolved?.blockers.map((b,i)=><p role="alert" className="structure-error" key={i}>{b}</p>)}
   </>}
   {resolved?.parameter_source&&<details open><summary>继承 case 参数 · {resolved.parameter_source.parameter_summary}</summary><p>下游类型默认和显式覆盖优先；输入审查列出各参数实际来源。</p></details>}{resolved&&<p>本次实际读取：{resolved.required_files.length?resolved.required_files.join('、'):'配置结构'}；ISTART={resolved.initialization.ISTART}，ICHARG={resolved.initialization.ICHARG}{resolved.source_plan.electronic_usage==='fixed'?' · 固定电荷':resolved.source_plan.electronic_usage==='initial'?' · 自洽初值':' · 新电子态'}。</p>}
-  {error&&<p role="alert">{error}</p>}{!advanced&&<button type="button" className="text-button" onClick={()=>openSettings('config')}>高级手动来源与参数模板</button>}
+  {error&&<p role="alert">{error}</p>}
  </section>;
 }

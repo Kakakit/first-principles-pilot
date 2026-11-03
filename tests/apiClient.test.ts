@@ -15,3 +15,15 @@ test('bounded read timeout ends waiting without retrying or claiming a remote st
  globalThis.fetch=async(_path,options)=>{calls++;return new Promise((_resolve,reject)=>{options?.signal?.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true});});};
  try{await assert.rejects(requestJson('/api/wannier90/band-path',{},undefined,{timeoutMs:10}),/等待超时.*没有自动重试.*不代表远端程序已停止/);assert.equal(calls,1);}finally{globalThis.fetch=original;}
 });
+
+test('caller cancellation ends the active read without a retry or timeout message',async()=>{
+ const {requestJson,requestTimeout}=await import('../src/apiClient.ts');const original=globalThis.fetch;let calls=0;
+ globalThis.fetch=async(_path,options)=>{calls++;return new Promise((_resolve,reject)=>{options?.signal?.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true});});};
+ try{
+  const caller=new AbortController(),request=requestJson('/api/execution',undefined,undefined,{signal:caller.signal});caller.abort();
+  await assert.rejects(request,{name:'AbortError'});assert.equal(calls,1);
+  assert.ok(requestTimeout('/api/server','GET')>0);
+  assert.ok(requestTimeout('/api/execution/a/artifacts','GET')>requestTimeout('/api/server','GET'));
+  assert.ok(requestTimeout('/api/execution/a/submit','POST')>requestTimeout('/api/server','GET'));
+ }finally{globalThis.fetch=original;}
+});
