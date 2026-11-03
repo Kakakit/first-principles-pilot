@@ -53,7 +53,7 @@ gpu=contract['profile'].get('resource_request') if contract['profile'].get('reso
 try:
     selection=(s['gpu_resources'](observed,contract['config']['alias'],contract['node'],gpu) if gpu else
         s['select_resources'](observed,contract['config']['alias'],contract['node'],
-        user_override=contract['cores'],user_override_evidence=contract['reason']))
+        user_override=contract['cores'],user_override_evidence=contract['reason'] or '用户选择请求核数'))
 except s['ResourceSelectionError'] as exc:
     facts,_=s['_node'](s['_host'](observed,contract['config']['alias']),contract['node'])
     waiting=(facts.get('STATUS') in ('BUSY','FULLY_IDLE','PARTIAL','SUSPECT_LOAD') and

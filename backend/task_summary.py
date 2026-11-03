@@ -37,7 +37,7 @@ def paginate(rows,limit=50,cursor=None):
 
 
 def scan(row):
-    return {**{k:row[k] for k in ('id','scan_node_id','stage','state','schema','promotion') if k in row},
+    return {**{k:row[k] for k in ('id','scan_node_id','stage','state','schema','promotion','waiting_reason','last_worker_error') if k in row},
             'cases':[{k:c[k] for k in ('id','index','state','attempt_id','parameters') if k in c} for c in row['cases']]}
 
 

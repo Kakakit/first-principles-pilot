@@ -59,6 +59,17 @@ class CancelTests(unittest.TestCase):
         with patch('backend.remote_transport._interpreter',return_value='/usr/bin/python3'),patch.object(ex,'ssh',return_value={'exit_code':None,'stdout':'','transport_state':'NOT_SENT','stderr':'not sent'}):
             self.assertEqual(cancel.remote(self.record,'cancel')['result'],'NOT_SENT')
 
+    def test_missing_directory_fallback_is_only_bound_accepted_read_only_recovery(self):
+        import shlex
+        receipt={'exit_code':0,'stdout':'FPILOT_CANCEL='+json.dumps(self.live),'stderr':''}
+        self.record['cancellation']={'state':'UNKNOWN','accepted_at':ex.now(),'binding':cancel.binding(self.record),'facts':{'owner':'user'}}
+        with patch('backend.remote_transport._interpreter',return_value='/usr/bin/python3'),patch.object(ex,'ssh',return_value=receipt) as ssh:
+            def payload():return json.loads(shlex.split(ssh.call_args.args[1])[-1])
+            cancel.remote(self.record,'inspect');self.assertTrue(payload()['allow_missing_identity']);self.assertEqual(payload()['verified_owner'],'user')
+            cancel.remote(self.record,'cancel');self.assertFalse(payload()['allow_missing_identity'])
+            self.record['cancellation']['binding']['job_id']='another'
+            cancel.remote(self.record,'inspect');self.assertFalse(payload()['allow_missing_identity'])
+
     def test_no_identity_guessing_wrong_project_token_expiry_and_changes(self):
         with self.assertRaises(ValueError): cancel.preview('other', self.key)
         report=self.preview()
@@ -147,3 +158,33 @@ class SchedulerAdapterTests(unittest.TestCase):
         self.payload['action']='inspect'
         with patch.object(adapter.getpass,'getuser',return_value='user'),patch.object(adapter,'command',return_value=(0,self.row,'')) as cmd:
             self.assertEqual(adapter.run(self.payload)['result'],'LIVE');self.assertEqual(cmd.call_count,1)
+
+    def test_removed_directory_after_accepted_cancel_recovers_exact_accounting(self):
+        (self.root/'_fpilot/attempt.json').unlink()
+        self.payload.update(action='inspect',allow_missing_identity=True,verified_owner='user')
+        history='Job: 12.node01\nExit_status=271\ndequeuing from batch, state COMPLETE\n'
+        with patch.object(adapter.getpass,'getuser',return_value='user'),patch.object(adapter,'command',side_effect=[(1,'','Unknown Job Id'),(1,'',''),(0,history,'')]) as cmd:
+            result=adapter.run(self.payload)
+            self.assertTrue(result['terminal']);self.assertEqual(result['exit_code'],271)
+            self.assertEqual(result['identity_source'],'accepted_cancellation_and_accounting')
+            self.assertFalse(any(c.args[0][0] in ('qdel','scancel') for c in cmd.call_args_list))
+        for history in ('Job: 99.node01\nExit_status=271\nstate COMPLETE\n','Job: 12.node01\n',
+                        'Job: 12.node01\nJob_Owner=other@host\nExit_status=271\nstate COMPLETE\n'):
+            with patch.object(adapter.getpass,'getuser',return_value='user'),patch.object(adapter,'command',side_effect=[(1,'',''),(1,'',''),(0,history,'')]):
+                with self.assertRaises(ValueError):adapter.run(self.payload)
+
+    def test_missing_identity_never_authorizes_cancel_and_mismatched_marker_still_blocks(self):
+        (self.root/'_fpilot/attempt.json').unlink()
+        self.payload.update(allow_missing_identity=True,verified_owner='user')
+        with patch.object(adapter,'command') as command:
+            with self.assertRaises(FileNotFoundError):adapter.run(self.payload)
+            command.assert_not_called()
+        self.payload['action']='inspect';self.payload['verified_owner']='other'
+        with patch.object(adapter.getpass,'getuser',return_value='user'),patch.object(adapter,'command') as command:
+            with self.assertRaisesRegex(ValueError,'所有者'):adapter.run(self.payload)
+            command.assert_not_called()
+        (self.root/'_fpilot/attempt.json').write_text(json.dumps({'id':'wrong'}))
+        self.payload['verified_owner']='user'
+        with patch.object(adapter,'command') as command:
+            with self.assertRaisesRegex(ValueError,'记录不符'):adapter.run(self.payload)
+            command.assert_not_called()

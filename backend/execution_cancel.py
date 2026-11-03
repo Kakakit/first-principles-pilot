@@ -60,6 +60,14 @@ def remote(record, action):
     source = Path(__file__).with_name('execution_cancel_remote.py').read_text()
     payload = {'attempt_id': record['id'], 'root': record['remote_path_absolute'],
                'job_id': record.get('job_id'), 'scheduler': ex.scheduler_name(record), 'action': action}
+    operation = record.get('cancellation', {})
+    # Only a previously accepted cancellation of this exact immutable identity
+    # can use scheduler accounting after the user has removed its directory.
+    payload['allow_missing_identity'] = (action == 'inspect' and bool(operation.get('accepted_at'))
+        and operation.get('state') in PENDING and operation.get('binding') == binding(record)
+        and bool(operation.get('facts', {}).get('owner')))
+    if payload['allow_missing_identity']:
+        payload['verified_owner'] = operation['facts']['owner']
     command = shlex.quote(_interpreter(record['config']['alias'])) + ' -c ' + shlex.quote(source) + ' ' + shlex.quote(json.dumps(payload))
     # The helper text contains scheduler commands even during inspect. Declare
     # the actual role explicitly: transport must never retry/cache cancellation.

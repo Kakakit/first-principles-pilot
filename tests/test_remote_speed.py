@@ -166,8 +166,9 @@ class DispatchGuardTests(unittest.TestCase):
         profile={'ppn':48};config={'alias':'jutai-1','scheduler':'pbs','queue':'batch','walltime':'01:00:00','runtime_source':'script','program':'vasp_std','vasp_executable':'vasp_std'}
         record={'config':config,'node':'node01','cores':None,'reason':'','profile':profile}
         original=servers.availability_command
-        for status,free,okay in (('FULLY_IDLE',48,True),('BUSY',0,False),('SUSPECT_LOAD',0,False),('DOWN',0,False),('FULLY_IDLE',24,False)):
-            capacity=f'===== jutai-1 =====\nSCHEDULER=PBS/Torque\nNODE=node01 STATUS={status} CPUS_FREE={free} CPUS_TOTAL=48\n'
+        for status,free,cores,okay in (('FULLY_IDLE',48,None,True),('BUSY',0,None,False),('SUSPECT_LOAD',0,None,False),('DOWN',0,None,False),('FULLY_IDLE',24,None,False),('FULLY_IDLE',112,48,True),('FULLY_IDLE',112,None,False)):
+            record['cores']=cores
+            capacity=f'===== jutai-1 =====\nSCHEDULER=PBS/Torque\nNODE=node01 STATUS={status} CPUS_FREE={free} CPUS_TOTAL={max(48,free)}\n'
             with tempfile.TemporaryDirectory() as tmp:
                 bin=Path(tmp);qstat=bin/'qstat';qstat.write_text('#!/bin/sh\nprintf "Queue: batch\\n enabled = True\\n started = True\\n resources_max.walltime = 24:00:00\\n"\n');qstat.chmod(0o700)
                 command='printf '+__import__('shlex').quote(capacity)+'\n'

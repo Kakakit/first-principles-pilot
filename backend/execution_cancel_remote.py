@@ -30,10 +30,18 @@ def inspect(payload):
         raise ValueError('需要准确的单个作业号')
     if not root.startswith('/') or os.path.realpath(root) != root:
         raise ValueError('远端目录或符号链接身份不符')
-    marker = json.loads(small(root + '/_fpilot/attempt.json'))
-    if marker.get('id') != payload['attempt_id'] or small(root + '/.job-id').strip() != job:
-        raise ValueError('远端 attempt 或作业号与记录不符')
+    identity_verified = False
+    try:
+        marker = json.loads(small(root + '/_fpilot/attempt.json'))
+        if marker.get('id') != payload['attempt_id'] or small(root + '/.job-id').strip() != job:
+            raise ValueError('远端 attempt 或作业号与记录不符')
+        identity_verified = True
+    except FileNotFoundError:
+        if payload['action'] != 'inspect' or payload.get('allow_missing_identity') is not True:
+            raise
     user = getpass.getuser()
+    if not identity_verified and payload.get('verified_owner') != user:
+        raise ValueError('取消受理时核对的作业所有者与当前用户不符')
     if payload['scheduler'] == 'pbs':
         code, text, error = command(['qstat', '-f', job])
         def row(raw):
@@ -50,9 +58,13 @@ def inspect(payload):
         if code == 0: return row(history)
         code, history, _ = command(['tracejob', '-n', '30', job])
         found = re.search(r'^\s*Job:\s*(\S+)', history, re.M)
-        exit_status = re.search(r'Exit_status\s*=\s*(-?\d+)', history)
-        if code == 0 and found and found[1] == job and 'state COMPLETE' in history and exit_status:
-            return {'scheduler_state': 'C', 'terminal': True, 'exit_code': int(exit_status[1]), 'owner': user}
+        exits = re.findall(r'Exit_status\s*=\s*(-?\d+)', history)
+        owner = re.search(r'Job_Owner\s*=\s*([^@\s]+)', history)
+        if code == 0 and found and found[1] == job and 'state COMPLETE' in history and exits:
+            if owner and owner[1] != user:
+                raise ValueError('accounting 的作业所有者不匹配')
+            return {'scheduler_state': 'C', 'terminal': True, 'exit_code': int(exits[-1]), 'owner': user,
+                    'identity_source': 'attempt_files' if identity_verified else 'accepted_cancellation_and_accounting'}
         raise ValueError('无法核对原作业状态；队列中缺失不证明已停止。' + error[-250:])
     if payload['scheduler'] != 'slurm' or not job.isdigit():
         raise ValueError('调度器或作业号格式不受支持')
