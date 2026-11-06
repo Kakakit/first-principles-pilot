@@ -1,3 +1,4 @@
+const pct=value=>Number.isFinite(value)?(value*100).toFixed(4)+'%':'—';
 const protocol='fpilot.extension-view.v1',pending=new Map(),cache=new Map();let serial=0,data,state,model,selection,series,current,epoch=0;
 const $=id=>document.getElementById(id),esc=v=>String(v??'未提供').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),num=v=>Number.isFinite(v)?Number(v.toPrecision(8)).toString():'未提供',colors=['#2469aa','#c15a23','#23856d','#8c54ae','#bc4161','#776620'];
 function rpc(kind,args={}){return new Promise((resolve,reject)=>{const id=String(++serial),timer=setTimeout(()=>{pending.delete(id);reject(Error('展示通信超时'));},20000);pending.set(id,{resolve,reject,timer});parent.postMessage({protocol,kind,id,...args},'*');});}
@@ -27,15 +28,40 @@ async function load(){
  }else{
   const frames=[['raw','原始 Wannier 基底']];if(selection.global_axes_candidate)frames.push(['global','全局轴候选']);if(selection.coordination_candidate)frames.push(['coordination','配位局域轴候选']);state.frame=choices('frame',frames,state.frame);
  }
- $('reference-status').textContent=data.mode==='pdos'?'':model.local_reference?'已继承VASP参考：'+(model.local_reference.source?.name||'冻结来源')+'；结构与局域轴匹配。最终WF身份仍为候选，未自动通过科学验证。':'未导入VASP参考；局域轴由本次结构独立拟合，最终WF身份仍需核验。';
+ $('reference-status').textContent=data.mode==='pdos'?'':model.local_reference?'已继承VASP参考：'+(model.local_reference.source?.name||'冻结来源')+'；结构与局域轴匹配；最终WF成分见下方，未自动通过科学验证。':'未导入VASP参考；局域轴由本次结构独立拟合，最终WF身份仍需核验。';
+ const identityValid=!!model.wf_identity&&(!model.wf_identity.binding?.udis_sha256||model.wf_identity.window_validation?.status==='MATCHED_HR_DIAGONAL');$('wf-panel').hidden=data.mode==='pdos';$('wf-note').textContent=model.wf_identity_note||'此结果没有可下载的 TB2J 轨道成分文件。请在能级分析中选择同一对上、下自旋 Wannier 结果，并选入 .amn 和 _u.mat；有解缠结时还需 _u_dis.mat 和 .eig。';$('wf-download').disabled=!identityValid||!data.wf_identity_file;if (!identityValid || !data.wf_identity_file) {
+   $('wf-note').textContent = model.spinors
+     ? '给 TB2J 的轨道成分文件目前只支持共线上、下自旋结果。'
+     : '此结果缺少可下载的轨道成分文件。请选择同一对上、下自旋 Wannier 结果，加入 .amn 和 _u.mat。有解缠结时还需 _u_dis.mat 和 .eig。';
+ }if(model.wf_identity&&data.wf_spin_alignment?.status==='BASIS_ALIGNMENT_NOT_ESTABLISHED')$('wf-note').textContent+='；上下自旋参考复重叠尚未对齐，不可仅按轨道序号确认共同基底。';
+ if(identityValid){const id=model.wf_identity;$('wf-table').innerHTML=table(['WF（1起）','参考归属','成分说明','参考子空间覆盖（非d纯度）','胞内占比','原子内主要分量占比','d参考分量'],id.orbitals.filter(r=>r.atom===state.atom).map(r=>[r.wf,r.element+r.atom,(['CROSS_CELL_MIXED','LOW_HOME_OVERLAP'].includes(r.status)?'胞内参考占比较低 WF':r.label),pct(r.coverage),pct(r.home_fraction),pct(r.dominant_fraction),r.components.filter(c=>c.l===2).map(c=>c.label+' '+pct(c.relative_weight)).join('；')]))+'<p>'+esc((id.notes||[]).join(' '))+'</p>';}else $('wf-table').textContent='';
  $('identity').textContent=(model.source.name||model.seed||'计算来源')+' · '+atom.element+atom.atom+' · '+(data.mode==='pdos'?'VASP 全局轨道坐标':'Wannier 子壳局域分析')+(data.mode==='hamiltonian'&&!selection.complete_shell?' · 当前模型仅含部分壳层，不补造缺失轨道':'');
  $('warnings').innerHTML=(model.warnings||[]).map(w=>'<p>'+esc(w)+'</p>').join('');
  $('evidence').textContent=JSON.stringify(data.mode==='pdos'?{source:model.source,settings:model.settings,evidence:model.evidence,atom_lines:atom.evidence_lines}:{source:model.source,seed:model.seed,mapping_evidence:model.mapping_evidence,mapping:model.mapping,centres:model.centres,localization:model.localization,whole_atom_block:model.site_blocks?.find(a=>a.atom===state.atom),hr:model.hr_evidence,local_reference:model.local_reference,reference_alignment:selection.reference_alignment},(key,value)=>/hash|sha256|digest/i.test(key)?undefined:value,2);
  if(ticket===epoch){draw();$('status').textContent='冻结数据已加载；更改区间、单位和分组在页面内计算。';}
 }
 function metrics(){return state.frame==='coordination'&&selection.coordination_candidate?selection.coordination_candidate.metrics:state.frame==='global'&&selection.global_axes_candidate?selection.global_axes_candidate:selection.raw;}
+function frozenFermiEv() {
+ if (data.mode === 'pdos') return Number.isFinite(model.fermi_ev) ? model.fermi_ev : null;
+ const summary = model.source?.input_summary;
+ const reference = summary?.energy_reference;
+ if (!summary?.parent_attempt_id || reference?.attempt_id !== summary.parent_attempt_id ||
+     (reference.host && reference.host !== model.source.alias)) return null;
+ return Number.isFinite(reference.fermi_eV) ? reference.fermi_eV : null;
+}
+
 function draw(){
- $('error').textContent='';$('coordination-summary').textContent='';$('unit').value=state.unit;$('reference').value=state.reference;
+ $('error').textContent='';$('coordination-summary').textContent='';$('unit').value=state.unit;$('energy-zero').textContent='';
+ const isPdos = data.mode === 'pdos';
+ const fermiEv = frozenFermiEv();
+ const referenceOptions = $('reference').options;
+ const fermiOption = referenceOptions.namedItem('fermi-reference');
+ fermiOption.disabled = !isPdos && fermiEv === null;
+ fermiOption.textContent = fermiOption.disabled ? '相对费米能级（未记录）' : '相对费米能级';
+ referenceOptions.namedItem('raw-reference').hidden = isPdos;
+ if (isPdos && state.reference === 'raw') state.reference = 'fermi';
+ if (!isPdos && state.reference === 'fermi' && fermiEv === null) state.reference = 'raw';
+ $('reference').value=state.reference;
  let labels,values,moments=null,h=null;
  try{
   if(data.mode==='pdos'){
@@ -45,25 +71,39 @@ function draw(){
   }else{
    h=metrics();values=hLevels(h,state.kind);labels=state.kind==='diagonal'?selection.orbital_labels:values.map((_,i)=>'能级 '+(i+1));
    $('level-title').textContent=state.kind==='diagonal'?'轨道平均能量 Hₘₘ':'局域本征能级';
-   $('weights').innerHTML=table(['初始轨道基底',...h.eigenvalues_ev.map((_,i)=>'能级 '+(i+1))],h.weights.map((row,i)=>[selection.orbital_labels[i],...row.map(v=>num(v*100)+'%')]));
+   $('weights').innerHTML=table(['初始轨道基底',...h.eigenvalues_ev.map((_,i)=>'能级 '+(i+1))],h.weights.map((row,i)=>[selection.orbital_labels[i],...row.map(v=>pct(v))]));
    $('matrix').innerHTML=table(['H / '+state.unit,...selection.orbital_labels],h.matrix.real.map((row,i)=>[selection.orbital_labels[i],...row.map((v,j)=>num(v*(state.unit==='meV'?1000:1))+(h.matrix.imag[i][j]?' + ('+num(h.matrix.imag[i][j]*(state.unit==='meV'?1000:1))+')i':''))]));
-   $('diagnostic').textContent=selection.coordination_candidate?'当前多面体 '+(selection.polyhedron||'已指定')+'；局域轴由真实配体方向拟合。能级解释仍以最终 Wannier 轨道身份成立为前提。':'未设置配位架；一般壳层能级不要求填写配体或配位数。';
+   $('diagnostic').textContent=model.wf_identity?'当前为原WF索引子块，未按最终归属重新分组或换基底；混合WF不等于纯原子d轨道。':selection.coordination_candidate?'当前多面体 '+(selection.polyhedron||'已指定')+'；局域轴由真实配体方向拟合。能级解释仍以最终 Wannier 轨道身份成立为前提。':'未设置配位架；一般壳层能级不要求填写配体或配位数。';
    const cp=selection.coordination_candidate?.metrics.cubic_partition;
    if(cp){const cn=selection.coordination_candidate.coordination,f=state.unit==='meV'?1000:1;const delta=cp.eg_minus_t2g_ev*(cn===4?-1:1);$('coordination-summary').textContent=(selection.polyhedron||'已指定多面体')+' · 局域配位架近似分组：'+(cn===4?'Δtet = ⟨t₂⟩ − ⟨e⟩':'Δoct = ⟨e_g⟩ − ⟨t₂g⟩')+' = '+num(delta*f)+' '+state.unit+'。基于最终 WF 身份与方向假设；不是纯静电晶场。';}
 
   }
  }catch(e){current=null;$('levels').innerHTML='';$('spectrum').textContent='当前区间无效，未生成能级。';$('groups').textContent='';$('pair-result').textContent='';fail(e);return;}
- const relative=relativeLevels(values,state.reference),factor=state.unit==='meV'?1000:1;
- current={mode:data.mode,source:model.source,atom:state.atom,shell:selection.l,labels,values_ev:values,display_ev:relative,moments,unit:state.unit,reference:state.reference,frame:data.mode==='pdos'?'VASP global':state.frame,kind:data.mode==='pdos'?'spectral_centroid':state.kind,range_ev:data.mode==='pdos'?[state.lower,state.upper]:null};
+ const factor = state.unit === 'meV' ? 1000 : 1;
+ // DOSCAR energies were shifted by E_F before integration.
+ const offset = levelOffset(values, state.reference, isPdos ? 0 : fermiEv);
+ const relative = relativeLevels(values, offset);
+ const referenceEv = state.reference === 'fermi' ? fermiEv
+   : isPdos ? (fermiEv === null || offset === null ? null : fermiEv + offset) : offset;
+ const referenceName = state.reference === 'centroid' ? '壳层平均能量' : '费米能级';
+ const referenceText = state.reference === 'raw'
+   ? '原始能量' + (fermiEv === null ? ' · 此来源未记录费米能级' : '')
+   : referenceEv !== null
+     ? '已减去' + referenceName + ' ' + num(referenceEv * factor) + ' ' + state.unit
+     : isPdos && offset !== null && state.reference === 'centroid'
+       ? '已减去相对费米的壳层平均能量 ' + num(offset * factor) + ' ' + state.unit
+       : referenceName + '数值未提供';
+ $('energy-zero').textContent = referenceText;
+ current={mode:data.mode,source:model.source,atom:state.atom,shell:selection.l,labels,values_ev:values,display_ev:relative,moments,unit:state.unit,reference:state.reference,reference_energy_ev:referenceEv,display_offset_ev:offset,fermi_ev:fermiEv,frame:data.mode==='pdos'?'VASP global':state.frame,kind:data.mode==='pdos'?'spectral_centroid':state.kind,range_ev:data.mode==='pdos'?[state.lower,state.upper]:null};
  const order=values.map((_,i)=>i).filter(i=>Number.isFinite(values[i])).sort((a,b)=>values[a]-values[b]);
- $('spectrum').innerHTML=table(['条目','原始能量 / '+state.unit,'图中能量 / '+state.unit,'至下一条 / '+state.unit,...(moments?['积分权重 / states']:['主要轨道组成'])],values.map((v,i)=>{
+ $('spectrum').innerHTML=table(['条目',(isPdos?'相对费米能量':'原始能量')+' / '+state.unit,'图中能量 / '+state.unit,'至下一条 / '+state.unit,...(moments?['积分权重 / states']:['主要轨道组成'])],values.map((v,i)=>{
   const rank=order.indexOf(i),next=rank>=0?order[rank+1]:undefined;
-  const mix=h&&state.kind==='eigen'?h.weights.map((row,j)=>({label:selection.orbital_labels[j],w:row[i]})).sort((a,b)=>b.w-a.w).slice(0,3).map(v=>v.label+' '+num(v.w*100)+'%').join('；'):h?'指定基底轨道':'',extra=moments?num(moments[i].weight):mix;
+  const mix=h&&state.kind==='eigen'?h.weights.map((row,j)=>({label:selection.orbital_labels[j],w:row[i]})).sort((a,b)=>b.w-a.w).slice(0,3).map(v=>v.label+' '+pct(v.w)).join('；'):h?'指定基底轨道':'',extra=moments?num(moments[i].weight):mix;
   return [labels[i],num(v==null?null:v*factor),num(relative[i]==null?null:relative[i]*factor),next===undefined?'—':num((values[next]-v)*factor),extra];
  }));
  const valid=relative.filter(Number.isFinite),lo=valid.length?Math.min(...valid):0,hi=valid.length?Math.max(...valid):1,span=Math.max(hi-lo,.01),yy=v=>265-(v-lo)/span*200;
  const n=values.length,w=740/Math.max(n,1);
- $('levels').innerHTML=`<rect width="900" height="350" fill="white"/><text x="24" y="25" font-size="17" fill="#243b53">${esc($('level-title').textContent)} · ${esc(model.source.name||model.seed||'来源')} · 原子 ${state.atom} · ${state.unit}</text><text x="24" y="48" font-size="12">${esc(state.reference==='centroid'?'零点：当前有效条目平均能量':'原始参考：'+(data.mode==='pdos'?'E_F':'Wannier Hamiltonian'))}</text>`+relative.map((v,i)=>{const x=80+i*w;return Number.isFinite(v)?`<line x1="${x}" x2="${x+w*.65}" y1="${yy(v)}" y2="${yy(v)}" stroke="${colors[i%colors.length]}" stroke-width="4"/><text x="${x}" y="${yy(v)-10}" font-size="13">${num(v*factor)}</text><text x="${x}" y="305" font-size="12">${esc(labels[i])}</text>`:`<text x="${x}" y="305" font-size="12">${esc(labels[i])}：未提供</text>`;}).join('');
+ $('levels').innerHTML=`<rect width="900" height="350" fill="white"/><text x="24" y="25" font-size="17" fill="#243b53">${esc($('level-title').textContent)} · ${esc(model.source.name||model.seed||'来源')} · 原子 ${state.atom} · ${state.unit}</text><text x="24" y="48" font-size="12">${esc(referenceText)}</text>`+relative.map((v,i)=>{const x=80+i*w;return Number.isFinite(v)?`<line x1="${x}" x2="${x+w*.65}" y1="${yy(v)}" y2="${yy(v)}" stroke="${colors[i%colors.length]}" stroke-width="4"/><text x="${x}" y="${yy(v)-10}" font-size="13">${num(v*factor)}</text><text x="${x}" y="305" font-size="12">${esc(labels[i])}</text>`:`<text x="${x}" y="305" font-size="12">${esc(labels[i])}：未提供</text>`;}).join('');
  choices('pair-a',labels.map((label,i)=>[String(i),label]),state.pairA??0);choices('pair-b',labels.map((label,i)=>[String(i),label]),state.pairB??Math.min(1,labels.length-1));pair();
  $('group-options').innerHTML=labels.map((label,i)=>`<label><input type="checkbox" value="${i}" ${values[i]==null?'disabled':''}>${esc(label)}</label>`).join('');drawGroups();
 }
@@ -74,12 +114,12 @@ function drawDos(){
  $('dos').innerHTML=`<rect width="900" height="300" fill="white"/><rect x="${px(state.lower)}" y="30" width="${px(state.upper)-px(state.lower)}" height="215" fill="#dceafa"/><line x1="65" x2="855" y1="245" y2="245" stroke="#567"/>${paths}<text x="65" y="275">${num(x[0])}</text><text x="790" y="275">${num(x.at(-1))} eV</text><text x="65" y="20">PDOS / states·eV⁻¹ · 能量 E − E_F</text><text x="5" y="45">${num(ymax)}</text><text x="5" y="245">${num(ymin)}</text>`;
  $('legend').innerHTML=selection.labels.map((label,i)=>`<span style="color:${colors[i%colors.length]}">━ ${esc(label)}</span>`).join('');
 }
-function drawGroups(){if(!current)return;const gs=state.groups[groupKey()]||[],f=state.unit==='meV'?1000:1,means=gs.map(g=>groupMean(current.values_ev,g.indices));$('groups').innerHTML=gs.map((g,i)=>`<p>${esc(g.name)}：${g.indices.map(j=>esc(current.labels[j])).join('、')}；重心 ${num(means[i]==null?null:means[i]*f)} ${state.unit}（原始参考） <button data-remove="${i}">移除</button></p>`).join('')+(gs.length>=2?'<p>'+gs.slice(1).map((g,i)=>esc(g.name)+' − '+esc(gs[0].name)+' = '+num(means[i+1]!=null&&means[0]!=null?(means[i+1]-means[0])*f:null)+' '+state.unit).join('；')+'</p>':'');$('groups').querySelectorAll('button').forEach(b=>b.onclick=()=>{gs.splice(Number(b.dataset.remove),1);drawGroups();});}
+function drawGroups(){if(!current)return;const gs=state.groups[groupKey()]||[],f=state.unit==='meV'?1000:1,means=gs.map(g=>groupMean(current.values_ev,g.indices));$('groups').innerHTML=gs.map((g,i)=>`<p>${esc(g.name)}：${g.indices.map(j=>esc(current.labels[j])).join('、')}；重心 ${num(means[i]==null||current.display_offset_ev===null?null:(means[i]-current.display_offset_ev)*f)} ${state.unit}（图中参考） <button data-remove="${i}">移除</button></p>`).join('')+(gs.length>=2?'<p>'+gs.slice(1).map((g,i)=>esc(g.name)+' − '+esc(gs[0].name)+' = '+num(means[i+1]!=null&&means[0]!=null?(means[i+1]-means[0])*f:null)+' '+state.unit).join('；')+'</p>':'');$('groups').querySelectorAll('button').forEach(b=>b.onclick=()=>{gs.splice(Number(b.dataset.remove),1);drawGroups();});}
 function exportData(){if(!current)throw Error('当前区间无效，无法导出');return {schema:'fpilot.orbital-level-selection.v1',...current,view:state,groups:(state.groups[groupKey()]||[]).map(g=>({...g,centroid_ev:groupMean(current.values_ev,g.indices)})),evidence:data.mode==='pdos'?model.evidence:model.hr_evidence,...(data.mode==='pdos'?{energy_ev:series.energy,density:series.density[state.spin],settings:model.settings}:{metrics:metrics(),mapping:model.mapping,options:model.options,transforms:selection.transforms,local_reference:model.local_reference,reference_alignment:selection.reference_alignment,occupation_reference:selection.occupation_reference}),warnings:model.warnings,identity:data.identity};}
 function download(name,media,content,encoding='text'){return rpc('download',{name,media_type:media,encoding,content});}
 async function boot(){
  data=await file('data.json');state={identity:data.identity,model:0,atom:null,shell:'2',spin:0,kind:'eigen',frame:'coordination',unit:'eV',reference:'centroid',groups:{}};
- const saved=(await rpc('read-state')).value;if(saved?.identity===data.identity&&Number.isInteger(saved.model)&&saved.model>=0&&saved.model<data.models.length){state={...state,...saved};if(!['eigen','diagonal'].includes(state.kind))state.kind='eigen';if(!['raw','centroid'].includes(state.reference))state.reference='centroid';if(!['eV','meV'].includes(state.unit))state.unit='eV';if(!state.groups||Array.isArray(state.groups)||typeof state.groups!=='object')state.groups={};}
+ const saved=(await rpc('read-state')).value;if(saved?.identity===data.identity&&Number.isInteger(saved.model)&&saved.model>=0&&saved.model<data.models.length){state={...state,...saved};if(!['eigen','diagonal'].includes(state.kind))state.kind='eigen';if(!['raw','centroid','fermi'].includes(state.reference))state.reference='centroid';if(!['eV','meV'].includes(state.unit))state.unit='eV';if(!state.groups||Array.isArray(state.groups)||typeof state.groups!=='object')state.groups={};}
  for(const mode of ['pdos','hamiltonian']){$(mode+'-tab').disabled=mode!==data.mode;$(mode+'-tab').setAttribute('aria-selected',String(mode===data.mode));$(mode+'-tab').title=mode===data.mode?'当前分析模式':'请在对应 DOS/SCF 或 Wannier90 结果任务中创建此模式的分析';}
  $('mode-note').textContent=data.mode==='pdos'?'DOS 完成即可查看，不需要 Wannier90 或 hr.dat。图中是所选区间的轨道谱重心，不是局域本征能级。':'从已有 hr.dat 提取局域壳层矩阵。默认展示本征能级和混合组成，不强制 t₂g/e_g 分组。';
  choices('model',data.models.map((m,i)=>[String(i),m.source.name||m.seed||'来源 '+(i+1)]),state.model);await load();
@@ -90,8 +130,9 @@ async function boot(){
  for(const id of ['pair-a','pair-b'])$(id).onchange=pair;
  $('add-group').onclick=()=>{try{if(!current)throw Error('先设置有效积分区间');const indices=[...$('group-options').querySelectorAll('input:checked')].map(i=>Number(i.value)),name=$('group-name').value.trim();if(!name||!indices.length)throw Error('请命名并至少勾选一条能级');const gs=state.groups[groupKey()]||[];if(gs.some(g=>g.name===name))throw Error('当前组名已存在');gs.push({name,indices});state.groups[groupKey()]=gs;$('error').textContent='';drawGroups();}catch(e){fail(e);}};
  $('save').onclick=()=>{if(!current)return fail(Error('当前区间无效，无法保存'));rpc('save-state',{value:state}).then(()=>$('status').textContent='展示选择已保存。').catch(fail);};
+ $('wf-download').onclick=async()=>{try{if(data.wf_identity_file)await download('wf-identity.json','application/json',JSON.stringify(await file(data.wf_identity_file),null,2));}catch(e){fail(e);}};
  $('json').onclick=()=>{try{download('orbital-levels.json','application/json',JSON.stringify(exportData(),null,2)).catch(fail);}catch(e){fail(e);}};
- $('csv').onclick=()=>{try{const d=exportData(),f=state.unit==='meV'?1000:1,q=v=>'"'+String(v??'').replaceAll('"','""')+'"',rows=[['source','mode','atom','l','spin_channel','kind','frame','label','raw_energy','display_energy','unit','weight_states','lower_eV_EF','upper_eV_EF','evidence_sha256']];d.labels.forEach((label,i)=>rows.push([d.source.name,d.mode,d.atom,d.shell,$('spin').selectedOptions[0].textContent,d.kind,d.frame,label,d.values_ev[i]==null?'':d.values_ev[i]*f,d.display_ev[i]==null?'':d.display_ev[i]*f,state.unit,d.moments?.[i].weight,d.range_ev?.[0],d.range_ev?.[1],data.mode==='pdos'?model.evidence.doscar_sha256:model.hr_evidence.sha256]));d.groups.forEach(g=>rows.push([d.source.name,d.mode,d.atom,d.shell,'','group_mean',d.frame,g.name,g.centroid_ev==null?'':g.centroid_ev*f,'',state.unit,'',d.range_ev?.[0],d.range_ev?.[1],'']));download('orbital-levels.csv','text/csv;charset=utf-8','\uFEFF'+rows.map(row=>row.map(q).join(',')).join('\r\n')).catch(fail);}catch(e){fail(e);}};
+ $('csv').onclick=()=>{try{const d=exportData(),f=state.unit==='meV'?1000:1,q=v=>'"'+String(v??'').replaceAll('"','""')+'"',rows=[['source','mode','atom','l','spin_channel','kind','frame','label','raw_energy','display_energy','unit','weight_states','lower_eV_EF','upper_eV_EF','evidence_sha256']];d.labels.forEach((label,i)=>rows.push([d.source.name,d.mode,d.atom,d.shell,$('spin').selectedOptions[0].textContent,d.kind,d.frame,label,d.values_ev[i]==null?'':d.values_ev[i]*f,d.display_ev[i]==null?'':d.display_ev[i]*f,state.unit,d.moments?.[i].weight,d.range_ev?.[0],d.range_ev?.[1],data.mode==='pdos'?model.evidence.doscar_sha256:model.hr_evidence.sha256]));d.groups.forEach(g=>rows.push([d.source.name,d.mode,d.atom,d.shell,'','group_mean',d.frame,g.name,g.centroid_ev==null?'':g.centroid_ev*f,g.centroid_ev==null||d.display_offset_ev===null?'':(g.centroid_ev-d.display_offset_ev)*f,state.unit,'',d.range_ev?.[0],d.range_ev?.[1],'']));download('orbital-levels.csv','text/csv;charset=utf-8','\uFEFF'+rows.map(row=>row.map(q).join(',')).join('\r\n')).catch(fail);}catch(e){fail(e);}};
  $('png').onclick=async()=>{try{exportData();const svg=new XMLSerializer().serializeToString($('levels')),url=URL.createObjectURL(new Blob([svg],{type:'image/svg+xml'})),image=new Image();try{await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url;});const canvas=document.createElement('canvas');canvas.width=1800;canvas.height=700;canvas.getContext('2d').drawImage(image,0,0,1800,700);await download('orbital-levels.png','image/png',canvas.toDataURL('image/png').split(',')[1],'base64');}finally{URL.revokeObjectURL(url);}}catch(e){fail(e);}};
  new ResizeObserver(()=>parent.postMessage({protocol,kind:'resize',height:document.body.scrollHeight},'*')).observe(document.body);
 }

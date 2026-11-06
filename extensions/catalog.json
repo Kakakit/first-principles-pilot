@@ -423,13 +423,13 @@
     {
       "id": "local-crystal-field-analysis",
       "name": "轨道占据、能级与劈裂分析",
-      "version": "2.3.0",
+      "version": "2.4.3",
       "schema": "fpilot.extension.v2",
       "install_mode": "workbench-v2",
       "source": "resources/extensions/local-crystal-field-analysis",
-      "package": "extensions/packages/local-crystal-field-analysis-2.3.0.zip",
-      "sha256": "906a4c5caf2dee8cc61521184aec3cb4e2133d5f031731ed3c32de731418f7c6",
-      "size_bytes": 88672,
+      "package": "extensions/packages/local-crystal-field-analysis-2.4.3.zip",
+      "sha256": "67a472e7684e5b869877a3a6a941cbed48ea51a24246f71e139798e54414cf39",
+      "size_bytes": 106039,
       "files": [
         {
           "path": "ALGORITHM_REVIEW.md",
@@ -437,7 +437,7 @@
         },
         {
           "path": "README.md",
-          "sha256": "68ca41af0acfcb2d8e116d44e8e1e98ef607338e50c5156f537e6936275cb5be"
+          "sha256": "61502016a46d1254c0a7c4e142d5e0442c5ae7bf17fa5b346c2db3a69609016d"
         },
         {
           "path": "extension.json",
@@ -445,7 +445,7 @@
         },
         {
           "path": "extension.manifest.json",
-          "sha256": "71cf474e74ea71271c512ce82f0a75260c9e1b31d95fe3b4ce8063504b7adbb3"
+          "sha256": "a324c0e4b612c7242da202a0940ebe122a118b966640e708944cc7ab2d71c048"
         },
         {
           "path": "fixtures/pdos/DOSCAR",
@@ -472,12 +472,16 @@
           "sha256": "4fd0bb7ffc7a624c4b88be5d93b981bd49d89c9912d0200b4db8e8539838161e"
         },
         {
+          "path": "licenses/wannier90io-MIT.txt",
+          "sha256": "1f695156c87a84f57d35c08b8abb65134d8dc5b16f137533eace936a7cb8d5c5"
+        },
+        {
           "path": "scripts/calc_local_crystal_field.py",
           "sha256": "7a68d8e6f1a3c24751fdfd80c87de9850a5ab4469c1d92048b8852b7f48c9409"
         },
         {
           "path": "scripts/cli.py",
-          "sha256": "ebe32f89534ebd70065a233dff99ae78d82b73d56b5eba258aa21358d6027acf"
+          "sha256": "7f28975652dde7ee55d4a12f0f216eca8b9584b033907973a6fd8a88a45469b4"
         },
         {
           "path": "scripts/compare_dense_coarse.py",
@@ -505,11 +509,23 @@
         },
         {
           "path": "scripts/presentation.py",
-          "sha256": "5114ff7e95c60794cc5d528c333cc57137c9b9ca0d497d22d8c972ad07544f41"
+          "sha256": "7750b51a55483de6eed01bb692a1e807ec3960f75fc19105b2b36582cca2843b"
         },
         {
           "path": "scripts/protocol_cli.py",
           "sha256": "e0bff0c179fbfc98bc632c5707718d263dd6006d6e5f56c557f4c6b654abc826"
+        },
+        {
+          "path": "scripts/wf_identity.py",
+          "sha256": "a10cc435900ad63d4af7090ea51bc2f04877be4b95ffca373598afb2aca596e7"
+        },
+        {
+          "path": "scripts/wf_io.py",
+          "sha256": "aa8b20305525575e4577fe4bb8393ed6edea315113d0fe96534be7b2377d143d"
+        },
+        {
+          "path": "scripts/wf_report.py",
+          "sha256": "fb197bc03d117a17bc7f5247168f917359d296f180c2878e9d2592e42b5659af"
         },
         {
           "path": "tests/test_calc_local_crystal_field.py",
@@ -532,16 +548,20 @@
           "sha256": "edeab509ed1d9d78c1bef9ad9200db94b7abbb91160a2b641976f4e0af5031f6"
         },
         {
+          "path": "tests/test_wf_identity.py",
+          "sha256": "a9142d766fca19f2c4af53afc7c2f0f3bad6f4ea00579134da16f1dce78bbf17"
+        },
+        {
           "path": "viewer/main.js",
-          "sha256": "ac7cfdef2a5f7b43d11989fdf9daba374893f1b090f6d6509856d31b08d0b319"
+          "sha256": "6fc94f42130ff782341b5d2ff71c29d115378a9e2d134f8edf270888b8260203"
         },
         {
           "path": "viewer/math.mjs",
-          "sha256": "3356478b59d70f8ba5ad05971315d3782c9e9b6c28867ad88959c8bddbb01a34"
+          "sha256": "c6fdbd2c982a70dd5e0ce3c5e56523022d78590d5c95a2271144c1f90efa35a8"
         },
         {
           "path": "viewer/occupation-main.js",
-          "sha256": "2527ab6136bd1c480271835b30ab516d924a3ed0b041c0fe7af435259e1a0470"
+          "sha256": "568c3e88f6038015ddda50af623107c465513d780d9dbe5d8fa4ab2538f1c7b9"
         },
         {
           "path": "viewer/occupation-model.mjs",
@@ -549,11 +569,11 @@
         },
         {
           "path": "viewer/occupation-shell.html",
-          "sha256": "f7322d87c00f03d00d2fbbed19ac3088df7c1706e700302be3ee6185c29d5782"
+          "sha256": "1a35c03c6c4bed2f7b6c0ed0165c7d5deb8816598dc022bd91441df1d9b35c5f"
         },
         {
           "path": "viewer/shell.html",
-          "sha256": "1deaf81d6f73025c0bc73974f2b530d80a84441955d3099b3787f1f6c6435cc6"
+          "sha256": "c0c7930172bd837858a86b9fb7d274ae9346241c8ded29f8b67946c8bdbc124f"
         }
       ]
     },
@@ -800,17 +820,17 @@
     {
       "id": "tb2j",
       "name": "TB2J 交换参数与轨道分解",
-      "version": "2.2.0",
+      "version": "2.4.1",
       "schema": "fpilot.extension.v2",
       "install_mode": "workbench-v2",
       "source": "resources/extensions/tb2j",
-      "package": "extensions/packages/tb2j-2.2.0.zip",
-      "sha256": "892db699c32fe4d069cd2460c5fcd77e87dfbcc0bce85ea27869123cb9e56d02",
-      "size_bytes": 281485,
+      "package": "extensions/packages/tb2j-2.4.1.zip",
+      "sha256": "02f255e700060ab87337dc9d4877c7b95ad8380a7a95176c03137c8677cefe98",
+      "size_bytes": 323578,
       "files": [
         {
           "path": "README.md",
-          "sha256": "0d4bfa97836541e650ea50456620ec83dee3b0cf2ad210142dae04518788163d"
+          "sha256": "c8015f484eb03d9ef4396ebdfce47e363fe7d8759286d252743ccf75e25ea2c0"
         },
         {
           "path": "examples/collinear.request.json",
@@ -826,7 +846,7 @@
         },
         {
           "path": "extension.manifest.json",
-          "sha256": "a27df64e967f27ef922caf17dd8fc50f2830493ce34512b5f0d1f4816a395637"
+          "sha256": "476f30541ba15c2410315bd51302cfbc096b4f591f62966f17d62cdf4bd03d98"
         },
         {
           "path": "references/tb2j-wannier90.md",
@@ -834,27 +854,31 @@
         },
         {
           "path": "scripts/cli.py",
-          "sha256": "4d43bc77cfffde33e759d89c0b51390231df79e9047d258d3b91d7e64dfb7aca"
+          "sha256": "4c9f05627d6e9c118bcff60628fb834aac51613b4d961a1e4baaffe8015dd44f"
         },
         {
           "path": "scripts/inputs_v2.py",
-          "sha256": "975e5435f0ddd0683d0344450931bad9dc2a5772f42746585514efdc275bf0ee"
+          "sha256": "83c560cd3f55d64485698d233153f028f19fe2bf2e564d06c8c6ad632cda3f58"
         },
         {
           "path": "scripts/orbital_labels.py",
-          "sha256": "58a298d228c81f677a5a5618e34741c2af33d91b07f5c0f8b7d5b8d708db6e79"
+          "sha256": "b0fd1e3a7a4612d856148df5e346982defc2347b673961a1943736b66e8b4037"
         },
         {
           "path": "scripts/presentation.py",
-          "sha256": "cffff4b27868c399a569723e834716cb1db1d9742d3e9a13fa1fe453b9637ed0"
+          "sha256": "fed6e58ee444eb6662e49b9cec0ee0b49614516a5b04d9182c39dfe5d2e73ec6"
         },
         {
           "path": "scripts/results_v2.py",
-          "sha256": "413ee702b7ee2ae6b2d05e0597e845f35ec51ff44250818098ca69c3858b3c62"
+          "sha256": "67d35d1ba58bbc2767686a90c0f4ba78977ccb9cdf16d694a1825ff6610a492c"
         },
         {
           "path": "scripts/tb2j.py",
           "sha256": "b1066208544e8b4b91d0932387455678ac7daa3eb483fa1a48947dc246fe8b42"
+        },
+        {
+          "path": "scripts/wf_report.py",
+          "sha256": "c5f1c250c0f90aaf0bea133b82376026e9650a822ad69819ae09a01f89340e8c"
         },
         {
           "path": "tests/fixtures/collinear/POSCAR",
@@ -898,7 +922,7 @@
         },
         {
           "path": "tests/fixtures/fake_tb2j/TB2J/scripts/wann2J.py",
-          "sha256": "0ecbac85ea31c174af80ec814693efd6b6bd1c4d55b429fc0a39ee4b561a6c82"
+          "sha256": "2b7b627ad091f62992d6c43a10174441329c01c37280335a39dd9f711a5290a2"
         },
         {
           "path": "tests/fixtures/fake_tb2j/TB2J/versioninfo.py",
@@ -993,6 +1017,10 @@
           "sha256": "bf359a86598fe8e1a4aebfff5aac1e8d018b4e53ca274d8c4d8513c61c07d7de"
         },
         {
+          "path": "tests/test_wf_bridge.py",
+          "sha256": "04de3c5d936b781f41b62a87d74cfe37ba6226c2e4fae3ef6cde827fe32e8670"
+        },
+        {
           "path": "viewer/ECHARTS-LICENSE.txt",
           "sha256": "634293835b43a6dd2094fa39182a3d9a6b9ca43b7fdb9ac354e8037af2a3093a"
         },
@@ -1005,20 +1033,28 @@
           "sha256": "4d9993bbbc06132c66dddcf833dd0329771b29a28985f38b145a77767300975b"
         },
         {
+          "path": "viewer/groups.js",
+          "sha256": "63b3fabbc86a3b980f7f5eadc009e9d47cce6302c6a959cb956591105f579fc6"
+        },
+        {
+          "path": "viewer/identity.js",
+          "sha256": "7645814c2031a4e69c87e6637a57d16ec965eb7de8f8adf9a3b10f4fb1bdbf10"
+        },
+        {
           "path": "viewer/main.js",
-          "sha256": "2acf397286de92a6536c24843570295a7f39d347a4ec7c5205aaea83c894b595"
+          "sha256": "b8850c285309797a8c43b67e1c720373113764caf922486708c71c72bc3f8887"
         },
         {
           "path": "viewer/model.js",
-          "sha256": "10550430c89d59d52b1b2f7c460354f95e35a499b0ea9ffa039720881318c9f0"
+          "sha256": "861d2b7aa58ddc88e52d7aad0e040db4ee281972c2347a9162b54722ebf779a8"
         },
         {
           "path": "viewer/shell.html",
-          "sha256": "7446820787068a855c14a338567f902c7d5e79574078736a4be7723538e514fc"
+          "sha256": "d96f3c1473912fd3223e5af4385fe8cdfb16395da1c1f5a9309154741d8b93b7"
         },
         {
           "path": "viewer/viewer.html",
-          "sha256": "2bbd1b0fbea12ad1e884972686d489bff73ff120c70ea0d7ebb2e8f059c60e6a"
+          "sha256": "26570352f35a7aa079fe1f2582fa5b305af4c576eee2ef938a6a160673c2b915"
         }
       ]
     }

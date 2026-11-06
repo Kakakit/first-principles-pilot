@@ -149,7 +149,17 @@ def inspect(request):
         pair=(row['atom_index'],row['orbital_index'])
         if any(type(x) is not int or x<1 for x in pair) or pair[0]>len(atoms) or pair[1]>models[0]['num_wann'] or pair in seen or not row['label'].strip():raise ValueError('轨道映射含重复、越界或空标签')
         seen.add(pair)
-    return {'models':models,'mode':mode,'atoms':atoms,'efermi_ev':energy,'energy_reference':energy_ref,'mapping':mapping}
+    from wf_report import read_report,bind_report
+    report=read_report(options.get('wf_identity_report'))
+    identities=[]
+    if report:
+        if mode!='collinear':raise ValueError('最终WF身份衔接首版只支持无SOC共线')
+        for model in models:
+            if not model['ham']['name'].endswith('_hr.dat'):raise ValueError('WF身份报告首版绑定hr输入，请选择同一模型的hr与centres')
+            bound=bind_report(report,model['ham']['path'],model['win']['path'],model['seed'])
+            if bound['channel']!=model['seed']:raise ValueError('身份报告自旋通道与来源不符')
+            identities.append(bound)
+    return {'models':models,'mode':mode,'atoms':atoms,'efermi_ev':energy,'energy_reference':energy_ref,'mapping':mapping,'wf_identity_models':identities,'wf_spin_alignment':report.get('spin_alignment') if report else None}
 
 
 def normalize(checked,output):

@@ -228,6 +228,54 @@
           }
         }
       }
+    },
+    "analysis_modes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "stages",
+          "input_roles",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{1,79}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "stages": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "input_roles": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "evidence": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false

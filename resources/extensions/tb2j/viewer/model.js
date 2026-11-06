@@ -26,16 +26,16 @@ export function orbitalRows(entries,bondRows,oi,oj,map,gi='',gj=''){
  const lookup=new Map(bondRows.map(r=>[r.id,r]));
  return entries.flatMap(v=>{const b=lookup.get(v[0]);if(!b||!oi.includes(v[1])||!oj.includes(v[2]))return [];
   const mi=map.get(b.i+':'+v[1]),mj=map.get(b.j+':'+v[2]);if(gi&&mi?.group!==gi||gj&&mj?.group!==gj)return [];
-  return [{...b,J:v[3],totalJ:b.J,DMI:v[4],Jani:v[5],oi:v[1],oj:v[2],li:mi?.label||'',lj:mj?.label||'',gi:mi?.group||'',gj:mj?.group||''}];});
+  return [{...b,J:v[3],totalJ:b.J,DMI:v[4],Jani:v[5],oi:v[1],oj:v[2],li:mi?.label||'',lj:mj?.label||'',gi:mi?.group||'',gj:mj?.group||'',wfi:mi?.wannier_index,wfj:mj?.wannier_index,ei:mi?.source||'原始序号',ej:mj?.source||'原始序号',ci:mi?.components_by_channel||mi?.components,cj:mj?.components_by_channel||mj?.components}];});
 }
 export function sumOrbitals(rows){
  const sums=new Map();for(const row of rows){const old=sums.get(row.id);if(old){old.J+=row.J;old.count++;}else sums.set(row.id,{...row,J:row.J,count:1});}
  return [...sums.values()];
 }
 export function csv(rows,orbital=false){
- const columns=['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','J_meV',...(orbital?['orbital_i','label_i','group_i','orbital_j','label_j','group_j','total_J_meV']:[]),'DMI_meV','Jani_meV'];
+ const columns=['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','J_meV',...(orbital?['orbital_i','label_i','group_i','orbital_j','label_j','group_j','total_J_meV','wf_i','wf_j','evidence_i','evidence_j','components_i','components_j']:[]),'DMI_meV','Jani_meV'];
  const quote=value=>'"'+String(value??'').replaceAll('"','""')+'"';
- const body=rows.map(r=>[r.si,r.i,r.sj,r.j,JSON.stringify(r.R),r.r,r.J,...(orbital?[r.oi,r.li,r.gi,r.oj,r.lj,r.gj,r.totalJ]:[]),r.DMI?JSON.stringify(r.DMI):'',r.Jani?JSON.stringify(r.Jani):''].map(quote).join(','));
+ const body=rows.map(r=>[r.si,r.i,r.sj,r.j,JSON.stringify(r.R),r.r,r.J,...(orbital?[r.oi,r.li,r.gi,r.oj,r.lj,r.gj,r.totalJ,r.wfi,r.wfj,r.ei,r.ej,r.ci?JSON.stringify(r.ci):'',r.cj?JSON.stringify(r.cj):'']:[]),r.DMI?JSON.stringify(r.DMI):'',r.Jani?JSON.stringify(r.Jani):''].map(quote).join(','));
  return '\ufeff'+columns.join(',')+'\n'+body.join('\n')+'\n';
 }
 export function shells(rows,tolerance=0.001){

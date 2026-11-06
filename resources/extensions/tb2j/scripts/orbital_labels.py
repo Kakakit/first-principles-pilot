@@ -100,6 +100,8 @@ def metadata(source,full,bounds,options):
     wins=sorted((source/'model').glob('*.win'));basis_path=source/'TB2J_results/assigned_basis.txt'
     basis=basis_path.read_text() if basis_path.is_file() else ''
     result={'atoms':[{'index':i,'symbol':s,'orbitals':bounds.get(i,0)} for i,s in sorted(atoms.items())],'basis_text':basis,'basis_rows':[],'projections':'','candidate_mapping':[],'automatic_mapping':[],'label_notes':[]}
+    try:result['basis_rows']=assigned_indices(source,full,bounds)
+    except ValueError as exc:result['label_notes'].append('原始编号关联不可用：'+str(exc))
     try:
         if not wins:raise ValueError('本机未保存冻结 .win')
         parsed=[projectors(p.read_text(),full['mode'],options.get('groupby')) for p in wins]
@@ -113,7 +115,7 @@ def metadata(source,full,bounds,options):
             if not m or m[1] not in sites:raise ValueError('基底行不能对应原子与 Wannier 序号')
             atom=sites[m[1]];wf=int(m[3]);local=re.fullmatch(r'orb_(\d+)',m[2]);local=int(local[1]) if local else len(assigned.get(atom,[]))+1
             if wf<1 or wf>len(entries) or wf in seen:raise ValueError('基底 Wannier 序号重复或越界')
-            seen.add(wf);assigned.setdefault(atom,[]).append((local,wf,m[2]));result['basis_rows'].append({'atom_index':atom,'orbital_index':local,'wannier_index':wf})
+            seen.add(wf);assigned.setdefault(atom,[]).append((local,wf,m[2]))
         for atom,size in bounds.items():
             rows=sorted(assigned.get(atom,[]));labels=[]
             if [r[0] for r in rows]!=list(range(1,len(rows)+1)):raise ValueError('原子内基底序号缺失或重复')
@@ -134,3 +136,28 @@ def metadata(source,full,bounds,options):
     except (ValueError,IndexError,KeyError,TypeError) as exc:
         result['automatic_mapping']=[];result['candidate_mapping']=[];result['label_notes'].append('自动标签不可用：'+str(exc)+'。无需手工填写也可继续查看总 J 和原始轨道矩阵。')
     return result
+
+def assigned_indices(source,full,bounds):
+    """Resolve native orb→WF independently of initial angular-projector guesses."""
+    wins=sorted((source/'model').glob('*.win'));path=source/'TB2J_results/assigned_basis.txt'
+    if not wins or not path.is_file():return []
+    text=clean(wins[0].read_text());atoms=block(text,'atoms_cart') or block(text,'atoms_frac')
+    symbols=[m[1] for line in atoms.splitlines() for m in [re.match(r'^([A-Z][a-z]?)(?:\d*)\s+[-+.0-9]',line)] if m];counts={};sites={}
+    for i,s in enumerate(symbols,1):counts[s]=counts.get(s,0)+1;sites[s+str(counts[s])]=i
+    count=re.search(r'^\s*num_wann\s*[:=]\s*(\d+)',text,re.M|re.I)
+    if not count:return []
+    n=int(count[1]);rows=[];seen=set();local=set()
+    for line in path.read_text().splitlines():
+        m=re.fullmatch(r'\s*([A-Z][a-z]?\d+)\|orb_(\d+)\s+(\d+)\s*',line)
+        if not m or m[1] not in sites:raise ValueError('assigned_basis不能对应冻结原子与WF')
+        atom=sites[m[1]];oi=int(m[2]);wf=int(m[3])
+        if wf in seen or not 1<=wf<=n or oi<1 or (atom,oi) in local:raise ValueError('assigned_basis编号重复或越界')
+        seen.add(wf);local.add((atom,oi));rows.append({'atom_index':atom,'orbital_index':oi,'wannier_index':wf})
+    for row in full['exchange']:
+        for end in ['i','j']:
+            ai=row['atom_'+end]
+            if not 1<=ai<=len(symbols) or symbols[ai-1]!=row['symbol_'+end]:raise ValueError('assigned_basis结构与交换原子不符')
+    for atom,size in bounds.items():
+        indices=sorted(r['orbital_index'] for r in rows if r['atom_index']==atom)
+        if indices!=list(range(1,size+1)) and not (full['mode']=='spinor' and indices==list(range(1,2*size+1))):raise ValueError('assigned_basis与轨道矩阵维度不符')
+    return [r for r in rows if r['atom_index'] in bounds]

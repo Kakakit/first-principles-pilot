@@ -11,4 +11,15 @@ export function moment(x,y,lo,hi){
 }
 export function groupMean(values,indices){if(!indices.length||indices.some(i=>!Number.isInteger(i)||i<0||i>=values.length||!Number.isFinite(values[i])))return null;return indices.reduce((sum,i)=>sum+values[i],0)/indices.length;}
 export function hLevels(metrics,kind){return kind==='diagonal'?metrics.matrix.real.map((row,i)=>row[i]):metrics.eigenvalues_ev.slice();}
-export function relativeLevels(values,reference){const finite=values.filter(Number.isFinite);const zero=reference==='centroid'&&finite.length?finite.reduce((a,b)=>a+b,0)/finite.length:0;return values.map(v=>Number.isFinite(v)?v-zero:null);}
+export function levelOffset(values, reference, fermiEv = null) {
+ if (reference === null || Number.isFinite(reference)) return reference;
+ if (reference === 'fermi') return fermiEv;
+ if (reference !== 'centroid') return 0;
+ const finite = values.filter(Number.isFinite);
+ return finite.length ? finite.reduce((sum, value) => sum + value, 0) / finite.length : null;
+}
+
+export function relativeLevels(values, reference, fermiEv = null) {
+ const offset = levelOffset(values, reference, fermiEv);
+ return values.map(value => Number.isFinite(value) && Number.isFinite(offset) ? value - offset : null);
+}

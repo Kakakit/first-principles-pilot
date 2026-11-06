@@ -67,8 +67,32 @@ def collect(request,parse=True):
         if not parse and imported:
             from onsite_core import win_model
             inherit(request['options'],win_model(win)['structure'])
+        identity_files={role:selected(request,role,source,False) for role in ['wf-projections','wf-unitary','wf-disentanglement','wf-eigenvalues']}
+        if any(identity_files.values()):
+            if not identity_files['wf-projections'] or not identity_files['wf-unitary']:raise ValueError('WF身份分析需同来源.amn和_u.mat；有解缠结还需_u_dis.mat')
+            if identity_files['wf-disentanglement'] and not identity_files['wf-eigenvalues']:raise ValueError('U_dis需要同来源.eig恢复解缠结外窗口能带行')
+            for role,suffix in [('wf-projections','.amn'),('wf-unitary','_u.mat'),('wf-disentanglement','_u_dis.mat'),('wf-eigenvalues','.eig')]:
+                if identity_files[role] and next(i['name'] for i in request['inputs'][role] if i['source_id']==source['id'])!=seed+suffix:raise ValueError('WF矩阵文件前缀与冻结来源不符')
         if parse:
-            data=analyze_files(hr,win,wout,centres,request['options']);data.update(source=source,seed=seed);outputs.append(data)
+            data=analyze_files(hr,win,wout,centres,request['options']);data.update(source=source,seed=seed)
+            if any(identity_files.values()):
+                if data['spinors']:
+                    data['wf_identity_note']='SOC身份首版暂未核验，保留候选与原spinor分析'
+                elif not identity_files['wf-projections'] or not identity_files['wf-unitary']:
+                    raise ValueError('WF身份分析需同来源.amn和_u.mat；有解缠结还需_u_dis.mat')
+                else:
+                    for role,suffix in [('wf-projections','.amn'),('wf-unitary','_u.mat'),('wf-disentanglement','_u_dis.mat'),('wf-eigenvalues','.eig')]:
+                        item=identity_files[role]
+                        if item and next(i['name'] for i in request['inputs'][role] if i['source_id']==source['id'])!=seed+suffix:raise ValueError('WF矩阵文件前缀与冻结来源不符')
+                    from wf_identity import analyze as identify
+                    report=identify(identity_files['wf-projections'],identity_files['wf-unitary'],identity_files['wf-disentanglement'],win,data,seed,eig_path=identity_files['wf-eigenvalues']);data['wf_identity']=report
+                    data['wf_identity_note']='最终WF成分已计算；当前展示原WF基底，不把几何旋转当作已完成基底对齐'
+                    for r in data['reports']:
+                        r['orbital_labels']=['WF'+str(wf)+' · '+report['orbitals'][wf-1]['label'] for wf in r['wf_indices']]
+                        r['global_axes_candidate']=None;r['coordination_candidate']=None;r['transforms']={};r['basis_status']='FINAL_REFERENCE_CHARACTER_NO_REBASING'
+                        r.setdefault('warnings',[]).append('子块按原投影序号选取，未按最终参考归属重新分组；跨原子或混合WF不能当作已确认的原子d壳。')
+            else:data['wf_identity_note']='缺少.amn/U矩阵，继续原有候选分析；write_u_matrices=true并保留.amn后可新建身份后处理'
+            outputs.append(data)
     if mode=='vasp':
         modes={m['mode'] for m in outputs}
         if len(modes)!=1:raise ValueError('所选VASP来源进入不同分析内容，请分别分析，或明确选择统一内容')
@@ -97,6 +121,15 @@ def analyze(request):
     if data['mode']=='pdos':
         dump(out/'pdos.json',data)
         return {'summary':f"已解析 {len(data['models'])} 个逐原子 PDOS 来源；可直接浏览并调整重心积分区间",'scientific_validation':'INSUFFICIENT','warnings':list(dict.fromkeys(w for m in data['models'] for w in m['warnings'])),'artifacts':[artifact(out/'pdos.json','冻结逐原子 PDOS、全范围重心及来源证据')]}
+    reports=[m['wf_identity'] for m in data['models'] if m.get('wf_identity')]
+    extra=[]
+    if reports:
+        from wf_identity import compare_channels
+        from wf_report import SCHEMA
+        identity={'schema':SCHEMA,'models':reports,'spin_alignment':compare_channels(reports),'meaning':'成分识别报告，不是新基底或PAW占据，不按概率重分配交换'}
+        raw=json.dumps(identity,ensure_ascii=False,allow_nan=False)
+        if len(raw.encode())>8*1024**2:raise ValueError('WF身份报告超过8 MiB，请分批选择来源')
+        dump(out/'wf-identity.json',identity);data['wf_spin_alignment']=identity['spin_alignment'];extra=[artifact(out/'wf-identity.json','供TB2J使用的最终WF身份报告')]
     dump(out/'onsite.json',data)
     rows=[]
     for model in data['models']:
@@ -107,5 +140,5 @@ def analyze(request):
     columns=[{'key':k,'label':label,'unit':u} for k,label,u in [('model','模型',''),('site','原子/子壳',''),('wf','WF 编号（1 起）',''),('centroid','投影子壳重心','eV'),('span','投影子壳本征值范围','eV'),('delta_candidate','条件性的局域 d 分组差','eV'),('basis','轨道身份','')]]
     with (out/'onsite.csv').open('w',newline='',encoding='utf-8-sig') as f:
         writer=csv.DictWriter(f,fieldnames=[c['key'] for c in columns]);writer.writeheader();writer.writerows(rows)
-    return {'summary':f"已分析 {len(data['models'])} 个模型、{len(rows)} 个 s/p/d 子壳；物理晶场解释尚未验证",'scientific_validation':'INSUFFICIENT','warnings':list(dict.fromkeys(w for m in data['models'] for w in m['warnings'])),'tables':[{'title':'原始 onsite 子壳与条件分组候选','columns':columns,'rows':rows}], 'artifacts':[artifact(out/'onsite.json','完整复矩阵、WF 映射、原文与过程'),artifact(out/'onsite.csv','子壳汇总 CSV','text/csv')]}
+    return {'summary':f"已分析 {len(data['models'])} 个模型、{len(rows)} 个 s/p/d 子壳；物理晶场解释尚未验证",'scientific_validation':'INSUFFICIENT','warnings':list(dict.fromkeys(w for m in data['models'] for w in m['warnings'])),'tables':[{'title':'原始 onsite 子壳与条件分组候选','columns':columns,'rows':rows}], 'artifacts':[artifact(out/'onsite.json','完整复矩阵、WF 映射、原文与过程'),artifact(out/'onsite.csv','子壳汇总 CSV','text/csv')]+extra}
 if __name__=='__main__':raise SystemExit(main(check,analyze))

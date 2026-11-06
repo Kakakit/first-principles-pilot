@@ -54,6 +54,9 @@ def run(request,output,target):
     model,prefixes=normalize(checked,output);raw=output/'TB2J_results';raw.mkdir()
     args=argv(checked,request['options'],model,prefixes,raw)
     receipt={'python':sys.executable,'TB2J_version':environment['version'],'argv':args,'command_display':shlex.join(args),'options':request['options'],'energy_reference':checked['energy_reference'],'orbital_mapping':checked['mapping'],'sources':request['sources']}
+    from wf_report import digest
+    receipt['model_bindings']=[{'prefix':prefixes[i],'channel':m['seed'],'hr_sha256':digest(m['ham']['path']),'win_sha256':digest(m['win']['path'])} for i,m in enumerate(checked['models']) if m['ham']['name'].endswith('_hr.dat')]
+    receipt['wf_identity_models']=checked.get('wf_identity_models',[]);receipt['wf_spin_alignment']=checked.get('wf_spin_alignment')
     dump(output/'command.json',receipt)
     with (output/'tb2j.stdout.log').open('w') as stdout,(output/'tb2j.stderr.log').open('w') as stderr:
         response=subprocess.run(args,cwd=str(output),stdout=stdout,stderr=stderr,env={**os.environ,'OMP_NUM_THREADS':'1','OPENBLAS_NUM_THREADS':'1','MKL_NUM_THREADS':'1'})

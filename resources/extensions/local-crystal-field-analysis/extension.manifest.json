@@ -2,7 +2,7 @@
   "schema": "fpilot.extension.v2",
   "id": "local-crystal-field-analysis",
   "name": "轨道占据、能级与劈裂分析",
-  "version": "2.3.0",
+  "version": "2.4.3",
   "description": "VASP导出冻结局域配位与占据参考；Wannier核对结构并继承局域轴，轨道身份保留候选状态。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
@@ -84,6 +84,50 @@
         "OUTCAR"
       ],
       "max_bytes": 1099511627776
+    },
+    {
+      "role": "wf-projections",
+      "title": "VASP初始投影 .amn（可选身份核验）",
+      "names": [
+        "wannier90.amn",
+        "wannier90.1.amn",
+        "wannier90.2.amn"
+      ],
+      "max_bytes": 1099511627776,
+      "required": false
+    },
+    {
+      "role": "wf-unitary",
+      "title": "最终U矩阵（write_u_matrices=true）",
+      "names": [
+        "wannier90_u.mat",
+        "wannier90.1_u.mat",
+        "wannier90.2_u.mat"
+      ],
+      "max_bytes": 1099511627776,
+      "required": false
+    },
+    {
+      "role": "wf-disentanglement",
+      "title": "解缠结U_dis矩阵（有解缠结时需要）",
+      "names": [
+        "wannier90_u_dis.mat",
+        "wannier90.1_u_dis.mat",
+        "wannier90.2_u_dis.mat"
+      ],
+      "max_bytes": 1099511627776,
+      "required": false
+    },
+    {
+      "role": "wf-eigenvalues",
+      "title": "同来源 .eig（U_dis能带行核对）",
+      "names": [
+        "wannier90.eig",
+        "wannier90.1.eig",
+        "wannier90.2.eig"
+      ],
+      "max_bytes": 10485760,
+      "required": false
     }
   ],
   "evidence": [
@@ -174,8 +218,8 @@
       "local_reference": {
         "type": "string",
         "format": "data-url",
-        "title": "导入 VASP 局域轨道参考（可选）",
-        "description": "选择占据结果导出的 local-orbital-reference.json。匹配同一晶胞、原子顺序及冻结坐标后继承配位与局域轴；类型留空自动继承。不是最终WF身份验证；不传递自然占据本征矢。移除文件即可独立分析Wannier。",
+        "title": "VASP 局域坐标参考 local-orbital-reference.json（可选）",
+        "description": "这里接收 VASP 占据页的「下载给 Wannier 用的局域坐标」。要给 TB2J 提供轨道成分，请在同一对上、下自旋的 Wannier 能级结果页点击「下载给 TB2J 用的文件」。",
         "maxLength": 2800000
       }
     },
@@ -273,7 +317,11 @@
         "hamiltonian",
         "wannier-input",
         "wannier-output",
-        "centres"
+        "centres",
+        "wf-projections",
+        "wf-unitary",
+        "wf-disentanglement",
+        "wf-eigenvalues"
       ],
       "evidence": [
         "wannier_all_done"

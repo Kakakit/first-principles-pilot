@@ -35,7 +35,9 @@ def render(request):
         else:
             models.append({'source':m['source'],'seed':m.get('seed'),'file':write(f'h{mi}.json',m)})
     if page:write(f'pdos-page-{page_number}.json',{'parts':page})
-    index={'schema':'fpilot.orbital-levels.v1','identity':hashlib.sha256(raw).hexdigest(),'mode':mode,'models':models,'comparison':bundle.get('comparison','分模型展示')}
+    index={'schema':'fpilot.orbital-levels.v1','identity':hashlib.sha256(raw).hexdigest(),'mode':mode,'models':models,'wf_spin_alignment':bundle.get('wf_spin_alignment'),'comparison':bundle.get('comparison','分模型展示')}
+    identities=[m['wf_identity'] for m in bundle['models'] if m.get('wf_identity')]
+    if identities:index['wf_identity_file']=write('wf-identity.json',{'schema':'fpilot.wf-identity.v1','models':identities,'spin_alignment':bundle.get('wf_spin_alignment',{'status':'NOT_PAIRED'})})
     write('data.json',index)
     if mode=='occupation':
         html=(viewer/'occupation-shell.html').read_text().replace('/* OCCUPATION MODEL */',(viewer/'occupation-model.mjs').read_text().replace('export ','' )).replace('/* OCCUPATION MAIN */',(viewer/'occupation-main.js').read_text())

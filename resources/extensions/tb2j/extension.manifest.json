@@ -2,7 +2,7 @@
   "schema": "fpilot.extension.v2",
   "id": "tb2j",
   "name": "TB2J 交换参数与轨道分解",
-  "version": "2.2.0",
+  "version": "2.4.1",
   "description": "从完成的 Wannier 来源计算 J、SOC DMI/各向异性和可选轨道分解。在来源服务器直接执行 TB2J，原文件保留。",
   "entrypoint": "scripts/cli.py",
   "contexts": [
@@ -271,6 +271,13 @@
         "default": "TB2J exchange analysis",
         "maxLength": 2000,
         "description": "可选备注，用于区分参数与用途；不影响 J 的数值。"
+      },
+      "wf_identity_report": {
+        "type": "string",
+        "format": "data-url",
+        "title": "轨道成分文件 wf-identity.json（可选）",
+        "description": "在「轨道占据、能级与劈裂分析」中，对本次 TB2J 使用的同一对上、下自旋 Wannier 结果做能级分析，然后点击「下载给 TB2J 用的文件」。把下载的 wf-identity.json 选到这里。VASP 占据页导出的 local-orbital-reference.json 用于 Wannier 能级分析的「VASP 局域坐标参考」。只看总 J 可留空。",
+        "maxLength": 12000000
       }
     },
     "required": [
@@ -348,6 +355,12 @@
         ]
       },
       {
+        "title": "WF身份衔接（可选）",
+        "fields": [
+          "wf_identity_report"
+        ]
+      },
+      {
         "title": "高级参数与来源解释",
         "collapsed": true,
         "fields": [
@@ -399,7 +412,13 @@
       "emax_ev",
       "nz",
       "orb_decomposition"
-    ]
+    ],
+    "wf_identity_report": {
+      "ui:widget": "file",
+      "ui:options": {
+        "accept": ".json,application/json"
+      }
+    }
   },
   "outputs": [
     "table",

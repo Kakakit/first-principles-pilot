@@ -117,3 +117,11 @@ TB2J 独立包见 [使用指南](../../resources/extensions/tb2j/README.md)，�
 HTML 内联脚本、样式和绘图库，以无同源权的 iframe sandbox 隔离，禁止外部连接；普通运行不依赖网络或主体组件。页面与宿主使用 `fpilot.extension-view.v1` postMessage：read-file 只读清单内 JSON，read-state/save-state 保存最大 64 KiB 有限 JSON，resize 调整高度，failed 回退基础结果，download 交付本机生成的 CSV/JSON/文本/PNG（有限内容、简单文件名，最多 64 MiB）。每条 RPC 带字符串 id，宿主验证消息来源为当前 iframe，返回 kind=response、同 id 和 value/error。扩展不调用工作台 API，也不读取宿主 DOM；原生单位、映射与计算规则不进入宿主。
 
 通用 API：POST analyses/{id}/presentation 生成；GET presentation/{version}/files/{path} 只读声明文件；GET/PUT presentation/{version}/state 读写独立展示设置。均位于 `/api/extension-host/`。设置每次保存写独立版本，不改原分析来源、选项、产物或科学状态。分析可返回 presentation、presentation_supported、last_checked_at、refresh_message、refresh_busy；界面显示核对进度、完成/错误反馈和最后核对时间。
+
+## 可选的阶段分析模式 （2026-10-20）
+
+v2 清单可追加 `analysis_modes`：非空列表，每项包含 `id`、`title`、`stages`、`input_roles`、`evidence`。模式 ID 唯一，各模式阶段不重叠且共同覆盖清单 stages；输入角色引用清单 inputs 中的角色。无此字段时完全沿用原合同。
+
+宿主按本次来源的 stage 选择同一模式；混合模式来源报错。模式筛选输入角色，保留角色原 required 和大小限制；模式证据与清单公共 evidence 合并。上下文返回该模式的有效输入及阶段，检查、预览、冻结和执行采用同一规则。原始完整清单冻结在分析记录，来源、大小/mtime、解释器和预览身份核验不变。请求 schema 不增加业务字段，独立 CLI 仍可从 sources.stage 确定自己的算法。宿主不认识任何扩展 ID 或物理量。
+
+兼容性：旧包不需要更新；声明 analysis_modes 的新包需要此版宿主。扩展分支保留兼容文档与 schema 快照。工作台需包含对应的宿主校验与模式选择实现。

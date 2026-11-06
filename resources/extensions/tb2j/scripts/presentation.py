@@ -112,13 +112,39 @@ def render(source,output):
     for index,(pair,rows) in enumerate(sorted(orbital.items())):orbital_parts+=shards(output,'orbital-'+str(index),rows,pair)
     from orbital_labels import metadata
     meta=metadata(source,full,bounds,command.get('options') or {})
+    from wf_report import mapping_rows
+    identities=command.get('wf_identity_models',[])
+    if any(m.get('binding',{}).get('udis_sha256') and m.get('window_validation',{}).get('status')!='MATCHED_HR_DIAGONAL' for m in identities):
+        identities=[];meta['label_notes'].append('旧解缠结身份报告未核对外窗口能带行；请加入同来源eig重新分析，不套用旧成分标签。')
+    if identities:
+        meta['wf_identity_rows']=[{**r,'channel':m['channel']} for m in identities for r in mapping_rows(m,meta['basis_rows'])]
+        # Mixed or channel-dependent names retain WF identities, never a silent pure-d label.
+        first=mapping_rows(identities[0],meta['basis_rows']);other=mapping_rows(identities[1],meta['basis_rows']) if len(identities)>1 else []
+        for index,r in enumerate(first):
+            if other and other[index]['label']!=r['label']:r['label']='WF'+str(r['wannier_index'])+' · 自旋成分不同'
+            r['components_by_channel']={identities[0]['channel']:r['components']}
+            if other:r['components_by_channel'][identities[1]['channel']]=other[index]['components']
+        meta['automatic_mapping']=first;meta['candidate_mapping']=first
+        meta['label_notes'].append('名称来自最终WF参考重叠，轨道交换仍属于原WF基底；不按成分概率转换J。')
+    contexts={}
+    for model in identities:
+        for site in model.get('local_axes',[]):
+            if site.get('coordination') in (4,6):contexts.setdefault(site['atom'],[]).append(site)
+    meta['site_context']=[values[0] for values in contexts.values() if len(values)==len(identities) and len({v['coordination'] for v in values})==1]
+    if not command.get('model_bindings') and (source/'model').is_dir():
+        from wf_report import digest
+        bindings=[]
+        for prefix,channel in [('up','wannier90.1'),('down','wannier90.2')]:
+            hr=source/'model'/(prefix+'_hr.dat');win=source/'model'/(prefix+'.win')
+            if hr.is_file() and win.is_file():bindings.append({'prefix':prefix,'channel':channel,'hr_sha256':digest(hr),'win_sha256':digest(win)})
+        command['model_bindings']=bindings
     result=json.loads((source/'result.json').read_text()) if (source/'result.json').is_file() else {}
     index={'schema':'fpilot.tb2j-view.v1','units':full['units'],'mode':full['mode'],
            'default_max_distance_A':(command.get('options') or {}).get('rcut_angstrom') or 9,'calculation_max_distance_A':(command.get('options') or {}).get('rcut_angstrom'),
            'exchange_count':len(pairs),'orbital_count':count,'pair_columns':PAIR_COLUMNS,'orbital_columns':ORBITAL_COLUMNS,
            'exchange_parts':exchange_parts,'orbital_parts':orbital_parts,'element_pairs':pair_counts,
            'frozen_mapping':full.get('orbital_mapping') or [],'energy_reference':full.get('energy_reference'),
-           'warnings':result.get('warnings',[]),'validation':result.get('validation',{}),**meta}
+           'model_bindings':command.get('model_bindings',[]),'wf_spin_alignment':command.get('wf_spin_alignment'),'warnings':result.get('warnings',[]),'validation':result.get('validation',{}),**meta}
     (output/'index.json').write_text(encoded(index))
     html=pathlib.Path(__file__).resolve().parents[1]/'viewer/viewer.html'
     shutil.copyfile(html,output/'viewer.html')

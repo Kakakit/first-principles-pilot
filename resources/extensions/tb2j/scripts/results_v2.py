@@ -87,10 +87,30 @@ def parse(raw,checked,options,output):
         groups.append({**base,'matrix_sum_meV':matrix_sum,'total_J_meV':row['J_meV'],'matrix_minus_J_meV':matrix_sum-row['J_meV'],'mapped_group_sum_meV':mapped_sum,'unmapped_matrix_meV':matrix_sum-mapped_sum,'mapped_minus_J_meV':mapped_sum-row['J_meV'],'groups':[{'group_i':g[0],'group_j':g[1],'J_meV':v} for g,v in sorted(group_sum.items())]})
     if set(mapping)-validated:raise ValueError('轨道映射超出本次实际原子轨道矩阵：'+str(sorted(set(mapping)-validated)))
     full={'schema':'fpilot.tb2j-data.v2','units':{'exchange':'meV','distance':'Å'},'atom_index_base':1,'orbital_index_base':1,'R_convention':'native TB2J lattice translation','mode':checked['mode'],'energy_reference':checked['energy_reference'],'orbital_mapping':checked['mapping'],'exchange':rows,'orbital':orbital,'groups':groups}
+    full['wf_identity_models']=checked.get('wf_identity_models',[]);full['wf_spin_alignment']=checked.get('wf_spin_alignment')
+    if full['wf_identity_models']:
+        from wf_report import mapping_rows
+        from orbital_labels import metadata
+        bounds={}
+        for row in orbital:
+            for end in ['i','j']:bounds[row['atom_'+end]]=max(bounds.get(row['atom_'+end],0),row['orbital_'+end])
+        basis=metadata(output,full,bounds,options)['basis_rows']
+        identity_maps={m['channel']:{(r['atom_index'],r['orbital_index']):r for r in mapping_rows(m,basis)} for m in full['wf_identity_models']}
+        evidence=next(iter(identity_maps.values()))
+        for row in orbital:
+            for end in ['i','j']:
+                r=evidence.get((row['atom_'+end],row['orbital_'+end]))
+                if r:
+                    row['wf_'+end]=r['wannier_index'];row['basis_evidence_'+end]=r['source'];row['identity_status_'+end]=r['status'];row['identity_components_'+end]=r['components']
+                    matching={ch:values.get((r['atom_index'],r['orbital_index'])) for ch,values in identity_maps.items()}
+                    row['identity_components_'+end]={ch:v['components'] for ch,v in matching.items() if v}
+                    labels={v['label'] for v in matching.values() if v}
+                    if len(labels)>1:row['identity_status_'+end]='SPIN_DEPENDENT_CHARACTER'
+                    if (row['atom_'+end],row['orbital_'+end]) not in mapping:row['label_'+end]=r['label'] if len(labels)==1 else 'WF'+str(r['wannier_index'])+' · 自旋成分不同'
     dump(output/'exchange.json',full);export_csv(output/'exchange.csv',rows,['atom_i','atom_j','symbol_i','symbol_j','R','distance_A','J_meV','DMI_meV','Jani_meV'])
     paths=[('exchange.json','完整高精度数据','application/json'),('exchange.csv','交换参数 CSV','text/csv')]
     if orbital:
-        export_csv(output/'orbitals.csv',orbital,['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','orbital_i','orbital_j','label_i','label_j','group_i','group_j','J_meV','DMI_meV','Jani_meV']);export_csv(output/'groups.csv',groups,['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','total_J_meV','matrix_sum_meV','matrix_minus_J_meV','mapped_group_sum_meV','unmapped_matrix_meV','mapped_minus_J_meV','groups']);paths += [('orbitals.csv','原始轨道矩阵与确认标签','text/csv'),('groups.csv','用户分组与总 J 差值','text/csv')]
+        export_csv(output/'orbitals.csv',orbital,['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','orbital_i','orbital_j','label_i','label_j','group_i','group_j','wf_i','wf_j','basis_evidence_i','basis_evidence_j','identity_status_i','identity_status_j','identity_components_i','identity_components_j','J_meV','DMI_meV','Jani_meV']);export_csv(output/'groups.csv',groups,['symbol_i','atom_i','symbol_j','atom_j','R','distance_A','total_J_meV','matrix_sum_meV','matrix_minus_J_meV','mapped_group_sum_meV','unmapped_matrix_meV','mapped_minus_J_meV','groups']);paths += [('orbitals.csv','原始轨道矩阵与确认标签','text/csv'),('groups.csv','用户分组与总 J 差值','text/csv')]
     def column(key,label,unit=''):return {'key':key,'label':label,'unit':unit}
     common=[column('symbol_i','元素 i'),column('atom_i','原子 i（1 起）'),column('symbol_j','元素 j'),column('atom_j','原子 j（1 起）'),column('R','晶格平移 R'),column('distance_A','距离','Å')]
     cols=common+[column('J_meV','J','meV')]
