@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react';
 import {requestJson,errorMessage} from './apiClient';
 import type {ServerConfig,RegisteredProfile} from './executionUi';
 
-const initial={alias:'',scheduler:'pbs',queue:'',python:'',mpi_executable:'',vasp_executable:'',ncl_executable:'',environment_script:'',module:'',remote_workspace_root:'$HOME/fpilot',runtime_source:'script',pyw90_python:'',pyw90_package:''};
+const initial={alias:'',scheduler:'pbs',command_mode:'opaque',queue:'',python:'',mpi_executable:'',vasp_executable:'',ncl_executable:'',environment_script:'',module:'',remote_workspace_root:'$HOME/fpilot',runtime_source:'script',pyw90_python:'',pyw90_package:''};
 type Connection={resolved:Record<string,string>;python?:{path:string;version:number[]};schedulers?:string[];note:string;connected?:boolean;workspace?:{ready:boolean;absolute_path?:string;existing_parent?:string;note?:string}};
 
 export default function SiteRegistration({onRegistered}:{onRegistered:(config:ServerConfig,profiles:RegisteredProfile[])=>void}){
@@ -27,7 +27,7 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
       }
       const result=await requestJson('/api/sites',value);
       onRegistered(result.config,result.registered_profiles);window.dispatchEvent(new Event('fpilot:settings-changed'));
-      setMessage(value.python?'服务器已登记。下一步在服务器详情中导入可用脚本，按程序分类保存；提交页可以直接选择。':'服务器基本信息已保存；还需填写可用的服务器 Python，才能进行节点查询。');
+      setMessage(value.python?'服务器已登记。下一步在服务器详情中导入可用脚本，按程序分类保存；提交页可以直接选择。':'服务器基本信息已保存。请在服务器详情中核对可用的远端 Python。');
     }catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
   }
   const isWindows=navigator.userAgent.includes('Windows');
@@ -53,7 +53,10 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
         </>}
       </details>
       <h4>2 · 登记与选择运行方式</h4>
-      <div className="submit-grid"><label>调度器<select value={form.scheduler} onChange={e=>setForm({...form,scheduler:e.target.value,...(e.target.value==='custom'?{runtime_source:'script'}:{})})}><option value="pbs">PBS / Torque</option><option value="slurm">Slurm</option><option value="custom">其它／自定义命令</option></select></label>
+      <div className="submit-grid"><label>执行方式<select value={form.scheduler==='custom'?form.command_mode:form.scheduler} onChange={e=>{
+        const value=e.target.value;
+        setForm(value==='direct'||value==='opaque'?{...form,scheduler:'custom',command_mode:value,runtime_source:'script'}:{...form,scheduler:value});
+      }}><option value="pbs">PBS / Torque</option><option value="slurm">Slurm</option><option value="direct">无调度器 · 直接运行</option><option value="opaque">其它 · 自定义命令</option></select></label>
         {form.scheduler!=='custom'&&<label>运行方式<select value={form.runtime_source} onChange={e=>field('runtime_source',e.target.value)}><option value="script">导入可用任务脚本（推荐）</option><option value="registered">高级：填写程序和环境路径</option></select></label>}
         {form.scheduler!=='custom'&&<label>{form.scheduler==='pbs'?'队列':'分区'}{form.runtime_source==='script'?'（可由脚本填写）':''}<input value={form.queue} onChange={e=>field('queue',e.target.value)}/></label>}
         <label>旧项目兼容根目录<input value={form.remote_workspace_root} placeholder="例如 /scratch/my-projects" onChange={e=>field('remote_workspace_root',e.target.value)}/></label></div>

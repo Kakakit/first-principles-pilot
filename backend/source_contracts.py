@@ -159,7 +159,8 @@ SCIENTIFIC_REASONS={'程序尚未正常完成','缺少最终电子收敛证据',
 def eligible(record, mode, purpose, source_plan=None):
     reasons = []
     from . import execution as ex, recycle
-    if recycle.inactive('attempts', record.get('id', ''), record) or record.get('path_schema') != 'fpilot.remote-attempt-path' or not record.get('job_id'):
+    from .execution_modes import has_execution_receipt
+    if recycle.inactive('attempts', record.get('id', ''), record) or record.get('path_schema') != 'fpilot.remote-attempt-path' or not has_execution_receipt(record):
         reasons.append('来源已回收或缺少实际运行记录')
     try:
         manifest, files = actual_inputs(record)

@@ -10,6 +10,11 @@ from . import servers,remote_paths,remote_transport,source_files,execution as ex
 def enabled(record):return record.get('config',{}).get('scheduler')!='custom' and record.get('dispatch_protocol')=='fpilot.batch-dispatch.v1'
 
 
+def stage_receipt_prefix():
+    return ("set -e\nfpilot_submitting=0\nfpilot_created=0\n"
+            + "trap 'rc=$?; if test \"$rc\" -ne 0 && test \"$fpilot_submitting\" = 0; then printf \"FPILOT_NOT_DISPATCHED=%s\\n\" \"$fpilot_created\"; fi' EXIT\n")
+
+
 def prefix(record,purpose='vasp'):
     config=record['config']
     # Reuse the resource parser and selector, rather than weakening node rules.
@@ -20,13 +25,11 @@ def prefix(record,purpose='vasp'):
     code+='contract='+repr(contract)+'\ntry:\n    exec('+repr(CAPACITY)+')\nexcept ValueError as exc:\n    print("FPILOT_RESOURCE_BLOCKED=1",flush=True)\n    print(str(exc),file=sys.stderr)\n    sys.exit(1)\n'
     queue_command='qstat -Qf' if servers.normalize_scheduler(config['scheduler'])=='pbs' else "sinfo -h -o 'FPILOT_PARTITION=%P|%a|%l'"
     body=servers.availability_command(config)+"printf 'FPILOT_QUEUE_BEGIN\\n'\n"+queue_command
-    command=("set -e\nfpilot_submitting=0\nfpilot_created=0\n"
-        +"trap 'rc=$?; if test \"$rc\" -ne 0 && test \"$fpilot_submitting\" = 0; then printf \"FPILOT_NOT_DISPATCHED=%s\\n\" \"$fpilot_created\"; fi' EXIT\n"
+    command=(stage_receipt_prefix()
         +'capacity=$(\n'+body+'\n)\n'
         +shlex.quote(remote_transport._interpreter(config['alias']))+' -c '+shlex.quote(code)+' "$capacity"\n')
     if config.get('resource_policy')=='scheduler_queue':
-        command=("set -e\nfpilot_submitting=0\nfpilot_created=0\n"
-                 +"trap 'rc=$?; if test \"$rc\" -ne 0 && test \"$fpilot_submitting\" = 0; then printf \"FPILOT_NOT_DISPATCHED=%s\\n\" \"$fpilot_created\"; fi' EXIT\n")
+        command=stage_receipt_prefix()
     if purpose=='vasp' and config.get('runtime_source')!='script':
         for name in ('mpi_executable','vasp_executable','environment_script'):
             value=config.get(name)
@@ -124,17 +127,21 @@ def tracking_note(record):
 
 def known_not_submitted(record,receipt):
     import re
+    from .execution_modes import is_direct
     match=re.search(r'^FPILOT_NOT_DISPATCHED=([01])$',receipt.get('stdout',''),re.M)
     not_sent=receipt.get('transport_state')=='NOT_SENT' and receipt.get('exit_code') is None
     if not not_sent and (not match or receipt.get('exit_code') in (None,0)):return False
     project_conflict = bool(re.search(r'^FPILOT_PROJECT_CONFLICT=1$',receipt.get('stdout',''),re.M))
     resource_blocked='FPILOT_RESOURCE_BLOCKED=1' in receipt.get('stdout','').splitlines()
     retryable=not_sent or (match[1]=='0' and not project_conflict and not resource_blocked)
+    action = '没有启动进程' if is_direct(record.get('config', {})) else '没有调用调度器'
     record.update(state='PREPARED' if retryable else 'FAILED',job_id=None,
                   not_dispatched=True,dispatch_receipt=receipt,updated_at=ex.now(),
-                  note='派发前检查未通过，没有调用调度器；'+receipt.get('stderr','')[-400:])
+                  note='派发前检查未通过，'+action+'；'+receipt.get('stderr','')[-400:])
     if not_sent:
-        record.update(waiting_kind='CONNECTION',note='本次派发请求未发送，等待 SSH 连接恢复后复核资源；没有调用调度器')
+        note = ('本次启动请求未发送，准备记录可在 SSH 恢复后重新确认' if is_direct(record.get('config', {}))
+                else '本次派发请求未发送，等待 SSH 连接恢复后复核资源；没有调用调度器')
+        record.update(waiting_kind='CONNECTION',note=note)
     elif 'FPILOT_CAPACITY_WAIT=1' in receipt.get('stdout','').splitlines():
         record.update(waiting_kind='CAPACITY',note='节点仍被占用或负载未恢复，等待资源释放后复核；没有调用调度器')
     with closing(ex.db()) as c:

@@ -191,6 +191,7 @@ def _edited_bundle(info,edit,mode,source_id,acknowledged):
 
 
 def preview(project_id,kind,target_id,item_ids=None,scope='single',config_overrides=None,node=None,cores=None,template_id=None,input_text='',parameter_patch='',restart_mode='keep',source_attempt_id=None,acknowledge_unverified=False,**unused):
+    from .execution_modes import is_direct
     result=context(project_id,kind,target_id,item_ids,scope)
     if not result['items']:raise ValueError('没有失败或尚未提交的任务')
     if scope=='remaining' and input_text:raise ValueError('整批修改使用公共参数补丁，不可用一份原文覆盖所有 case')
@@ -201,6 +202,8 @@ def preview(project_id,kind,target_id,item_ids=None,scope='single',config_overri
         try:
             if info['blockers']:raise ValueError('；'.join(info['blockers']))
             info['config'].update(config_overrides or {})
+            if is_direct(info['config']):
+                raise ValueError('直接任务请在运行页手动准备并确认启动；计算链和迭代暂不支持直接运行')
             if template_id is None and info.get('template_id') and info.get('template_snapshot'):
                 from . import job_templates
                 try:
@@ -536,6 +539,8 @@ def release_quota(project_id,key):
     from .attempt_operations import locked
     with locked({key}):
         record=container('attempts',key,project_id)
+        from .execution_modes import is_direct
+        if is_direct(record.get('config', {})):raise ValueError('直接任务须先核查原进程状态，待确认结束后释放名额')
         if record['state']!='UNKNOWN':raise ValueError('只有 UNKNOWN 可单独解除本机额度占用')
         if record.get('quota_released'):return record
         record['quota_released']={'at':ex.now(),'reason':'用户手动解除；原作业仍继续跟踪'}

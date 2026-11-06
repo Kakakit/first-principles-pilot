@@ -23,7 +23,8 @@ def batched(function, kind):
             recycle.assert_available('inputs' if kind=='vasp' else 'projects',p['bundle_id'] if kind=='vasp' else p['project']['id'])
             project = p['project'] if kind=='wannier90' else ex.frozen_project(p['bundle_id'])
             root, _ = remote_paths.project_location(project,config['alias'],config.get('remote_workspace_root'))
-            validators = [lambda: {'id':p.get('probe_id') or ''} if config.get('resource_policy')=='scheduler_queue' else servers.capacity_probe(config, **({'purpose':'wannier90'} if kind=='wannier90' else {})),
+            from .execution_modes import is_direct
+            validators = [lambda: {'id':p.get('probe_id') or ''} if is_direct(config) or config.get('resource_policy')=='scheduler_queue' else servers.capacity_probe(config, **({'purpose':'wannier90'} if kind=='wannier90' else {})),
                           lambda: ex.ssh(config['alias'],remote_paths.workspace_probe_command(root),timeout=30)]
             if kind == 'wannier90':
                 from . import wannier_execution as w, source_files, remote_energy, wannier_bands

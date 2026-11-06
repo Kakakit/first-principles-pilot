@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .storage import ROOT, validate_workspace
 
-KINDS = {'inputs', 'wannier-inputs', 'job-templates', 'attempts', 'projects', 'analyses', 'plots', 'local-analyses', 'chains', 'scans', 'saved-plots','comparisons','analysis-datasets'}
+KINDS = {'inputs', 'wannier-inputs', 'job-templates', 'attempts', 'projects', 'nodes', 'analyses', 'plots', 'local-analyses', 'chains', 'scans', 'saved-plots','comparisons','analysis-datasets'}
 
 DIRECTORIES = {'analyses':'analyses-v2','plots':'plots','local-analyses':'analyses','saved-plots':'plot-datasets','comparisons':'wannier-comparisons','analysis-datasets':'analysis-datasets'}
 TABLES = {'attempts':'attempts','chains':'chain_runs','scans':'scan_batches'}
@@ -60,14 +60,23 @@ def _record(kind,key):
 
 
 def purge(kind,key,confirm_local=False,include_children=True):
+    from .attempt_operations import locked
+    if kind in ('analyses','attempts'):
+        marker(kind,key)
+        with locked({key}):return _purge(kind,key,confirm_local,include_children)
+    return _purge(kind,key,confirm_local,include_children)
+
+
+def _purge(kind,key,confirm_local,include_children):
     """Explicit irreversible cleanup of one recycled local record, never remote files."""
     path=marker(kind,key)
     if confirm_local is not True or not path.is_file():raise ValueError('请先回收记录，再确认彻底清理本地数据')
+    from . import file_lifecycle
+    file_lifecycle.before_purge(kind,key)
     # Retain existing failures/explicit notes before any original input is removed.
     from . import problem_records
     problem_records.backfill()
     if kind == 'projects':
-        record=json.loads(path.read_text())
         results=[]
         for child in ([item for item in all_items() if item['kind'] not in ('projects','analysis-datasets') and item.get('project_id')==key] if include_children else []):
             if marker(child['kind'],child['key']).exists():
@@ -78,6 +87,13 @@ def purge(kind,key,confirm_local=False,include_children=True):
         pending=[r['cleanup_directory'] for r in results if r.get('cleanup_pending')]
         return {'kind':kind,'key':key,'deleted':True,'remote_deleted':False,'children':results,
                 'cleanup_pending':bool(pending),'cleanup_directory':'；'.join(pending) if pending else None}
+    if kind=='nodes':
+        record=json.loads(path.read_text())
+        deleted=deleted_marker(kind,key);deleted.parent.mkdir(parents=True,exist_ok=True)
+        from .extension_protocol import atomic_json
+        atomic_json(deleted,{'kind':kind,'key':key,'project_id':record['project_id'],'node_id':record['node']['id']})
+        path.unlink()
+        return {'kind':kind,'key':key,'deleted':True,'remote_deleted':False}
     refs=_references(kind,key)
     _pause_dependents(kind,key,'本地来源已清理，请重新选择来源并审查')
     targets=[]
@@ -189,7 +205,74 @@ def is_recycled(kind, key):
     return marker(kind, key).exists()
 
 
-def move(kind, key, project=None):
+def node_objects(project_id,node_id):
+    from .calculation_nodes import owner
+    from .file_lifecycle import _analysis_owner
+    for row in _rows('attempts'):
+        if row.get('project_id')==project_id and owner(row)==node_id:
+            yield 'attempts',row['id']
+    for row in _rows('scan_batches'):
+        if row.get('project_id')==project_id and row.get('scan_node_id')==node_id:
+            yield 'scans',row['id']
+    for path in (ROOT/'analyses-v2').glob('*/analysis.json'):
+        row=json.loads(path.read_text())
+        if row.get('project_id')==project_id and _analysis_owner(row)==node_id:
+            yield 'analyses',row['id']
+    for path in (ROOT/'inputs').glob('*.zip'):
+        try:
+            with zipfile.ZipFile(path) as archive:
+                project=json.loads(archive.read('project.json'))
+                if project.get('id')==project_id and json.loads(archive.read('manifest.json')).get('node_id')==node_id:
+                    yield 'inputs',path.stem
+        except (OSError,ValueError,KeyError,zipfile.BadZipFile):continue
+    for path in (ROOT/'wannier-bundles').glob('*.json'):
+        row=json.loads(path.read_text())
+        if row.get('project_id')==project_id and row.get('node_id')==node_id:
+            yield 'wannier-inputs',path.stem
+
+
+
+def workspace_after_recycle(workspace):
+    if not workspace:return workspace
+    removed_nodes={}
+    for folder in (ROOT/'recycle'/'nodes',ROOT/'recycle'/'deleted'/'nodes'):
+        for path in folder.iterdir() if folder.is_dir() else ():
+            if path.is_file() and len(path.name)==64:
+                record=json.loads(path.read_text())
+                removed_nodes.setdefault(record['project_id'],set()).add(record.get('node_id') or record['node']['id'])
+    if not removed_nodes and not any(inactive('projects',p['id']) for p in workspace['projects']):return workspace
+    projects=[]
+    for p in workspace['projects']:
+        if inactive('projects',p['id']):continue
+        removed=removed_nodes.get(p['id'],set())
+        projects.append({**p,'nodes':[n for n in p['nodes'] if n['id'] not in removed],
+                         'edges':[e for e in p['edges'] if e['source'] not in removed and e['target'] not in removed]})
+    return {**workspace,'projects':projects,'activeId':workspace['activeId'] if any(p['id']==workspace['activeId'] for p in projects) else next((p['id'] for p in projects),None)}
+
+
+def move(kind, key, project=None, project_id=None, cascade=None):
+    if kind=='nodes':
+        if not isinstance(project,dict) or project.get('id')!=project_id:
+            raise ValueError('缺少项目草稿')
+        validate_workspace({'activeId':project_id,'projects':[project]})
+        node=next((n for n in project['nodes'] if n['id']==key),None)
+        if node is None:raise ValueError('节点已不在项目中')
+        node_key=hashlib.sha256(json.dumps([project_id,key]).encode()).hexdigest()
+        path=marker('nodes',node_key)
+        if not path.exists():
+            from .extension_protocol import atomic_json
+            children=[]
+            for child_kind,child_key in node_objects(project_id,key):
+                child_path=marker(child_kind,child_key)
+                if not child_path.exists():move(child_kind,child_key,cascade=node_key)
+                if json.loads(child_path.read_text()).get('cascaded_by')==node_key:
+                    children.append({'kind':child_kind,'key':child_key})
+            path.parent.mkdir(parents=True,exist_ok=True)
+            atomic_json(path,{'kind':'nodes','key':node_key,'project_id':project_id,'node':node,
+                             'edges':[e for e in project['edges'] if key in (e['source'],e['target'])],
+                             'label':node['data'].get('label') or key,'at':datetime.now(timezone.utc).isoformat(),'children':children})
+        return {'kind':kind,'key':node_key,'recycled':True}
+
     if kind=='projects':
         from . import problem_records
         problem_records.backfill({project['id']:project} if project else None)
@@ -231,30 +314,23 @@ def move(kind, key, project=None):
         validate_workspace({'activeId': key, 'projects': [project]})
         project_id = key
         label = project['name']
+    from . import file_lifecycle
+    file_lifecycle.remember(kind,key)
     _pause_dependents(kind,key,'记录已移入回收站，请恢复并重新确认执行')
-    if kind=='analyses':
-        from .extension_runs import stop_local
-        stop_local(key)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text(json.dumps({'kind': kind, 'key': key, 'project_id': project_id, 'label': label, 'at': datetime.now(timezone.utc).isoformat(),
-                                    'project': project if kind == 'projects' else None}, ensure_ascii=False))
-    if kind=='analyses':
-        record=_record(kind,key)
-        if record.get('location')=='local' and record.get('state') in ('QUEUED','WAIT_RESOURCE','RUNNING','DISPATCHING'):
-            from .extension_protocol import atomic_json
-            record.update(state='FAILED',error='已由用户回收，本机分析已停止；恢复后可重新运行分析。')
-            atomic_json(ROOT/DIRECTORIES[kind]/key/'analysis.json',record)
+                                    'project': project if kind == 'projects' else None, 'cascaded_by':cascade}, ensure_ascii=False))
     if kind=='projects':
+        from .extension_protocol import atomic_json
         children=[]
         for child_kind,child_key in _project_objects(key):
             child_path=marker(child_kind,child_key)
-            if child_path.exists():continue
-            move(child_kind,child_key)
-            child=json.loads(child_path.read_text());child['cascaded_by']=key;child_path.write_text(json.dumps(child,ensure_ascii=False))
-            children.append({'kind':child_kind,'key':child_key})
-        record=json.loads(path.read_text());record['children']=record.get('children',[])+children
-        path.write_text(json.dumps(record,ensure_ascii=False))
+            if not child_path.exists():move(child_kind,child_key,cascade=key)
+            if json.loads(child_path.read_text()).get('cascaded_by')==key:
+                children.append({'kind':child_kind,'key':child_key})
+        record=json.loads(path.read_text());record['children']=children
+        atomic_json(path,record)
     return {'kind': kind, 'key': key, 'recycled': True}
 
 
@@ -263,12 +339,16 @@ def restore(kind, key):
     if not path.exists():
         raise ValueError('回收记录不存在')
     record = json.loads(path.read_text())
-    if kind == 'projects':
+    if kind in ('projects','nodes'):
         for child in record.get('children',[]):
             child_path=marker(child['kind'],child['key'])
             if child_path.exists() and json.loads(child_path.read_text()).get('cascaded_by')==key:
                 child_path.unlink()
     path.unlink()
+    from . import file_lifecycle
+    related={(kind,key)}|{(child['kind'],child['key']) for child in record.get('children',[])}
+    record['remote_cleaned']=any((asset['kind'],asset['key']) in related and asset['state'] in file_lifecycle.DONE
+                                 for asset in file_lifecycle._assets())
     return record
 
 
@@ -298,10 +378,13 @@ def inactive(kind,key,record=None):
 
 
 def assert_available(kind,key,record=None):
+    from .file_lifecycle import remote_is_cleaned
     if inactive(kind,key,record):raise ValueError('记录或所属项目已移入回收站或清理；没有派发')
+    if kind=='attempts' and remote_is_cleaned(kind,key):raise ValueError('此记录的远端目录已清理，不能继续用作运行来源')
     if record:
         for source_kind,source_key in source_ids(record):
-            if inactive(source_kind,source_key):raise ValueError('所需输入或来源已回收或清理，请返回配置重新审查；没有派发')
+            if inactive(source_kind,source_key) or (source_kind=='attempts' and source_key!=key and remote_is_cleaned(source_kind,source_key)):
+                raise ValueError('所需输入或来源已回收或清理，请返回配置重新审查；没有派发')
 
 
 def source_ids(value):
@@ -363,6 +446,9 @@ def all_items():
 def empty(items,confirm_local=False):
     if confirm_local is not True or not isinstance(items,list):raise ValueError('请确认清空本地回收站')
     # Clear only the explicit selection visible at confirmation; newly recycled records stay.
+    from .file_lifecycle import before_purge
+    for item in items:
+        if marker(item['kind'],item['key']).exists():before_purge(item['kind'],item['key'])
     results=[]
     for item in sorted(items,key=lambda r:r['kind']=='projects'):
         kind,key=item['kind'],item['key']

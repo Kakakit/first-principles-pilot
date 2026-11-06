@@ -1,5 +1,6 @@
-export type TaskNavigation={projectId:string;page:string;nodeId:string|null;attemptId:string;runScope:'node'|'chain'};
-export type TaskDestination={projectId?:string;page:string;nodeId?:string|null;attemptId?:string;runScope?:'node'|'chain'};
+type LocationDetails={subpage?:string;section?:string;alias?:string;program?:string;focus?:string;bundleId?:string};
+export type TaskNavigation={projectId:string;page:string;nodeId:string|null;attemptId:string;runScope:'node'|'chain'}&LocationDetails;
+export type TaskDestination={projectId?:string;page:string;nodeId?:string|null;attemptId?:string;runScope?:'node'|'chain'}&LocationDetails;
 
 /** Keep the selected record only when the destination still names the same task. */
 export function taskDestination(current:TaskNavigation,target:TaskDestination):TaskNavigation{

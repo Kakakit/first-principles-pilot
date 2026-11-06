@@ -1,8 +1,22 @@
 export type ServerConfig = Record<string, string>;
 
+type ExecutionConfig = {scheduler?:string;command_mode?:string};
+export function commandMode(config?:ExecutionConfig):'direct'|'opaque'|null {
+  return ['custom','other'].includes(config?.scheduler?.toLowerCase()||'')
+    ? config?.command_mode==='direct'?'direct':'opaque' : null;
+}
+
+export type DirectRuntime = {process_pid?:number;exit_code?:number|null;termination_reason?:string};
+export function directProcessLabel(state:string,runtime?:DirectRuntime) {
+  if (runtime?.process_pid) return 'PID '+runtime.process_pid;
+  return state==='PREPARED'?'尚未启动':state==='UNKNOWN'?'进程待核查':'直接运行';
+}
+
 export type RegisteredProfile = {
   alias: string;
   scheduler: string;
+  command_mode?: 'direct'|'opaque';
+  direct_limit?: number;
   queue: string;
   variant: string;
   status: string;
@@ -68,7 +82,7 @@ export type PreparedBinding = {
 
 export function sameCapacityTarget(before:ServerConfig|null,after:ServerConfig):boolean {
   const scheduler=(value?:string)=>(value||'pbs').toLowerCase().replace('pbs/torque','pbs').replace('torque','pbs');
-  return Boolean(before&&before.alias===after.alias&&scheduler(before.scheduler)===scheduler(after.scheduler)&&(before.resource_policy||'wait_idle')===(after.resource_policy||'wait_idle'));
+  return Boolean(before&&before.alias===after.alias&&scheduler(before.scheduler)===scheduler(after.scheduler)&&commandMode(before)===commandMode(after)&&(before.resource_policy||'wait_idle')===(after.resource_policy||'wait_idle'));
 }
 
 export function bindingFingerprint(binding: PreparedBinding | null): string {

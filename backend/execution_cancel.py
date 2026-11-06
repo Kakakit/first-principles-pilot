@@ -10,8 +10,9 @@ from pathlib import Path
 
 from . import execution as ex, execution_control as control, recycle, scans, chain_runs
 from .attempt_operations import locked
+from .execution_modes import is_direct
 
-PENDING = {'IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'}
+PENDING = {'IN_FLIGHT', 'ACCEPTED', 'UNKNOWN', 'RETRYABLE'}
 TERMINAL = {'COMPLETED', 'FAILED', 'CANCELLED'}
 
 
@@ -56,6 +57,26 @@ def serialized(key, controlling=True):
 
 
 def remote(record, action):
+    if is_direct(record['config']):
+        from .custom_commands import direct_request
+        operation = record.get('cancellation', {})
+        if action in ('cancel', 'resume'):
+            arguments = [operation['operation_id']]
+            if action == 'resume':
+                arguments.append('resume')
+            observed = direct_request(record, 'stop-direct', *arguments)
+        else:
+            observed = direct_request(record, 'status-direct')
+        state = observed['state']
+        terminal = state in ('EXITED', 'LOST', 'CANCELLED', 'START_FAILED')
+        stop = observed.get('stop', {})
+        note = stop.get('note') or observed.get('note')
+        if action == 'inspect' and state not in ('RUNNING', 'EXITING') and not terminal:
+            raise ValueError(note or '进程身份尚未确认，请刷新原任务后再停止')
+        result = ('NOT_SENT' if observed.get('not_sent') else 'TERMINAL' if terminal
+                  else stop.get('state', 'UNKNOWN') if action != 'inspect' else 'RUNNING')
+        return {'result': result, 'terminal': terminal, 'runtime_state': state, 'error': note,
+                'process_pid': observed.get('process_pid'), 'process_group_id': observed.get('process_group_id')}
     from .remote_transport import _interpreter
     source = Path(__file__).with_name('execution_cancel_remote.py').read_text()
     payload = {'attempt_id': record['id'], 'root': record['remote_path_absolute'],
@@ -83,7 +104,10 @@ def remote(record, action):
 
 
 def binding(record):
-    return {k: record.get(k) for k in ('id', 'project_id', 'job_id', 'remote_path_absolute', 'dispatch_started_at')} | {'alias': record['config']['alias'], 'scheduler': ex.scheduler_name(record)}
+    value = {k: record.get(k) for k in ('id', 'project_id', 'job_id', 'remote_path_absolute', 'dispatch_started_at')} | {'alias': record['config']['alias'], 'scheduler': ex.scheduler_name(record)}
+    if is_direct(record['config']):
+        value.update(command_mode='direct', command_run_id=record.get('command_run_id'))
+    return value
 
 
 def preview(project_id, key):
@@ -94,8 +118,13 @@ def preview(project_id, key):
         if record['state'] in TERMINAL: raise ValueError('任务已结束，无需取消')
         local = record['state'] == 'PREPARED' and not record.get('job_id') and (
             not record.get('dispatch_started_at') or record.get('not_dispatched') is True)
-        if not local and not record.get('job_id'): raise ValueError('尚未取得准确的 job ID；请先核查原提交，不会猜测或重投')
+        direct = is_direct(record['config'])
+        if not local and not direct and not record.get('job_id'): raise ValueError('尚未取得准确的 job ID；请先核查原提交，不会猜测或重投')
         facts = {'result': 'LOCAL', 'terminal': False} if local else remote(record, 'inspect')
+        if direct and facts['terminal']:
+            from .custom_commands import refresh
+            refresh(key)
+            raise ValueError('任务已结束，无需停止')
         if facts['terminal']: raise ValueError('调度器显示任务已结束，请先刷新原任务状态')
         operation = {'operation_id': uuid.uuid4().hex, 'token': uuid.uuid4().hex,
                      'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
@@ -127,32 +156,41 @@ def pause_references(refs, key):
             module.save(row)
 
 
-def cancel(project_id, key, token, confirm=False):
+def cancel(project_id, key, token, confirm=False, *, retry=False):
     if confirm is not True: raise ValueError('需要明确确认取消此任务')
     with serialized(key) as refs:
         record = target(project_id, key); operation = record.get('cancellation', {})
         if not token or token != operation.get('token'): raise ValueError('取消确认与预览不匹配')
-        if operation.get('state') != 'PREVIEW': return response(record)  # single-use
-        if datetime.fromisoformat(operation['expires_at']) <= datetime.now(timezone.utc): raise ValueError('取消预览已过期，请重新预览')
+        resuming = retry and is_direct(record['config']) and operation.get('state') == 'RETRYABLE' and not operation['local']
+        if not resuming:
+            if retry or operation.get('state') != 'PREVIEW': return response(record)
+            if datetime.fromisoformat(operation['expires_at']) <= datetime.now(timezone.utc): raise ValueError('取消预览已过期，请重新预览')
         if operation['binding'] != binding(record) or operation['references'] != refs: raise ValueError('任务身份或关联计划已变化，请重新预览')
         if record['state'] in TERMINAL: return response(record)
         if operation['local'] and record['state'] != 'PREPARED': raise ValueError('任务已开始提交，请重新核查')
         # A single cancellation does not revoke unrelated dispatch intent.
-        operation.update(state='IN_FLIGHT', requested_at=ex.now())
+        operation['state'] = 'IN_FLIGHT'
+        if not resuming:
+            operation['requested_at'] = ex.now()
+        operation.pop('error', None)
         record['updated_at'] = ex.now(); ex.save(record)  # persist BEFORE sending
         journal(record, 'CANCEL_REQUESTED')
         if operation['local']:
             record['state'] = 'CANCELLED'; operation.update(state='CONFIRMED', confirmed_at=ex.now(), result='LOCAL_CANCELLED')
         else:
             try:
-                facts = remote(record, 'cancel'); operation['facts'] = facts
-                operation['state'] = {'ACCEPTED': 'ACCEPTED', 'REJECTED': 'REJECTED', 'TERMINAL': 'FINISHED', 'NOT_SENT': 'NOT_SENT'}.get(facts['result'], 'UNKNOWN')
+                facts = remote(record, 'resume' if resuming else 'cancel'); operation['facts'] = facts
+                operation['state'] = {'ACCEPTED': 'ACCEPTED', 'REJECTED': 'REJECTED', 'TERMINAL': 'FINISHED',
+                                      'RETRYABLE': 'RETRYABLE', 'NOT_SENT': 'RETRYABLE' if resuming else 'NOT_SENT'}.get(facts['result'], 'UNKNOWN')
                 if facts.get('error'): operation['error'] = facts['error']
                 if facts['result'] == 'ACCEPTED': operation['accepted_at'] = ex.now()
             except Exception as exc:
                 operation.update(state='UNKNOWN', error=control.redact(str(exc)))
         record['updated_at'] = ex.now(); record = ex.save(record)
         journal(record, 'CANCEL_RECEIPT')
+        if is_direct(record['config']) and operation['state'] == 'FINISHED':
+            from .custom_commands import refresh
+            record = refresh(key)
         return response(record)
 
 
@@ -164,7 +202,14 @@ def recover(project_id, key):
     if record['state'] in TERMINAL:
         operation.update(state='CONFIRMED' if record['state'] == 'CANCELLED' else 'FINISHED', checked_at=ex.now())
         record['updated_at'] = ex.now()
-        return response(ex.save(record, expected_updated_at=observed_at))
+        record = ex.save(record, expected_updated_at=observed_at)
+        if is_direct(record['config']) and record['state'] in ('COMPLETED', 'FAILED'):
+            from .custom_commands import refresh
+            record = refresh(key)
+        return response(record)
+    if is_direct(record['config']):
+        from .custom_commands import refresh
+        return response(refresh(key))
     try:
         facts = remote(record, 'inspect'); operation.update(facts=facts, checked_at=ex.now())
         if facts['terminal']:

@@ -65,9 +65,17 @@ def journal(c, key, event, details=None):
 
 
 def enforce_limits(c, record):
+    from .execution_modes import is_direct
     limits=settings()
     rows=c.execute('SELECT body FROM attempts WHERE state IN ('+','.join('?' for _ in ACTIVE)+')',ACTIVE).fetchall()
     active=[json.loads(row[0]) for row in rows]
+    alias = record['config']['alias']
+    if is_direct(record['config']):
+        host = ex.servers.load_registry()['hosts'].get(alias, {})
+        direct = [r for r in active if r.get('config', {}).get('alias') == alias and is_direct(r['config'])]
+        if len(direct) >= host.get('direct_limit', 1):
+            raise ValueError('这台服务器的工作台直接任务已达上限。草稿已保留，请先结束或核查任务 '
+                             + '、'.join(r['id'][:8] for r in direct))
     from .extension_runs import active_usage
     active += [r for r in active_usage() if r['id']!=record.get('id')]
     active=[r for r in active if not r.get('quota_released')]
@@ -75,8 +83,9 @@ def enforce_limits(c, record):
     if (limits['max_inflight_total'] is not None and len(active)>=limits['max_inflight_total']) or (limits['max_inflight_per_host'] is not None and len(same)>=limits['max_inflight_per_host']):
         raise ValueError('在途任务数已达上限；UNKNOWN 也占用额度，未提交')
     cap=limits['max_cores_per_host']
-    if cap is not None:
-        counts=[r.get('profile',{}).get('ppn',r.get('profile',{}).get('ntasks')) for r in same+[record]]
+    if cap is not None and not is_direct(record['config']):
+        counts=[r.get('profile',{}).get('ppn',r.get('profile',{}).get('ntasks')) for r in same+[record]
+                if not is_direct(r.get('config', {}))]
         if any(type(n) is not int or n<1 for n in counts) or sum(counts)>cap:
             raise ValueError('每主机在途核数预算不足或历史核数未知；未提交')
 

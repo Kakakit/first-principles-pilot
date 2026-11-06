@@ -1,6 +1,7 @@
 import {newProject,makeStep,uid} from './model';
 import type {Project,Kind} from './model';
-export type ResultAttempt={id:string;node_id?:string;execution_scope?:string;state:string;kind?:string;created_at?:string;job_id?:string|null;path_schema?:string;stage_slug?:string;remote_path_absolute?:string;remote_path?:string;bundle_id?:string;input_note?:string|null;chain_run_id?:string;evidence?:Record<string,unknown>;config?:{alias?:string;scheduler?:string;name?:string};[key:string]:unknown};
+import {commandMode,type DirectRuntime} from './executionUi';
+export type ResultAttempt={id:string;node_id?:string;execution_scope?:string;state:string;kind?:string;created_at?:string;job_id?:string|null;path_schema?:string;stage_slug?:string;remote_path_absolute?:string;remote_path?:string;bundle_id?:string;input_note?:string|null;chain_run_id?:string;evidence?:Record<string,unknown>;direct_runtime?:DirectRuntime;config?:{alias?:string;scheduler?:string;name?:string;command_mode?:string};[key:string]:unknown};
 export type FrozenInput={id?:string;display_name?:string;stage?:string;parameters:Record<string,string>;parameter_origin?:string;species?:string[];files:Record<string,{sha256?:string}>;geometry_sha256?:string;kpoints?:string;warning?:string};
 export type Scalar={value:number;unit:string;source:{file:string;sha256?:string;host?:string;method?:string;line?:number}}|null;
 export type ResultSummary={attempt_id:string;state:string;evidence:Record<string,unknown>;input:FrozenInput;sources:Array<{type:string;display_name?:string;attempt_id?:string;files:string[];reason?:string;path?:string}>;metrics:Record<string,Scalar|number|boolean|null>|null;metrics_error?:string;metrics_checked_at?:string};
@@ -10,10 +11,10 @@ export function evidenceLabel(value:unknown){return value===true?'已见证据':
 export function programDone(attempt:ResultAttempt){return (attempt.evidence||{})[attempt.kind==='wannier90'?'wannier_all_done':'vasp_timing']===true;}
 export function nextAction(attempt?:ResultAttempt){
  if(!attempt)return {view:'config',label:'配置并冻结输入',reason:'当前节点尚无运行记录'};
- if(attempt.state==='UNKNOWN'||attempt.state==='DISPATCHING')return {view:'results',label:'核对原任务',reason:'先读取原 job ID 与结束证据，状态未确认前不重新提交'};
+ if(attempt.state==='UNKNOWN'||attempt.state==='DISPATCHING')return {view:'results',label:'核对原任务',reason:commandMode(attempt.config)==='direct'?'读取原运行回执和进程状态':'先读取原 job ID 与结束证据，状态未确认前不重新提交'};
  if(attempt.state==='FAILED')return {view:'results',label:'查看失败与恢复',reason:'先查看日志和输入；重新计算需另行准备、审阅和授权'};
  if(attempt.state==='PREPARED')return {view:'run',label:'继续运行审阅',reason:'已准备，尚未提交；核对已有版本、来源与脚本'};
- if(attempt.state==='COMPLETED')return {view:'results',label:'查看结果与分析',reason:programDone(attempt)?'程序结束与数值、物理验证分别查看':'调度已结束，程序完成证据仍需核对'};
+ if(attempt.state==='COMPLETED')return {view:'results',label:'查看结果与分析',reason:programDone(attempt)?'程序结束与数值、物理验证分别查看':commandMode(attempt.config)==='direct'?'执行结束，程序结束证据不足':'调度已结束，程序完成证据仍需核对'};
  return {view:'run',label:'查看运行状态',reason:'等待现有任务；不重新创建或提交'};
 }
 export function latestByNode(rows:ResultAttempt[]){

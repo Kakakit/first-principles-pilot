@@ -145,6 +145,10 @@ class InteractivePlotTests(unittest.TestCase):
             with patch.object(plots,'CACHE_ROOT',root):
                 self.assertEqual(plots.cached('project','band',None)['state'],'READY')
                 self.assertEqual(plots.cached('other','band',None)['state'],'ABSENT')
+                active = {'id':key,'state':'DOWNLOADING','downloaded_bytes':128}
+                with patch.object(plots,'JOBS',{key:active}):
+                    self.assertEqual(plots.cached('project','band',None),active)
+                    self.assertEqual(plots.cached('other','band',None)['state'],'ABSENT')
 
     def test_soc_procar_uses_first_charge_projection_table_only(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -214,7 +214,7 @@ class HistoryCleanupTests(unittest.TestCase):
 
     def test_project_purge_removes_owned_records_inputs_and_reports_without_remote_action(self):
         project={'id':'p','name':'本地清理','remoteSlug':'sample','nodes':[{'id':'s','data':{'kind':'structure','executionMode':'vasp','stageSequence':1,'stageSlug':'structure'}}],'edges':[]}
-        self.attempt(state='UNKNOWN');self.analysis(state='RUNNING');self.plan('scans',state='ACTIVE')
+        self.attempt(state='FAILED');self.analysis(state='COMPLETED');self.plan('scans',state='ACTIVE')
         key,file=self.frozen();original=self.write('originals/source','keep')
         recycle.move('projects','p',project)
         self.assertEqual({r['kind'] for r in recycle.all_items()},{'projects','inputs','attempts','analyses','scans'})
@@ -245,7 +245,10 @@ class HistoryCleanupTests(unittest.TestCase):
 
     def test_purged_attempt_receipt_cannot_recreate_events_or_worker_state(self):
         stale=self.attempt(state='UNKNOWN')
-        recycle.move('attempts',stale['id']);recycle.purge('attempts',stale['id'],True)
+        recycle.move('attempts',stale['id'])
+        with self.assertRaisesRegex(ValueError,'保留本地跟踪'):recycle.purge('attempts',stale['id'],True)
+        ex.save({**stale,'state':'FAILED'})
+        recycle.purge('attempts',stale['id'],True)
         stale.update(state='SUBMITTED',job_id='123.mock');ex.save(stale)
         with ex.db() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM execution_events').fetchone()[0],0)
@@ -267,17 +270,24 @@ class HistoryCleanupTests(unittest.TestCase):
         for module in (ex,wannier_execution,wannier_plot_restart):
             with self.assertRaisesRegex(ValueError,'回收站'):module.submit('a'*32)
 
-    def test_recycle_stops_only_the_owned_local_analysis_process(self):
+    def test_recycle_keeps_active_local_analysis_until_termination(self):
         import subprocess,sys
         process=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)'],start_new_session=True)
-        self.addCleanup(lambda:process.poll() is None and process.kill())
+        def stop_fixture():
+            if process.poll() is None:process.terminate()
+            process.wait(timeout=5)
+        self.addCleanup(stop_fixture)
         self.analysis(state='RUNNING',location='local');extension_runs._local_processes['b'*32]=process
         try:
             recycle.move('analyses','b'*32)
-            self.assertIsNotNone(process.poll())
+            self.assertIsNone(process.poll())
+            with self.assertRaisesRegex(ValueError,'保留本地跟踪'):recycle.purge('analyses','b'*32,True)
             recycle.restore('analyses','b'*32)
-            self.assertEqual(extension_runs.get('b'*32)['state'],'FAILED')
+            record=extension_runs.get('b'*32)
+            self.assertEqual(record['state'],'RUNNING')
             recycle.move('analyses','b'*32)
+            stop_fixture()
+            extension_runs.save({**record,'state':'FAILED'})
             recycle.purge('analyses','b'*32,True)
             self.assertFalse((self.root/'analyses-v2'/('b'*32)).exists())
         finally:extension_runs._local_processes.pop('b'*32,None)

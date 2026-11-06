@@ -4,19 +4,21 @@ import type {Project} from './model';
 import './project-sync.css';
 type Disk={ready:boolean;error:string;flush:(manual?:boolean)=>Promise<void>;exclusive:<T>(action:()=>Promise<T>)=>Promise<T>};
 type Host={alias:string;root:string};
+type CleanupPreview={candidates:{sha256:string;size_bytes:number}[];server:{host:string;root:string}};
 type Preview={preview_id:string;project_id:string;name:string;direction:string;counts:Record<string,number>;files:number;bytes:number;local_changes:boolean;local_counts:Record<string,number>|null;missing:{path:string;reason:string}[];remote_operation:unknown;absolute_directory:string};
 export default function ProjectSync({project,disk,onChanged}:{project:Project;disk:Disk;onChanged:()=>void}){
  const [alias,setAlias]=useState(''),[directory,setDirectory]=useState(''),[hosts,setHosts]=useState<Host[]>([]),[state,setState]=useState<any>(null);
  const [catalog,setCatalog]=useState<any[]|null>(null),[target,setTarget]=useState(''),[preview,setPreview]=useState<Preview|null>(null),[versions,setVersions]=useState<any[]>([]),[version,setVersion]=useState('');
+ const [cleanup,setCleanup]=useState<CleanupPreview|null>(null),[cleanupSelected,setCleanupSelected]=useState<string[]>([]);
  const [choice,setChoice]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
  const revision=useRef(0),context=useRef(project.id);context.current=project.id;
  const defaultDirectory=(root:string)=>root.replace(/\/$/,'')+'/.fpilot/project-sync';
- useEffect(()=>{let active=true;revision.current++;setPreview(null);setCatalog(null);setTarget('');setError('');setMessage('');
+ useEffect(()=>{let active=true;revision.current++;setPreview(null);setCleanup(null);setCatalog(null);setTarget('');setError('');setMessage('');
   Promise.all([requestJson('/api/project-sync/hosts'),requestJson(`/api/projects/${project.id}/sync`)]).then(([h,s])=>{if(!active)return;setHosts(h.hosts);setState(s);const a=s.location?.alias||s.local?.alias||s.default_alias||h.hosts[0]?.alias||'';setAlias(a);setDirectory(s.location?.snapshot_directory||s.local?.snapshot_directory||defaultDirectory(s.local?.root||h.hosts.find((v:Host)=>v.alias===a)?.root||'$HOME/fpilot'));}).catch(e=>{if(active)setError(errorMessage(e));});return()=>{active=false;};
  },[project.id]);
  useEffect(()=>{if(!disk.ready)return;let active=true;const timer=setTimeout(()=>{requestJson(`/api/projects/${project.id}/sync`).then(s=>{if(active)setState(s);}).catch(()=>{});},800);return()=>{active=false;clearTimeout(timer);};},[project.id,project.updatedAt,disk.ready]);
  const run=async(action:()=>Promise<void>)=>{if(busy)return;const pid=project.id;setBusy(true);setError('');setMessage('');try{await action();}catch(e){if(context.current===pid)setError(errorMessage(e));}finally{setBusy(false);}};
- const clear=()=>{revision.current++;setPreview(null);setCatalog(null);setTarget('');setVersion('');setVersions([]);setMessage('');setError('');};
+ const clear=()=>{revision.current++;setPreview(null);setCatalog(null);setTarget('');setVersion('');setVersions([]);setCleanup(null);setCleanupSelected([]);setMessage('');setError('');};
  const remember=()=>requestJson(`/api/projects/${project.id}/sync/location`,{alias,snapshot_directory:directory});
  const query=`alias=${encodeURIComponent(alias)}&snapshot_directory=${encodeURIComponent(directory)}`;
  const prepare=async(direction:string,pid=project.id)=>{const r=revision.current;await disk.flush(true);if(disk.error)throw new Error(disk.error);await remember();const p=await requestJson(`/api/projects/${pid}/sync/preview`,{alias,snapshot_directory:directory,direction,version:direction==='download'?(version||undefined):undefined});if(r!==revision.current)return;setPreview(p);setChoice(false);};
@@ -40,6 +42,24 @@ export default function ProjectSync({project,disk,onChanged}:{project:Project;di
  {preview.missing.length>0&&<p>原设备缺失 {preview.missing.length} 个附件，保留不可用说明，不自动重跑分析。</p>}{Boolean(preview.remote_operation)&&<p role="alert">服务器存在未完成的传输操作，须先核查回执。</p>}
  {preview.direction==='download'&&preview.local_changes&&<label><input type="checkbox" checked={choice} onChange={e=>setChoice(e.target.checked)}/>选择服务器版本，先备份本机未同步修改</label>}
  <div className="sync-actions"><button className="button primary" disabled={busy||!disk.ready||Boolean(preview.remote_operation)||(preview.direction==='download'&&preview.local_changes&&!choice)} onClick={()=>void run(confirm)}>{preview.direction==='upload'?'确认上传快照':'确认下载并还原'}</button><button className="button" disabled={busy} onClick={()=>setPreview(null)}>取消</button></div></section>}
+ <details><summary>清理未发布的快照附件</summary>
+  <p>只列出超过 24 小时且没有任何已发布版本引用的附件。当前及历史版本均保留。</p>
+  <button className="button" disabled={busy||!alias||!directory||legacy||stopped} onClick={()=>void run(async()=>{
+   const r=revision.current;
+   const result:CleanupPreview=await requestJson(`/api/projects/${project.id}/sync/cleanup-objects`,{alias,snapshot_directory:directory});
+   if(r===revision.current){setCleanup(result);setCleanupSelected([]);}
+  })}>核对未引用附件</button>
+  {cleanup&&<section className="sync-preview">
+   <p>{cleanup.server.host} · <code>{cleanup.server.root}</code></p>
+   {!cleanup.candidates.length&&<p>没有可清理的未发布附件。</p>}
+   <div className="lifecycle-assets">{cleanup.candidates.map(file=><label key={file.sha256}><input type="checkbox" checked={cleanupSelected.includes(file.sha256)} disabled={busy}
+    onChange={e=>setCleanupSelected(old=>e.target.checked?[...old,file.sha256]:old.filter(sha=>sha!==file.sha256))}/> <code>{file.sha256.slice(0,16)}</code> · {file.size_bytes.toLocaleString()} B</label>)}</div>
+   {cleanup.candidates.length>0&&<button className="button danger" disabled={busy||!cleanupSelected.length} onClick={()=>void run(async()=>{
+    const result=await requestJson(`/api/projects/${project.id}/sync/cleanup-objects`,{preview:cleanup,selected:cleanupSelected});
+    setCleanup(null);setCleanupSelected([]);setMessage(`已删除 ${result.deleted.length} 个选中的未发布附件。`);
+   })}>删除选中的未发布附件</button>}
+  </section>}
+ </details>
  {busy&&<p role="status">正在核验／传输，请保持工作台运行…</p>}{error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
  </details>;
 }

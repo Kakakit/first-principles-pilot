@@ -1,10 +1,10 @@
 import {useRef,useState} from 'react';
 import {Check,Download,Palette,Upload,X} from 'lucide-react';
-import {BUILTIN_THEMES,chooseTheme,colorLabels,fontLabels,installTheme,MAX_THEME_BYTES,removeTheme,resolveTheme,themeTemplate} from './appearance';
+import {BUILTIN_THEMES,chooseFontSize,chooseTheme,colorLabels,fontLabels,installTheme,MAX_THEME_BYTES,removeTheme,resolveTheme,themeTemplate} from './appearance';
 import type {Theme} from './appearance';
 import {useAppearance} from './useAppearance';
 export default function AppearancePanel(){
-  const {theme,customThemes,notice}=useAppearance();const file=useRef<HTMLInputElement>(null);const [error,setError]=useState('');const [message,setMessage]=useState('');const [exportOpen,setExportOpen]=useState(false);
+  const {theme,customThemes,notice,fontSize}=useAppearance();const file=useRef<HTMLInputElement>(null);const [error,setError]=useState('');const [message,setMessage]=useState('');const [exportOpen,setExportOpen]=useState(false);
   const currentJson=JSON.stringify(themeTemplate(theme),null,2)+'\n';
   const copyTheme=async()=>{try{await navigator.clipboard.writeText(currentJson);setMessage('当前主题 JSON 已复制，可保存为 .json 文件后导入');setError('');}catch{setError('复制未完成，请在下方文本框中手动选择和复制。');}};
   const choose=(id:string)=>{chooseTheme(id);setError('');setMessage('主题已应用');};
@@ -27,11 +27,15 @@ export default function AppearancePanel(){
   </div>;
   return <div className="appearance-panel">
     <div className="appearance-heading"><h2>外观</h2></div>
+    <label>界面文字大小<select value={fontSize||''} onChange={event=>{
+      const size=Number(event.target.value);chooseFontSize(size===14||size===16||size===18?size:undefined);setMessage('字号已应用');
+    }}><option value="">随主题</option><option value="14">较小 · 14 px</option><option value="16">标准 · 16 px</option><option value="18">较大 · 18 px</option></select></label>
     <div className="theme-grid" aria-label="内置主题">{BUILTIN_THEMES.map(t=>card(t))}</div>
     {!!customThemes.length&&<><h3 className="appearance-section-title">我的主题</h3><div className="theme-grid">{customThemes.map(t=>card(resolveTheme(t),true))}</div></>}
     <div className="appearance-preview"><div><span className="section-kicker">字体预览</span><h3>从结构到结果 · Materials research</h3><p>选择来源，配置计算，审阅输入，再运行与比较。</p><p className="appearance-latin">Structure → Calculation → Results</p><code>ENCUT = 520 · E = −10.428 eV</code></div><span className="neutral-badge">{theme.metrics.fontSize} px 正文 · {theme.metrics.secondaryFontSize} px 辅助文字</span></div>
-    <div className="appearance-import"><div><h3>自定义颜色与中英文字体</h3><p>下载模板后修改色号和字体名称，再导入 JSON。未填写的项沿用基础主题。</p></div><div className="appearance-actions"><a className="button" href="/theme-templates/custom-theme.json" download="fpilot-custom-theme.json"><Download size={16}/>下载格式模板</a><button className="button" aria-expanded={exportOpen} onClick={()=>setExportOpen(value=>!value)}>查看 / 复制当前主题</button><button className="button primary" onClick={()=>file.current?.click()}><Upload size={16}/>导入并应用</button></div><input ref={file} hidden type="file" accept=".json,application/json" aria-label="导入主题文件" onChange={e=>void importFile(e.target.files?.[0])}/></div>
+    <details className="appearance-guide"><summary>高级 · 导入和导出主题</summary><div className="appearance-import"><div><p>下载模板后修改色号和字体名称，再导入 JSON。未填写的项沿用基础主题。</p></div><div className="appearance-actions"><a className="button" href="/theme-templates/custom-theme.json" download="fpilot-custom-theme.json"><Download size={16}/>下载格式模板</a><button className="button" aria-expanded={exportOpen} onClick={()=>setExportOpen(value=>!value)}>查看 / 复制当前主题</button><button className="button" onClick={()=>file.current?.click()}><Upload size={16}/>导入并应用</button></div><input ref={file} hidden type="file" accept=".json,application/json" aria-label="导入主题文件" onChange={e=>void importFile(e.target.files?.[0])}/></div>
     {exportOpen&&<div className="theme-export"><label className="field">当前主题 JSON<textarea aria-label="当前主题 JSON" className="input-text" readOnly rows={10} value={currentJson}/></label><button className="button" onClick={()=>void copyTheme()}>复制主题 JSON</button><p>保存为 UTF-8 编码的 .json 文件，即可在另一台电脑导入。基础主题和所有生效颜色、字体都包含在内。</p></div>}
+    </details>
     {error&&<p className="appearance-error" role="alert">{error}</p>}{notice&&<p className="appearance-error" role="alert">{notice}</p>}{message&&<p className="appearance-message" role="status">{message}</p>}
     <details className="appearance-guide"><summary>模板里的色号和字体对应哪里？</summary><p><code>base</code> 指定基础主题。<code>colors</code> 控制以下界面色块；字体按数组顺序使用本机已安装字体，缺少时自动使用后备字体，无需下载字体。</p><dl>{Object.entries(colorLabels).map(([key,label])=><div key={key}><dt><code>{key}</code></dt><dd>{label}</dd></div>)}</dl><p>{Object.entries(fontLabels).map(([key,label])=><span key={key} className="theme-font-key"><code>{key}</code>：{label}</span>)}</p><p>元素颜色、曲线分类颜色和科学数据保持原有含义。<code>metrics</code> 可调正文字号 14–18 px、辅助字号 13–16 px 和圆角 0–20 px。</p></details>
   </div>;

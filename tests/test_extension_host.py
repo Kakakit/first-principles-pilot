@@ -339,8 +339,30 @@ class ExtensionHostTests(unittest.TestCase):
         self.install();self.mock_attempts({'aa':{'POSCAR':SI.encode()}});self.runtime()
         payload={'extension_id':'structure-volume-statistics','project_id':'project','sources':[{'kind':'attempt','attempt_id':'aa'}],'options':{'include_elements':True},'location':'ssh','alias':'jutai-1'}
         payload['preview_id']=runs.preview(payload)['preview_id'];receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);dest=runs.directory(record['id']);request=runs._input_request(record,dest);(dest/'launch.sh').write_text('fixture')
+        request['inputs']['duplicate-role']=copy.deepcopy(next(iter(request['inputs'].values())))
         with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'/workspace/project/analyses/'+record['id']+'\n'}) as ssh:remote.stage(record,dest,request)
+        inputs=json.loads((dest/'request.remote.json').read_text())['inputs']
+        paths={item['path'] for values in inputs.values() for item in values}
+        self.assertEqual(len(paths),1)
+        self.assertEqual(ssh.call_args.args[1].count('before=$(stat'),1)
+        self.assertIn('cp --reflink=auto',ssh.call_args.args[1])
         text=ssh.call_args.args[1];self.assertIn('dest=/workspace/project/analyses/'+record['id'],text);self.assertIn('stat -c',text);self.assertIn('cp --',text);self.assertNotIn('sha256',text);self.assertNotIn('ln ',text)
+
+    def test_partial_staging_records_frozen_location_before_first_write(self):
+        payload=self.remote_payload('ssh')
+        receipt=runs.start(payload);key=receipt['analysis_id']
+        def fail(record,destination,request):
+            persisted=runs.get(key)
+            self.assertEqual(persisted['remote_dir_planned'],remote.analysis_directory(record))
+            self.assertEqual(persisted['remote_stage'],'creating')
+            raise ValueError('fixture second copy failed')
+        with patch.object(remote,'stage',side_effect=fail),patch.object(remote,'direct') as start:
+            runs._execute(key)
+        record=runs.get(key)
+        self.assertEqual((record['state'],record['remote_stage']),('FAILED','partial'))
+        self.assertFalse(record.get('submission_started'))
+        self.assertEqual(record['remote_dir_planned'],remote.analysis_directory(record))
+        start.assert_not_called()
 
     def test_active_unknown_analysis_counts_core_budget(self):
         payload=self.remote_payload();receipt=runs.start(payload);record=runs.get(receipt['analysis_id']);record.update(location='scheduler',state='UNKNOWN',requested_cores=2);runs.save(record)

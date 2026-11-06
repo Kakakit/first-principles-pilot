@@ -9,6 +9,7 @@ import shlex
 import shutil
 import tempfile
 import time
+import uuid
 from pathlib import Path, PurePosixPath
 import numpy as np
 from . import execution, remote_paths, remote_transport, safe_files, recycle
@@ -106,18 +107,29 @@ if REQUEST['kind']=='band':
     receipt['kpoints_text']=kpoints.read_text()
     receipt['eigenval_text']=eigenval.read_text()
 # Preserve all orbitals and k points; no downsampling and no partitioned transfer.
-np.savez_compressed(str(out),metadata=np.array(json.dumps(receipt)),**arrays)
-if out.stat().st_size>10485760:
-    out.replace(out.with_name('data-full.npz'))
-    receipt.update(remote_only=True,remote_directory=str(work))
-    receipt.pop('eigenval_text',None)
-    np.savez_compressed(str(out),metadata=np.array(json.dumps(receipt)))
-    if out.stat().st_size>10485760:raise ValueError('绘图摘要仍超过 10 MiB，完整数据保留在服务器')
+candidate=out.with_name('data-build.npz')
+try:
+    np.savez_compressed(str(candidate),metadata=np.array(json.dumps(receipt)),**arrays)
+    if candidate.stat().st_size>10485760:
+        receipt.update(remote_only=True,remote_directory=str(work))
+        receipt.pop('eigenval_text',None)
+        np.savez_compressed(str(candidate),metadata=np.array(json.dumps(receipt)))
+        if candidate.stat().st_size>10485760:raise ValueError('绘图摘要仍超过 10 MiB，原始数据保留在服务器')
+    candidate.replace(out)
+finally:
+    candidate.unlink(missing_ok=True)
 print('FPILOT_COMPACT='+json.dumps({'bytes':out.stat().st_size,'parse_seconds':receipt['parse_seconds']}))
 '''
 
 
 def fetch(record, kind, force=False):
+    from .attempt_operations import locked
+    upstream=(record.get('dependency_snapshot') or {}).get('upstream_attempt_id') if kind=='band' else None
+    with locked({record['id'],upstream}-{None}):
+        return _fetch(record,kind,force)
+
+
+def _fetch(record,kind,force):
     from . import remote_cache, remote_energy
     key=identity(record,kind)
     with remote_cache.singleflight('plot-data',{'key':key}):
@@ -160,6 +172,18 @@ def install(value, destination):
             if name!='metadata':np.save(destination/(name+'.npy'),data[name])
 
 
+SELECTION_SWEEP = r'''
+cutoff=time.time()-3600
+for prior in output.parent.glob('selection-*.json.gz'):
+    try:
+        if (re.fullmatch(r'selection-[a-f0-9]{32,64}\.json\.gz',prior.name)
+                and not prior.is_symlink() and prior.is_file() and prior.stat().st_mtime < cutoff):
+            prior.unlink(missing_ok=True)
+    except OSError:
+        pass
+'''
+
+
 def selected_series(meta, selected, emin, emax, directory):
     """Keep oversized arrays remote; return one bounded selected projection, with no sampling loss."""
     from . import interactive_plots as plots, remote_cache
@@ -174,17 +198,18 @@ def selected_series(meta, selected, emin, emax, directory):
         record=execution.get(remote['attempt_id']);recycle.assert_available('attempts',record['id'],record)
         root=remote['remote_directory']
         functions=(' _selection _orbital_indexes _reciprocal_lattice _series_data').split()
-        source='from __future__ import annotations\nimport json,math,gzip,os\nfrom pathlib import Path\nimport numpy as np\n'
+        source='from __future__ import annotations\nimport json,math,gzip,os,re,time\nfrom pathlib import Path\nimport numpy as np\n'
         source+='ORBITAL_GROUPS='+repr(plots.ORBITAL_GROUPS)+'\n'
         source+='\n'.join(inspect.getsource(getattr(plots,name)) for name in functions)
         # The same series function uses the attempt POSCAR for reciprocal coordinates.
         source+='\nmeta='+repr(info)+'\nroot=Path('+repr(root)+')\n'
         source+='folder=root/'+repr(record['id'])+';folder.mkdir(exist_ok=True)\n'
-        source+='(folder/"POSCAR").write_text('+repr((directory/record['id']/'POSCAR').read_text())+')\n'
+        poscar=(directory/record['id']/'POSCAR').read_text()
+        source+='poscar=folder/"POSCAR"\nif not poscar.is_file() or poscar.read_text()!='+repr(poscar)+':poscar.write_text('+repr(poscar)+')\n'
         source+='data=_series_data(meta,root,'+repr(selected)+','+repr(emin)+','+repr(emax)+')\n'
-        digest=remote_cache.key('selected-projection',cache_identity)
-        output=str(PurePosixPath(root).parent/('selection-'+digest+'.json.gz'))
+        output=str(PurePosixPath(root).parent/('selection-'+uuid.uuid4().hex+'.json.gz'))
         source+='output=Path('+repr(output)+')\n'
+        source+=SELECTION_SWEEP
         source+='with gzip.open(str(output),"wt") as stream:json.dump(data,stream)\n'
         source+='if output.stat().st_size>10485760:raise ValueError("所选投影仍超过 10 MiB，请减少同时显示的轨道；不缩减 k 点或能带")\n'
         from .analysis_queue import slot,interpreter,environment
@@ -193,7 +218,12 @@ def selected_series(meta, selected, emin, emax, directory):
             recycle.assert_available('attempts',record['id'],record)
             target=Path(temp)/'selected.json.gz'
             safe_files.pull_many(record['config']['alias'],[{'remote_path':output,'destination':str(target)}],companion_command=command,lane='analysis',timeout=180)
-            with gzip.open(target,'rt') as stream:return json.load(stream)
+            try:
+                with gzip.open(target,'rt') as stream:return json.load(stream)
+            finally:
+                # Transfer acknowledged; this nonce belongs to this request.
+                # An interrupted transfer leaves its file for the age-gated sweep.
+                execution.ssh(record['config']['alias'],'rm -f -- '+remote_paths.shell_path(output),timeout=20,mutating=True,lane='analysis')
     with remote_cache.singleflight('selected-projection',cache_identity),remote_transport.operation('selected-projection'):
         cached=remote_cache.read('selected-projection',cache_identity)
         if cached:return cached['series']

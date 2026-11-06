@@ -77,3 +77,19 @@ test('slow polling never overlaps and cancellation prevents another read',async(
  await new Promise(resolve=>setTimeout(resolve,20));assert.equal(reads,1);
  cancel();release();await new Promise(resolve=>setTimeout(resolve,10));assert.equal(reads,1);
 });
+
+test('serial polling continues after a temporary status read failure', {timeout:1000}, async()=>{
+ const errors:unknown[]=[];
+ const failure=new Error('temporarily unavailable');
+ let reads=0;
+ let stop=()=>{};
+ await new Promise<void>(resolve=>{
+  stop=pollSerial(async()=>{
+   if(++reads===1)throw failure;
+   stop();
+   resolve();
+  },error=>errors.push(error),2,0);
+ });
+ assert.equal(reads,2);
+ assert.deepEqual(errors,[failure]);
+});

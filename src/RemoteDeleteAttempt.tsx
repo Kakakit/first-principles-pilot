@@ -1,14 +1,9 @@
 import {useState} from 'react';
+import LifecycleDialog from './LifecycleDialog';
 
-type Preview={token?:string;alias?:string;remote_path?:string;confirm_text?:string;directory_bytes?:number|null;expires_at?:string;note?:string;force?:boolean;state?:string;job_id?:string;scheduler_state?:string;dispatch_receipt?:{exit_code?:number;stdout?:string;stderr?:string};files?:string[];blocked_children?:string[]};
-
-export default function RemoteDeleteAttempt({projectId,attemptId,state,onDeleted,onOpenAttempt}:{projectId:string;attemptId:string;state:string;onDeleted:()=>void;onOpenAttempt?:(id:string)=>void}){
- const [preview,setPreview]=useState<Preview|null>(null);
- const [typed,setTyped]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
- const [done,setDone]=useState(false);
- if(done)return null;
- const request=async(path:string,body?:unknown)=>{const response=await fetch(path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const result=await response.json();if(!response.ok)throw new Error(result.detail||'远端删除检查失败');return result;};
- const load=async()=>{setBusy(true);setError('');setPreview(null);setTyped('');try{setPreview(await request(`/api/execution/${attemptId}/delete-preview?project_id=${encodeURIComponent(projectId)}`));}catch(caught){setError((caught as Error).message);}finally{setBusy(false);}};
- const remove=async()=>{if(!preview?.token||typed!==preview.confirm_text)return;setBusy(true);setError('');try{await request(`/api/execution/${attemptId}/permanent-delete`,{project_id:projectId,token:preview.token,confirm_text:typed});setDone(true);onDeleted();}catch(caught){setError((caught as Error).message);}finally{setBusy(false);}};
- return <details className="input-submit-card"><summary>删除此 attempt{state==='PREPARED'?'（仅本机准备记录）':'及对应远端目录'}</summary><p>只处理所选 attempt；有尚未确认的下游时请先查看并处理下游。已确认运行中的任务不能删除。</p><button className="button" disabled={busy} onClick={()=>void load()}>只读核对删除目标</button>{preview?.blocked_children?.length?<div><p>仍有下游 attempt：</p>{preview.blocked_children.map(id=><button className="button" key={id} onClick={()=>onOpenAttempt?.(id)}>{id} · 打开记录</button>)}</div>:null}{preview?.token&&<div className="remote-delete-preview"><p>服务器：{preview.alias} · 状态：{preview.state} · job ID：{preview.job_id||'无'} · 当前调度查询：{preview.scheduler_state||'无记录'}</p><div className="remote-result-path"><code>{preview.remote_path}</code></div><p>目录占用：{preview.directory_bytes==null?'未统计':(preview.directory_bytes/1024/1024/1024).toFixed(2)+' GiB'}</p>{preview.files?.map(item=><p key={item}>{item}</p>)}{preview.dispatch_receipt&&<details><summary>查看原提交回执</summary><pre className="input-text">{JSON.stringify(preview.dispatch_receipt,null,2)}</pre></details>}<p>{preview.note}</p>{preview.force&&<p className="structure-error">调度终态未确认；强制删除可能影响仍在运行的作业。请核对完整路径。</p>}<label className="field">输入{preview.force?'完整远端路径':'完整 attempt 目录名'} <strong>{preview.confirm_text}</strong> 以确认<input value={typed} onChange={event=>setTyped(event.target.value)} autoComplete="off"/></label><button className="button danger" disabled={busy||typed!==preview.confirm_text} onClick={()=>void remove()}>{state==='PREPARED'?'删除本机准备记录':'永久删除这一目录和任务记录'}</button></div>}{busy&&<p role="status">正在核对或删除此目录…</p>}{error&&<p role="alert" className="structure-error">{error}</p>}</details>;
+export default function RemoteDeleteAttempt({projectId,attemptId,onDeleted}:{projectId:string;attemptId:string;state:string;onDeleted:()=>void;onOpenAttempt?:(id:string)=>void}){
+ const [open,setOpen]=useState(false);
+ return <><button className="text-button cleanup-permanent" onClick={()=>setOpen(true)}>回收任务及管理远端文件</button>
+  {open&&<LifecycleDialog target={{kind:'attempts',key:attemptId,project_id:projectId}} label="此运行记录" onClose={()=>setOpen(false)} onDone={onDeleted}/>}
+ </>;
 }

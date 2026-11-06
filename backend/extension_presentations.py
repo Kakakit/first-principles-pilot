@@ -108,6 +108,14 @@ def validate(manifest,dest,sizes=None):
 
 
 def generate(record,view,dest,entry):
+    from .attempt_operations import locked
+    from .recycle import assert_available
+    with locked({record['id']}):
+        assert_available('analyses',record['id'],record)
+        return _generate(record,view,dest,entry)
+
+
+def _generate(record,view,dest,entry):
     from .extension_runs import directory,now
     output=dest/'outputs';output.mkdir()
     request={'schema':'fpilot.extension-presentation-request.v1','analysis_id':record['id'],

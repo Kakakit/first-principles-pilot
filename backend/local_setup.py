@@ -1,6 +1,7 @@
 """Portable launcher settings. Moving a workspace requires an explicit restart."""
 import json,os,shutil,sys,tempfile
 from pathlib import Path
+from filelock import FileLock, Timeout
 from .storage import ROOT
 from .execution_control import write_json
 
@@ -21,9 +22,10 @@ def read():
         'first_run':not (ROOT/'server-config.json').exists() and not (ROOT/'potcar-library.json').exists() and not value.get('setup_completed',False)}
 
 
-def validate(value):
+def validate(value, partial=False):
     result={}
     for key in ('workspace','research_root','potcar_library'):
+        if partial and key not in value:continue
         text=value.get(key,'')
         if not isinstance(text,str) or any(c in text for c in '\x00\r\n'):raise ValueError('本机路径无效：'+key)
         if not text:
@@ -38,22 +40,40 @@ def validate(value):
                 with tempfile.TemporaryFile(dir=path) as test:test.write(b'fpilot')
             except OSError as exc:raise ValueError('数据目录不可写：'+text) from exc
         result[key]=str(path.resolve())
-    port=value.get('port',8765)
-    if type(port) is not int or not 1024<=port<=65535:raise ValueError('端口须为 1024–65535 的整数')
-    result.update(port=port,worker_enabled=bool(value.get('worker_enabled',True)),setup_completed=True)
+    if not partial or 'port' in value:
+        port=value.get('port',8765)
+        if type(port) is not int or not 1024<=port<=65535:raise ValueError('端口须为 1024–65535 的整数')
+        result['port']=port
+    if not partial or 'worker_enabled' in value:
+        if partial and type(value['worker_enabled']) is not bool:raise ValueError('监控开关值无效')
+        result['worker_enabled']=bool(value.get('worker_enabled',True))
+    result['setup_completed']=True
     return result
 
 
-def save(value):
+def save(value, partial=False):
+    if partial and (not value or set(value)-{'workspace','port','research_root','worker_enabled'}):
+        raise ValueError('本机设置字段无效')
+    try:
+        with FileLock(str(CONFIG)+'.lock',timeout=5):
+            return _save(value,partial)
+    except Timeout as exc:
+        raise ValueError('另一项本机设置正在保存，请重试') from exc
+
+
+def _save(value, partial):
     previous=read()
-    valid=validate(value);valid['python']=sys.executable
+    changed=validate(value,partial)
+    valid={**previous['saved'],**changed} if partial else changed
+    valid['python']=sys.executable
     if os.environ.get('FPILOT_SAFE_PULL'):
         valid['safe_pull']=os.environ['FPILOT_SAFE_PULL']
-    if valid['potcar_library']:
+    if changed.get('potcar_library'):
         from .potcar_library import configure
         configure(valid['potcar_library'])
         os.environ['FPILOT_POTCAR_LIBRARY']=valid['potcar_library']
     write_json(CONFIG,valid)
-    restart=any(valid[key]!=previous['current'][key] for key in ('workspace','port','research_root')) or valid['worker_enabled']!=previous['saved'].get('worker_enabled',True)
+    restart=any(key in changed and changed[key]!=previous['current'][key] for key in ('workspace','port','research_root')) or (
+        'worker_enabled' in changed and changed['worker_enabled']!=previous['saved'].get('worker_enabled',True))
     return {'saved':valid,'restart_required':restart,
         'note':'配置已保存。更换数据目录、研究目录、端口或自动推进开关后，请停止并重新启动工作台；原目录保留，不自动搬迁。'}

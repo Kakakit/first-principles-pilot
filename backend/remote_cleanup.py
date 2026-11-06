@@ -9,6 +9,7 @@ from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 from . import execution as ex, remote_paths
+from .execution_modes import is_direct
 from .storage import ROOT
 
 
@@ -18,6 +19,14 @@ def _target(project_id, attempt_id):
     record = ex.get(attempt_id)
     if record.get('project_id') != project_id:
         raise ValueError('attempt 不属于当前项目')
+    return validate_record(record)
+
+
+def validate_record(record):
+    if is_direct(record.get('config', {})):
+        if record['state'] not in ('PREPARED', 'COMPLETED', 'FAILED', 'CANCELLED'):
+            raise ValueError('请先确认直接任务已结束，再删除运行目录')
+        ex.assert_recovery_target(record)
     if record.get('state') not in ('PREPARED', 'COMPLETED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'EXITING'):
         raise ValueError('调度器或工作台仍显示此任务在途；不能删除')
     if record.get('path_schema') != 'fpilot.remote-attempt-path':
@@ -38,7 +47,7 @@ def _pending_children(attempt_id):
                  (row.get('restart_snapshot') or {}).get('source_attempt_id') == attempt_id)]
 
 
-def _script(record, expected_marker=None, delete=False, force=False):
+def _script(record, expected_marker=None, delete=False, force=False, list_files=True):
     root = remote_paths.shell_path(record['remote_workspace_root'])
     destination = remote_paths.shell_path(record['remote_path_absolute'])
     identity = shlex.quote('"id": "' + record['id'] + '"')
@@ -89,7 +98,7 @@ else
 fi
 bytes=-
 ''')
-        if not delete:
+        if not delete and list_files:
             script += '''find "$dest" -maxdepth 2 -type f -printf 'FPILOT_DELETE_FILE=%P|%s\\n' | head -20
 '''
     if expected_marker:

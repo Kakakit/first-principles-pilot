@@ -5,13 +5,14 @@ from .input_display import frozen_note
 ATTEMPT_FIELDS=('id','node_id','owner_node_id','execution_scope','state','kind','created_at','updated_at',
     'job_id','tracking_error','tracking_checked_at','state_checked_at','path_schema','stage_slug','remote_path_absolute','remote_path','bundle_id','evidence',
     'scan_batch_id','scan_case_id','case_index','batch_reason','parent_attempt_id','parameter_summary','project_id',
-    'plot_source_attempt_id','band_attempt_id','node','cores','seed','chain_run_id')
+    'plot_source_attempt_id','band_attempt_id','node','cores','seed','chain_run_id','command_run_id','direct_runtime')
 
 
 def attempt(row):
     return {**{k:row[k] for k in ATTEMPT_FIELDS if k in row},
             'input_note':frozen_note(row) if not row.get('scan_batch_id') else None,
-            'config':{k:row.get('config',{}).get(k) for k in ('alias','scheduler','name')}}
+            'config':{k:row.get('config',{}).get(k) for k in ('alias','scheduler','name') + (
+                ('command_mode',) if 'command_mode' in row.get('config',{}) else ())}}
 
 
 def attempts(project_id):

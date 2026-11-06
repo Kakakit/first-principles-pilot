@@ -30,6 +30,7 @@ CACHE_ROOT = ROOT / 'projection-cache'
 SAVED_ROOT = ROOT / 'plot-datasets'
 JOBS: dict[str, dict] = {}
 LOCK = threading.Lock()
+ACTIVE_JOB_STATES = ('GENERATING', 'DOWNLOADING', 'PARSING')
 NUMBER = r'[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[Ee][-+]?\d+)?'
 ORBITAL_GROUPS = {'s': ('s',), 'p': ('px', 'py', 'pz'),
                   'd': ('dxy', 'dyz', 'dz2', 'dxz', 'dx2-y2')}
@@ -123,7 +124,7 @@ def prepare(project_id: str, band_attempt_id: str | None = None, dos_attempt_id:
     with LOCK:
         job_cache.prune(JOBS, CACHE_ROOT/'job-receipts')
         old=JOBS.get(key)
-        if old and old['state'] in ('GENERATING','DOWNLOADING','PARSING'):
+        if old and old['state'] in ACTIVE_JOB_STATES:
             return dict(old)
         ready=_metadata(directory)
         if ready and not force:
@@ -201,6 +202,10 @@ def status(key: str) -> dict:
 
 def cached(project_id: str, band_attempt_id: str | None = None, dos_attempt_id: str | None = None) -> dict:
     key = _key(project_id, band_attempt_id, dos_attempt_id)
+    with LOCK:
+        job = JOBS.get(key)
+        if job and job['state'] in ACTIVE_JOB_STATES:
+            return dict(job)
     meta = _metadata(CACHE_ROOT / key)
     if not meta or meta.get('project_id') != project_id or meta.get('band_attempt_id') != band_attempt_id or meta.get('dos_attempt_id') != dos_attempt_id:
         return {'id': key, 'state': 'ABSENT'}

@@ -1,10 +1,11 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import type {Dispatch,SetStateAction} from 'react';
-import {cleanWorkspace,parseWorkspace} from './model';
+import {cleanWorkspace,initialWorkspace,parseWorkspace} from './model';
 import type {Workspace} from './model';
 import {verifySource} from './structure';
 import {WorkspacePersistence,WorkspaceRequestError,workspaceRequest,workspaceSerializer,autosaveDelay,AUTOSAVE_IDLE_MS} from './workspacePersistence';
 import {requestJson} from './apiClient';
+import {settingsDrafts,submissionDrafts} from './submissionDrafts';
 
 export const MAX_BACKUP_BYTES=32*1024*1024;
 export async function checkedWorkspace(value:unknown) {
@@ -27,7 +28,11 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
       const result=await workspaceRequest({signal:controller.signal});
       if(!active)return;
       let w:Workspace;
-      if(result.workspace){w=await checkedWorkspace(result.workspace);}
+      if(result.recycled_empty){
+        w=initialWorkspace();
+        const saved=await workspaceRequest({method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace:w,expected_revision:result.revision,reason:'autosave'}),signal:controller.signal});
+        result.revision=saved.revision;
+      }else if(result.workspace){w=await checkedWorkspace(result.workspace);}
       else {
         if(legacyError)throw new Error('旧浏览器存档不可读。请先导出原存档并恢复，暂不迁移演示内容。');
         w=cleanWorkspace(latest.current);
@@ -82,7 +87,8 @@ export function useDiskWorkspace(workspace:Workspace,setWorkspace:Dispatch<SetSt
   const finishEditing=useCallback(()=>{drain.current=true;void flush();},[flush]);
   useEffect(()=>{const hidden=()=>{if(document.hidden)finishEditing();};document.addEventListener('visibilitychange',hidden);return()=>document.removeEventListener('visibilitychange',hidden);},[finishEditing]);
   useEffect(()=>{const save=(event:KeyboardEvent)=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==='s'){event.preventDefault();void flush(true);}};window.addEventListener('keydown',save);return()=>window.removeEventListener('keydown',save);},[flush]);
-  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(ready&&(serialize.current(latest.current)!==persistence.current.saved||persistence.current.pendingBody!==null)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[ready]);
+  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(settingsDrafts.hasDraft()||submissionDrafts.hasDraft('properties:')||
+    ready&&(serialize.current(latest.current)!==persistence.current.saved||persistence.current.pendingBody!==null)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn);},[ready]);
   const exclusive=async<T,>(action:()=>Promise<T>):Promise<T>=>{
     await flush(true);
     if(paused.current||persistence.current.pendingBody!==null||serialize.current(latest.current)!==persistence.current.saved)throw new Error('草稿尚未保存，连接恢复后再继续。');

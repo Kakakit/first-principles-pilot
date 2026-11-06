@@ -1,6 +1,7 @@
 """Persistent execution ownership; local-structure edges never join branches."""
 import json
 from .storage import ROOT
+from .execution_modes import has_execution_receipt
 
 
 def owner(record):
@@ -63,8 +64,9 @@ def inspect(project_id, members, connection=None):
         if rec.get('project_id') != project_id or rec.get('state') == 'PREPARED':
             continue
         scope = assignments.get(rec['id'],owner(rec))
-        if scope in members and (rec.get('job_id') or rec.get('state') in ('DISPATCHING', 'UNKNOWN')):
-            evidence.append(dict(scope=scope, alias=rec['config']['alias'], state='BOUND' if rec.get('job_id') else 'RESERVED', attempt_id=rec['id']))
+        receipt = has_execution_receipt(rec)
+        if scope in members and (receipt or rec.get('state') in ('DISPATCHING', 'UNKNOWN')):
+            evidence.append(dict(scope=scope, alias=rec['config']['alias'], state='BOUND' if receipt else 'RESERVED', attempt_id=rec['id']))
     aliases = sorted({e['alias'] for e in evidence})
     return {'scopes':members, 'alias':aliases[0] if len(aliases)==1 else None,
             'state':'CONFLICT' if len(aliases)>1 else 'BOUND' if any(e['state']=='BOUND' for e in evidence) else 'RESERVED' if aliases else 'UNBOUND',
@@ -103,7 +105,7 @@ def reserve(c, record):
 
 
 def commit(c, record):
-    if not record.get('job_id') or not owner(record) or not record.get('branch_scopes'):
+    if not has_execution_receipt(record) or not owner(record) or not record.get('branch_scopes'):
         return
     # A receipt binds the scopes reserved before dispatch. Later canvas edits
     # must not prevent monitoring an already submitted exact job.

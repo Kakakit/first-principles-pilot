@@ -59,14 +59,27 @@ def _doctor(receipt,runtime):
     with tarfile.open(fileobj=stream,mode='w:gz') as archive:
         archive.add(receipt['root'],arcname='package',filter=lambda info:None if '__pycache__' in info.name else info)
         archive.add(Path(__file__).with_name('extension_process.py'),arcname='extension-runner.py')
-    command='set -e\ndest='+remote_paths.shell_path(directory)+'\ntest ! -e "$dest"\nmkdir -p "$dest"\ntar -xzf - -C "$dest"\ncd "$dest"\nexport PYTHONDONTWRITEBYTECODE=1\n'+cli_command(runtime,receipt['manifest']['entrypoint'],'doctor',30)+'\n'
+    doctor_timeout = 30
+    from . import file_lifecycle, site_registration
+    key=directory.rsplit('/',1)[1]
+    asset=file_lifecycle.temporary(runtime['alias'],directory,key,site_registration.connection_identity(runtime['alias']),runtime['python'])
+    cleanup="trap 'status=$?; cd /; if test \"$status\" -eq 124; then : > \"$dest/.fpilot-doctor-unconfirmed\"; else rm -rf -- \"$dest\"; fi' EXIT\n"
+    lock="import fcntl,os,sys; f=open('.fpilot-doctor.lock','a'); fcntl.flock(f,fcntl.LOCK_EX); os.set_inheritable(f.fileno(),True); os.execl('/bin/sh','sh','-c',sys.argv[1])"
+    inner=('set -e\nprintf %s '+shlex.quote(key)+' > .fpilot-doctor-owner\ntar -xzf - -C .\n'
+           +'export PYTHONDONTWRITEBYTECODE=1\nexport OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1\n'
+           +cli_command(runtime,receipt['manifest']['entrypoint'],'doctor',doctor_timeout)+'\n')
+    command=('set -e\ndest='+remote_paths.shell_path(directory)+'\nmkdir -p -- "$(dirname -- "$dest")"\nmkdir -- "$dest"\n'+cleanup
+             +'cd "$dest"\n'+shlex.quote(runtime['python'])+' -c '+shlex.quote(lock)+' '+shlex.quote(inner)+'\n')
     try:
-        response=ex.ssh(runtime['alias'],command,stream.getvalue(),timeout=75)
+        response=ex.ssh(runtime['alias'],command,stream.getvalue(),timeout=doctor_timeout+45)
+        incomplete=response.get('exit_code') in (None,124) and response.get('transport_state')!='NOT_SENT'
+        file_lifecycle.finish_temporary(asset,incomplete,response.get('stderr'))
         if response.get('exit_code')!=0:raise ValueError(response.get('stderr') or '服务器环境检查失败')
         result=json.loads(response['stdout'])
         if result.get('schema')!='fpilot.extension-doctor.v2' or type(result.get('ready')) is not bool:raise ValueError('doctor 回执格式无效')
         return protocol.doctor_result(result,runtime['python'])
     except Exception as exc:
+        if 'response' not in locals():file_lifecycle.finish_temporary(asset,True,str(exc))
         return {'schema':'fpilot.extension-doctor.v2','ready':False,'python':runtime['python'],'missing':[],'reason':str(exc)[-1500:]}
 
 
@@ -134,18 +147,25 @@ def stage(record,directory,request):
     runtime=record['runtime'];remote_dir=analysis_directory(record)
     request=copy.deepcopy(request)
     request['output_dir']='__WORKDIR__/outputs';request['result_file']='__WORKDIR__/outputs/result.json'
-    copies=[]
+    copies=[];existing={}
     for role,items in request['inputs'].items():
         for index,item in enumerate(items):
             name=str(index)+'-'+role+'-'+item['name']; target='inputs/'+name
             if item.get('remote_path'):
-                source=remote_paths.shell_path(item['remote_path'])
-                expected=str(item['size_bytes'])+':'+str(item['mtime_epoch'])
-                copies += ['test -f '+source+'; test ! -L '+source,
-                           'before=$(stat -c \'%s:%Y\' -- '+source+'); test "$before" = '+shlex.quote(expected),
-                           'cp -- '+source+' '+shlex.quote(target),
-                           'test "$(stat -c \'%s:%Y\' -- '+source+')" = "$before"',
-                           'test "$(stat -c %s -- '+shlex.quote(target)+')" = '+str(item['size_bytes'])]
+                raw=remote_paths.validate_root(item['remote_path'])
+                identity=(raw,item['size_bytes'],item['mtime_epoch'])
+                if identity in existing:
+                    target=existing[identity]
+                else:
+                    existing[identity]=target
+                    source=remote_paths.shell_path(raw)
+                    expected=str(item['size_bytes'])+':'+str(item['mtime_epoch'])
+                    quoted=shlex.quote(target)
+                    copies += ['test -f '+source+'; test ! -L '+source,
+                               'before=$(stat -c \'%s:%Y\' -- '+source+'); test "$before" = '+shlex.quote(expected),
+                               'if cp --reflink=auto -- '+source+' '+quoted+'; then :; else cp -- '+source+' '+quoted+'; fi',
+                               'test "$(stat -c \'%s:%Y\' -- '+source+')" = "$before"',
+                               'test "$(stat -c %s -- '+quoted+')" = '+str(item['size_bytes'])]
             item['path']='__WORKDIR__/'+target
     protocol.atomic_json(directory/'request.remote.json',request)
     stream=io.BytesIO()
@@ -157,7 +177,7 @@ def stage(record,directory,request):
         if (directory/'inputs').exists(): archive.add(directory/'inputs',arcname='inputs')
     python=shlex.quote(runtime['python'])
     rewrite="import json,os; p='request.json'; v=json.load(open(p)); t=json.dumps(v).replace('__WORKDIR__',os.getcwd()); open(p,'w').write(t)"
-    command='set -e\ndest='+remote_paths.shell_path(remote_dir)+'\ntest ! -e "$dest"\nmkdir -p "$dest"\ntar -xzf - -C "$dest"\ncd "$dest"\nmkdir -p inputs outputs\n'+python+' -c '+shlex.quote(rewrite)+'\n'+'\n'.join(copies)+'\npwd -P\n'
+    command='set -e\ndest='+remote_paths.shell_path(remote_dir)+'\nmkdir -p -- "$(dirname -- "$dest")"\nmkdir -- "$dest"\ncd "$dest"\nprintf %s '+shlex.quote(record['id'])+' > .fpilot-analysis-owner\ntar -xzf - -C "$dest"\nmkdir -p inputs outputs\n'+python+' -c '+shlex.quote(rewrite)+'\n'+'\n'.join(copies)+'\npwd -P\n'
     receipt=ex.ssh(runtime['alias'],command,stream.getvalue(),timeout=180)
     if receipt.get('exit_code')!=0: raise ValueError('独立分析目录准备失败：'+receipt.get('stderr','')[-1000:])
     absolute=receipt['stdout'].strip().splitlines()[-1]
@@ -215,7 +235,7 @@ def source_pull(source,name,destination):
     from .safe_files import pull_many
     pull_many(source['alias'],[{'remote_path':path,'destination':str(destination)}],timeout=120)
     if destination.stat().st_size!=fact['size_bytes']:raise ValueError('来源文件回传大小变化，请重新准备')
-    return destination.read_bytes()
+    return destination
 
 
 def output_info(record,names):

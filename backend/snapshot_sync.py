@@ -198,3 +198,18 @@ def recover(pid):
         if value.get('purpose')=='upload' and fact['state']['version']==value.get('target_version'):value['version']=fact['state']['version']
         value.update(mode='SNAPSHOT',operation=None,error=None);write_json(sync.local_path(pid),value)
         return {**sync.status(pid),'message':'已核查回执；自动流程仍暂停，未重发上传或运行命令'}
+
+
+def cleanup_objects(pid,payload):
+    """Explicit cleanup of unpublished blobs, separate from transfer and version retention."""
+    if 'preview' not in payload:
+        config=location(payload['alias'],payload['snapshot_directory'])
+        result=sync.remote(config,'gc-preview',pid)
+        return {**result,'location':config}
+    preview=payload['preview']
+    config=location(preview['location']['alias'],preview['location']['snapshot_directory'])
+    selected=payload['selected']
+    if not isinstance(selected,list) or any(not isinstance(key,str) for key in selected) or not set(selected).issubset({entry['sha256'] for entry in preview['candidates']}):
+        raise ValueError('仅可选择已预览的未引用对象')
+    return sync.remote(config,'gc-remove',pid,selected=selected,state=preview['state'],server=preview['server'],
+                       device=sync.device()['id'],token=uuid.uuid4().hex)

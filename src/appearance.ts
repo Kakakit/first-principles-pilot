@@ -110,7 +110,7 @@ export function fontStack(english:string[],chinese:string[]):string {
   const names=[...new Set([...english.filter(n=>!generic.has(n)),...chinese.filter(n=>!generic.has(n)),...chinese.filter(n=>generic.has(n)),...english.filter(n=>generic.has(n))])];
   return names.map(n=>generic.has(n)||n.startsWith('-')?n:`"${n}"`).join(', ');
 }
-export type AppearanceState={selectedId:string;customThemes:ThemeDefinition[];notice:string};
+export type AppearanceState={selectedId:string;customThemes:ThemeDefinition[];notice:string;fontSize?:14|16|18};
 const initialState=():AppearanceState=>({selectedId:'celadon',customThemes:[],notice:''});
 export function restoreAppearance(raw:string|null):AppearanceState {
   if(!raw)return initialState();
@@ -120,7 +120,9 @@ export function restoreAppearance(raw:string|null):AppearanceState {
     if(new Set(customThemes.map(t=>t.id)).size!==customThemes.length)throw new Error();
     const selectedId=typeof value.selectedId==='string'?value.selectedId:'celadon';
     const exists=BUILTIN_THEMES.some(t=>t.id===selectedId)||customThemes.some(t=>`custom:${t.id}`===selectedId);
-    return {selectedId:exists?selectedId:'celadon',customThemes,notice:exists?'':'原主题不可用，已恢复明亮绿白主题'};
+    const fontSize=value.fontSize===14||value.fontSize===16||value.fontSize===18?value.fontSize:undefined;
+    return {selectedId:exists?selectedId:'celadon',customThemes,notice:exists?'':'原主题不可用，已恢复明亮绿白主题',
+      ...(fontSize?{fontSize}:{})};
   }catch{return {...initialState(),notice:'外观设置未能读取，已恢复明亮绿白主题；计算草稿不受影响'};}
 }
 let state=initialState();
@@ -128,7 +130,10 @@ const listeners=new Set<()=>void>();
 export const getAppearance=()=>state;
 export function subscribeAppearance(listener:()=>void){listeners.add(listener);return()=>{listeners.delete(listener);};}
 export function selectedTheme(preferences:AppearanceState=state):Theme {
-  const custom=preferences.customThemes.find(t=>`custom:${t.id}`===preferences.selectedId);return custom?resolveTheme(custom):builtinTheme(preferences.selectedId);
+  const custom=preferences.customThemes.find(t=>`custom:${t.id}`===preferences.selectedId);
+  const theme=custom?resolveTheme(custom):builtinTheme(preferences.selectedId);
+  const size=preferences.fontSize;
+  return size?{...theme,metrics:{...theme.metrics,fontSize:size,secondaryFontSize:size===18?16:size===16?14:13}}:theme;
 }
 export function applyTheme(theme:Theme,root:HTMLElement=document.documentElement) {
   root.dataset.appearance=theme.appearance;root.dataset.theme=theme.id;root.style.colorScheme=theme.appearance;
@@ -142,7 +147,7 @@ export function applyTheme(theme:Theme,root:HTMLElement=document.documentElement
 function notify(){applyTheme(selectedTheme());listeners.forEach(listener=>listener());window.dispatchEvent(new Event('fpilot:appearance-changed'));}
 function save(next:AppearanceState) {
   state={...next,notice:''};
-  try{localStorage.setItem(APPEARANCE_KEY,JSON.stringify({version:1,selectedId:state.selectedId,customThemes:state.customThemes}));}
+  try{localStorage.setItem(APPEARANCE_KEY,JSON.stringify({version:1,selectedId:state.selectedId,customThemes:state.customThemes,fontSize:state.fontSize}));}
   catch{state={...state,notice:'当前主题已应用，但浏览器未能保存外观设置；下次打开可能恢复默认'};}
   notify();
 }
@@ -155,6 +160,7 @@ export function chooseTheme(id:string){
   if(!BUILTIN_THEMES.some(t=>t.id===id)&&!state.customThemes.some(t=>`custom:${t.id}`===id))throw new Error('主题不存在');
   save({...state,selectedId:id});
 }
+export function chooseFontSize(fontSize:AppearanceState['fontSize']){save({...state,fontSize});}
 export function installTheme(text:string):Theme {
   const definition=parseTheme(text);const others=state.customThemes.filter(t=>t.id!==definition.id);
   if(others.length>=20)throw new Error('最多保存 20 个自定义主题，请先移除不用的主题');

@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from jsonschema import Draft7Validator
 from . import artifacts, execution as ex, extension_protocol as p, extension_remote as remote, extension_environments as environments
-from .recycle import is_recycled, inactive, assert_available
+from .recycle import is_recycled, inactive, assert_available, purged
 from .storage import ROOT, WorkspaceStore
 from .platform_runtime import exclusive_lock, process_alive, stop_child
 
@@ -50,7 +50,7 @@ def _presentation_record(record):
 
 
 def save(record):
-    if inactive('analyses',record['id'],record):return record
+    if purged('analyses',record['id']):return record
     record['updated_at']=now();p.atomic_json(directory(record['id'])/'analysis.json',record)
     if record['state'] not in ('DISPATCHING','RUNNING','SUBMITTED','UNKNOWN'):
         from .analysis_queue import notify
@@ -58,14 +58,14 @@ def save(record):
     return record
 
 
-def history(project_id=None,attempt_id=None):
+def history(project_id=None,attempt_id=None,include_recycled=False):
     base=ROOT/'analyses-v2';rows=[]
     for path in base.glob('*/analysis.json') if base.exists() else []:
         try:
             record=json.loads(path.read_text())
             if project_id and record['project_id']!=project_id:continue
             if attempt_id and not any(s.get('attempt_id')==attempt_id for s in record['sources']):continue
-            if not inactive('analyses',record['id'],record):
+            if include_recycled or not inactive('analyses',record['id'],record):
                 rows.append(_presentation_record(record))
         except (OSError,ValueError,KeyError):continue
     return sorted(rows,key=lambda r:r['created_at'],reverse=True)
@@ -115,6 +115,7 @@ def _stage(record):
     return record.get('stage_slug','unknown'),{}
 
 
+
 def _input_note(record):
     from .input_display import frozen_note
     return frozen_note(record, ROOT) or ''
@@ -159,6 +160,7 @@ def describe_sources(raw,project_id=None):
         elif value.get('kind')=='attempt':
             record=ex.get(value.get('attempt_id'))
             if record.get('recycled') or record.get('path_schema')!='fpilot.remote-attempt-path':raise ValueError('来源已回收或路径不受支持')
+            assert_available('attempts',record['id'],record)
             if project_id and record.get('project_id')!=project_id:raise ValueError('来源不属于当前项目')
             stage,model=_stage(record);listing=artifacts.listing(record['id'])
             rows.append({'id':record['id'],'kind':'attempt','attempt_id':record['id'],'node_id':record.get('node_id'),
@@ -227,7 +229,7 @@ def context(payload):
 
 
 def _input_request(record,dest):
-    inputs={r['role']:[] for r in record['manifest']['inputs']}
+    inputs={r['role']:[] for r in record['manifest']['inputs']};local_copies={}
     for index,source in enumerate(record['sources']):
         for role in record['manifest']['inputs']:
             fact=selected_input(role,source)
@@ -238,9 +240,15 @@ def _input_request(record,dest):
             item={'name':name,'source_id':source['id'],'path':str(target),'size_bytes':fact['size_bytes']}
             if source['kind']=='structure':target.write_text(source['poscar'])
             elif record['location']=='local':
-                raw=remote.source_pull(source,name,target)
-                if len(raw)!=fact['size_bytes']:raise ValueError('来源大小已变化，请重新选择后运行')
-                target.write_bytes(raw);item['sha256']=hashlib.sha256(raw).hexdigest()
+                identity=(source['alias'],source['remote_root'],name,fact['size_bytes'],fact['modified_at'])
+                if identity not in local_copies:
+                    remote.source_pull(source,name,target)
+                    digest=hashlib.sha256()
+                    with target.open('rb') as stream:
+                        for chunk in iter(lambda:stream.read(1024*1024),b''):
+                            digest.update(chunk)
+                    local_copies[identity]=(str(target),digest.hexdigest())
+                item['path'],item['sha256']=local_copies[identity]
             else:
                 item['remote_path']=source['remote_root'].rstrip('/')+'/'+name
                 item['mtime_epoch']=int(datetime.fromisoformat(fact['modified_at']).timestamp())
@@ -298,6 +306,12 @@ def _analysis_root(payload,sources,runtime):
 
 
 def start(payload):
+    from .attempt_operations import locked
+    keys={s['attempt_id'] for s in payload.get('sources',[]) if isinstance(s,dict) and isinstance(s.get('attempt_id'),str)}
+    with locked(keys):return _start(payload)
+
+
+def _start(payload):
     receipt=p.installed(payload['extension_id']);manifest=receipt['manifest']
     if not receipt['enabled']:raise ValueError('扩展已停用')
     options=p.options_for(manifest,payload.get('options') or {})
@@ -323,6 +337,8 @@ def start(payload):
             'extension_id':manifest['id'],'manifest':manifest,'revision':receipt['revision'],'sources':sources,'options':options,
             'location':location,'runtime':runtime,'runtime_doctor':environment,'state':'QUEUED','created_at':now(),'result':None,'outputs':[],
             'scientific_validation':'NOT_PERFORMED','verification':'小型本地输入内容身份；远端输入来源与大小/修改时间核验'}
+    from .file_lifecycle import _analysis_owner
+    record['owner_node_id']=_analysis_owner(record)
     if remote_binding:record['remote_analysis_root']=remote_binding['remote_analysis_root']
     save(record);schedule(key)
     return {'analysis_id':key,'state':'QUEUED'}
@@ -340,7 +356,7 @@ def schedule(key):
 
 
 def _complete(record):
-    assert_available('analyses',record['id'],record)
+    if purged('analyses',record['id']):return
     dest=directory(record['id']);path=dest/'outputs/result.json'
     if not path.is_file() or path.is_symlink() or path.stat().st_size>artifacts.MAX_PULL_BYTES:raise ValueError('缺少有界结果 JSON')
     result=json.loads(path.read_text());errors=list(Draft7Validator(RESULT_SCHEMA).iter_errors(result))
@@ -361,7 +377,7 @@ def _complete(record):
     p.atomic_json(path,result)
     record.update(state=result['status'],result=result,outputs=outputs,scientific_validation=result['scientific_validation'])
     save(record)
-    if record['state']=='COMPLETED' and record['manifest'].get('presentation'):
+    if record['state']=='COMPLETED' and record['manifest'].get('presentation') and not inactive('analyses',record['id'],record):
         from . import extension_presentations as views
         try:views.schedule(record['id'],frozen=True)
         except Exception as exc:
@@ -407,7 +423,6 @@ def _local(record):
         process=subprocess.Popen([python,str(p.inside(dest/'package',record['manifest']['entrypoint'])),'run','--request',str(dest/'request.json')],cwd=dest,stdout=stdout,stderr=stderr,start_new_session=True,env=subprocess_environment((record.get('runtime') or {}).get('cores')))
         with _process_lock:_local_processes[record['id']]=process
         try:
-            if inactive('analyses',record['id'],record):stop_local(record['id'])
             code=process.wait(timeout=record['manifest']['execution']['timeout_seconds'])
         except subprocess.TimeoutExpired:
             stopped=_stop_local_child(process)
@@ -493,16 +508,25 @@ def _remote(record):
     (dest/'launch.sh').write_text(text);record['script']=text
     shutil.copy2(Path(__file__).with_name('extension_process.py'),dest/'extension-runner.py')
     assert_available('analyses',record['id'],record)
-    record['remote_dir']=remote.stage(record,dest,request);save(record)
+    from .site_registration import connection_identity
+    record['remote_connection']=connection_identity(record['runtime']['alias'])
+    record['remote_dir_planned']=remote.analysis_directory(record)
+    record['remote_stage']='creating';save(record)
+    try:
+        record['remote_dir']=remote.stage(record,dest,request)
+    except Exception:
+        record['remote_stage']='partial';save(record)
+        raise
+    record['remote_stage']='ready';save(record)
     # A crash from here must never resubmit, even if job.id hasn't arrived yet.
-    record['submission_started']=True;save(record)
     assert_available('analyses',record['id'],record)
+    record['submission_started']=True;save(record)
     response=remote.direct(record);record['dispatch_receipt']=response;save(record);_refresh(record)
 
 
 def _execute(key):
     from .project_sync import dispatch_guard, locally_executable, SyncStopped
-    from .attempt_operations import AttemptBusy
+    from .attempt_operations import AttemptBusy, locked
     if inactive('analyses',key):return
     with lock(key) as owned:
         if not owned:return
@@ -510,7 +534,8 @@ def _execute(key):
         if inactive('analyses',key,record) or record['state'] not in ('QUEUED','WAIT_RESOURCE'):return
         if not locally_executable(record.get('project_id')):return
         try:
-            with dispatch_guard(record):
+            keys={s['attempt_id'] for s in record.get('sources',[]) if s.get('attempt_id')}
+            with dispatch_guard(record),locked(keys|{key}):
                 record=get(key)
                 if record['state'] not in ('QUEUED','WAIT_RESOURCE'):return
                 if record['location']=='local':_local(record)
@@ -541,8 +566,9 @@ def refresh(key):
 
 def tick():
     count=0
-    for record in history():
-        if record['state'] in ('QUEUED','WAIT_RESOURCE'):schedule(record['id']);count+=1
+    for record in history(include_recycled=True):
+        if record['state'] in ('QUEUED','WAIT_RESOURCE'):
+            if not inactive('analyses',record['id'],record):schedule(record['id']);count+=1
         elif record['location']!='local' and record['state'] in ACTIVE_REMOTE:
             refresh(record['id']);count+=1
         elif record['location']=='local' and record['state']=='RUNNING':

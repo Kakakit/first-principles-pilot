@@ -35,6 +35,7 @@ def tick(refresh=None, notify=False):
         rows=c.execute('SELECT body FROM attempts WHERE state IN ('+','.join('?' for _ in control.ACTIVE)+')',control.ACTIVE).fetchall()
     checked=0;errors=[]
     from . import remote_health,remote_transport
+    from .execution_modes import command_mode
     due=set(remote_health.due())
     # Hosts advance independently; a slow/unreachable host cannot hold other hosts.
     groups={}
@@ -47,11 +48,9 @@ def tick(refresh=None, notify=False):
         if alias in due:remote_transport.recover(alias)
         from . import remote_monitor
         live_records=[json.loads(row[0]) for row in host_rows]
-        scheduler=remote_monitor.batch([r for r in live_records if not recycle.inactive('attempts',r['id'],r)]) if custom_refresh is None else {}
-        for row in host_rows:
-            r=json.loads(row[0])
-            if r.get('config',{}).get('scheduler')=='custom':continue
-            if recycle.inactive('attempts',r['id'],r):continue
+        scheduler=remote_monitor.batch([r for r in live_records if command_mode(r.get('config',{})) is None]) if custom_refresh is None else {}
+        for r in live_records:
+            if command_mode(r.get('config',{}))=='opaque':continue
             if r['state']=='DISPATCHING':
                 try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(r['dispatch_started_at'])).total_seconds()
                 except (KeyError,ValueError):age=181
@@ -63,7 +62,7 @@ def tick(refresh=None, notify=False):
                 updated=refresh(r['id']) if custom_refresh is not None else ex.refresh(r['id'],poll_receipt=scheduler.get(r['id']),automatic=True)
                 checked+=1
                 if updated['state']=='FAILED':control.freeze_failure(r['id'])
-                if notify and updated['state'] in ('FAILED','COMPLETED'):notify_terminal(r['id'])
+                if notify and updated['state'] in ('FAILED','COMPLETED') and not recycle.inactive('attempts',r['id'],r):notify_terminal(r['id'])
             except Exception as exc:
                 if recycle.inactive('attempts',r['id'],r):continue
                 message=control.redact(str(exc))[:1000]
@@ -105,6 +104,9 @@ def tick(refresh=None, notify=False):
     from . import extension_runs
     try:extension_runs.tick()
     except Exception as exc:errors.append({'batch':'analysis','message':control.redact(str(exc))[:1000]})
+    from . import file_lifecycle
+    try:file_lifecycle.tick()
+    except Exception as exc:errors.append({'batch':'remote-cleanup','message':control.redact(str(exc))[:1000]})
     return {'checked':checked,'errors':errors}
 
 

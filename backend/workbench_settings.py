@@ -50,6 +50,7 @@ def save(value):
         previous['workspace_root']=new_directory(value['workspace_root'],previous.get('workspace_root'))
     if 'runtime' in value:
         config=servers.validate(value['runtime'])
+        config.pop('command_mode', None)  # The registered host owns the default.
         program=value.get('program','vasp_std')
         if program not in ('vasp_std','vasp_ncl','wannier90'):raise ValueError('程序类型无效')
         key=config['alias']+':'+program

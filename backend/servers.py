@@ -76,6 +76,7 @@ def _runtime_record(host, variant='vasp_std'):
 
 
 def _registered_profile(alias, host, variant='vasp_std'):
+    from .execution_modes import command_mode
     runtime = _runtime_record(host, variant)
     ncl_runtime = next((item for item in host.get('runtimes', []) if isinstance(item,dict)
                         and item.get('variant') == 'vasp_ncl'), None)
@@ -155,6 +156,8 @@ def _registered_profile(alias, host, variant='vasp_std'):
     return {
         'alias': alias,
         'scheduler': host.get('scheduler', ''),
+        **({'command_mode': command_mode(host), 'direct_limit': host.get('direct_limit', 1)}
+           if command_mode(host) else {}),
         'queue': queue,
         'variant': runtime_variant or variant,
         'status': host_status,
@@ -223,6 +226,8 @@ def select_profile(alias, variant='vasp_std'):
     }
     if host.get('runtime_source')=='script':
         config.update(runtime_source='script',program=variant,vasp_executable=variant)
+    if selected.get('command_mode'):
+        config['command_mode'] = selected['command_mode']
     if host.get('remote_workspace_root'):config['remote_workspace_root']=host['remote_workspace_root']
     return config
 
@@ -241,7 +246,10 @@ def default_config():
 
 
 def validate(config):
+    from .execution_modes import validate_mode
+    mode = validate_mode(config)
     extra = {k:config[k] for k in ('remote_workspace_root','runtime_source','program','template_id','script_templates','resource_request','script_edit_mode','pyw90_python','pyw90_package','resource_policy') if config.get(k)}
+    explicit_mode = 'command_mode' in config
     config = {k: config.get(k, '') for k in DEFAULT}
     config.update(extra)
     if config.get('resource_policy','wait_idle') not in ('wait_idle','scheduler_queue'):raise ValueError('资源提交方式无效')
@@ -259,7 +267,9 @@ def validate(config):
             raise ValueError('SSH 配置中没有该明确别名，请先配置本机 SSH')
     scheduler = normalize_scheduler(config['scheduler'])
     if scheduler == 'custom':
-        config.update(runtime_source='script',program=config.get('program') or 'vasp_std',vasp_executable=config.get('program') or 'vasp_std')
+        if explicit_mode:
+            config['command_mode'] = mode
+        config.update(scheduler='custom',runtime_source='script',program=config.get('program') or 'vasp_std',vasp_executable=config.get('program') or 'vasp_std')
         return config
     if config.get('runtime_source') not in (None,'registered','script'):raise ValueError('运行方式无效')
     script_mode=config.get('runtime_source')=='script'
@@ -368,19 +378,28 @@ def capacity_config(config):
 
 
 def runtime_config(config):
+    from .execution_modes import is_direct
     result=capacity_config(config)
     result['runtime_source']=config.get('runtime_source','registered')
+    if is_direct(config):
+        result['command_mode'] = 'direct'
     if result['runtime_source']!='script':
         result.update({k:config.get(k,'') for k in ('mpi_executable','vasp_executable','environment_script','module','launcher','runtime_environment','pmi_library','pmi_type')})
     return result
 
 
 def read_config():
+    from .execution_modes import command_mode
     path = ROOT/'server-config.json'
     config=json.loads(path.read_text(encoding='utf-8')) if path.exists() else default_config()
     removed_alias=None
-    if config.get('alias') not in load_registry()['hosts']:
+    hosts = load_registry()['hosts']
+    if config.get('alias') not in hosts:
         removed_alias=config.get('alias');config=default_config()
+    elif command_mode(hosts[config['alias']]):
+        config['command_mode'] = command_mode(hosts[config['alias']])
+    else:
+        config.pop('command_mode', None)
     latest=None
     for probe_path in sorted((ROOT/'server-probes').glob('*'),key=lambda p:p.stat().st_mtime,reverse=True):
         raw=probe_path.read_bytes()

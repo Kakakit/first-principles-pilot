@@ -462,7 +462,15 @@ def dependency_snapshot(bundle_id, manifest, files, upstream_attempt_id, alias, 
         raise ValueError('上游缺少 VASP timing 或报告了非零退出，依赖任务不推进')
     if manifest['stage'] in ('dos','bands','vasp-wannier') and evidence.get('ediff_reached') is not True:
         raise ValueError('固定电荷下游需要已确认电子收敛的 SCF 来源')
-    if not re.fullmatch(r'\d+(?:\.[A-Za-z0-9_.-]+)?',str(parent.get('job_id') or '')):
+    from .execution_modes import is_direct, has_execution_receipt
+    if is_direct(parent['config']):
+        if not has_execution_receipt(parent) or not evidence.get('output_sanity'):
+            raise ValueError('上游直接任务缺少可核对的运行回执或有效结束证据')
+        if manifest['stage'] in ('dos','bands','vasp-wannier'):
+            from .source_contracts import electronic
+            if not electronic(evidence):
+                raise ValueError('固定电荷下游需要已确认最终电子收敛的 SCF 来源')
+    elif not re.fullmatch(r'\d+(?:\.[A-Za-z0-9_.-]+)?',str(parent.get('job_id') or '')):
         raise ValueError('上游没有可核对的精确 job ID，依赖任务不推进')
     if parent.get('config',{}).get('alias') != alias:
         raise ValueError('依赖文件仅可在同一登记主机内复用')
@@ -596,7 +604,10 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
             raise ValueError('attempt 目录结构不受支持，不能重试')
         if parent['state'] not in ('FAILED','COMPLETED','CANCELLED','PREPARED'):
             raise ValueError('在途任务请先核查；UNKNOWN 使用明确确认的恢复入口')
-    from . import workbench_settings
+    from . import workbench_settings, execution_modes
+    mode = execution_modes.validate_mode(config)
+    if 'command_mode' in config and mode is None:
+        config = {k:v for k,v in config.items() if k != 'command_mode'}
     if template_id is None:
         template_id=servers.selected_template(config)
     if config.get('runtime_source')=='script' and template_id:
@@ -917,7 +928,9 @@ def submit(key):
     # Fresh resource probe before every dispatch; unchanged rendered resources required.
     from . import fast_dispatch
     fast=fast_dispatch.enabled(record)
-    fresh={'id':record['probe_id']} if fast or record['config'].get('resource_policy')=='scheduler_queue' else servers.capacity_probe(record['config'])
+    from .execution_modes import is_direct
+    direct = is_direct(record['config'])
+    fresh={'id':record['probe_id']} if fast or direct or record['config'].get('resource_policy')=='scheduler_queue' else servers.capacity_probe(record['config'])
     checked_config = record['config']
     if not record.get('template_snapshot') and not checked_config.get('runtime_source'):
         checked_config = {**checked_config, 'runtime_source': 'registered'}
@@ -987,6 +1000,8 @@ def submit(key):
         fast_dispatch.clear_previous_dispatch(record)
         dispatch_timeout=900 if any(item['mode']=='reflink-or-copy' for item in record.get('source_file_plan',{}).values()) else 180
         record.update(state='DISPATCHING',dispatch_started_at=now(),final_probe_id=fresh['id'],dispatch_timeout_seconds=dispatch_timeout)
+        if direct:
+            record['command_run_id'] = key
         control.journal(c,key,'DISPATCHING',{'node':record['node'],'cores':record['profile'].get('ppn',record['profile'].get('ntasks'))})
         c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(record,ensure_ascii=False),key));c.commit()
     scheduler=scheduler_name(record)
@@ -1043,11 +1058,16 @@ cat .job-id
 '''
     if scheduler=='custom':
         command=command.replace(' > .job-id',' > _fpilot/command-start.json').replace("printf 'FPILOT_JOB_ID='\ncat .job-id",'cat _fpilot/command-start.json')
+    if direct:
+        command=(fast_dispatch.stage_receipt_prefix()
+                 + command.replace('mkdir "$dest"', 'mkdir "$dest"\nfpilot_created=1')
+                 .replace('printf \'FPILOT_SUBMIT_PHASE=SCHEDULER', 'fpilot_submitting=1\nprintf \'FPILOT_SUBMIT_PHASE=SCHEDULER')
+                 .replace('cat _fpilot/command-start.json','printf "FPILOT_DIRECT_START="\ncat _fpilot/command-start.json'))
     if fast:
         command=fast_dispatch.prefix(record)+command.replace('mkdir "$dest"','mkdir "$dest"\nfpilot_created=1').replace(submit_command+' > .job-id','fpilot_submitting=1\n'+submit_command+' > .job-id')
     try:
         receipt=ssh(record['config']['alias'],command,stream.getvalue(),timeout=dispatch_timeout)
-        if (fast or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return get(key)
+        if (fast or direct or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return get(key)
         if scheduler=='custom':
             from .custom_commands import dispatch_result
             return dispatch_result(record,receipt)
@@ -1093,10 +1113,44 @@ def remember_file_status(record,receipt):
     if files:record['status_file_snapshot']={'output':files.group(1),'stamp':base64.b64decode(files.group(2)).decode()}
 
 
+def vasp_file_evidence_command():
+    return '''if test -f OUTCAR; then
+  printf 'FPILOT_TIMING='; grep -c 'General timing and accounting informations' OUTCAR || true
+  printf 'FPILOT_EDIFF='; grep -c 'aborting loop because EDIFF is reached' OUTCAR || true
+  printf 'FPILOT_IONIC='; awk '/Iteration[[:space:]]+[0-9]+[[:space:]]*\\([[:space:]]*[0-9]+[[:space:]]*\\)/{converged=0} /reached required accuracy/{converged=1} END{print converged+0}' OUTCAR
+fi
+if test -f vasp.out; then
+  printf 'FPILOT_MPI_SINGLETON='; grep -c 'PMI server not found' vasp.out || true
+fi
+if test -f INCAR && test -f OSZICAR; then
+  printf 'FPILOT_IONIC_STEP='; awk '/^[[:space:]]*[0-9]+[[:space:]]+F=/{n=$1} END{print n+0}' OSZICAR
+  ediff=$(awk 'BEGIN{IGNORECASE=1} /^[[:space:]]*EDIFF[[:space:]]*=/{gsub(/[!#].*/,"",$0); split($0,a,"="); gsub(/[[:space:]]/,"",a[2]); value=a[2]} END{print value}' INCAR)
+  last=$(awk '/^[[:space:]]*(DAV|RMM):/{step=$2; de=$4; deps=$5} END{if(step!="") print step"|"de"|"deps}' OSZICAR)
+  if test -n "$ediff" && test -n "$last"; then
+    printf 'FPILOT_EDIFF_NUMERIC=%s|%s\n' "$ediff" "$last"
+  fi
+fi
+'''
+
+
+def vasp_file_evidence(out):
+    def count(field):
+        match = re.search(r'^FPILOT_' + field + r'=(\d+)', out, re.M)
+        return int(match.group(1)) if match else None
+
+    timing = count('TIMING') or 0
+    singleton = count('MPI_SINGLETON') or 0
+    ionic = count('IONIC')
+    return {'vasp_timing': timing > 0, 'timing_count': timing,
+            'mpi_singleton_count': singleton, 'output_sanity': timing == 1 and singleton == 0,
+            **electronic_evidence(out), 'ionic_converged': ionic == 1 if ionic is not None else None,
+            'last_ionic_step': count('IONIC_STEP')}
+
+
 def refresh(key, poll_receipt=None, automatic=False):
-    if recycle.inactive('attempts',key,get(key)):return get(key)
     record=get(key)
-    if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN'):
+    if not automatic and recycle.inactive('attempts',key,record):return record
+    if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN', 'RETRYABLE'):
         from .execution_cancel import recover
         recover(record['project_id'], key)
         return get(key)
@@ -1152,23 +1206,7 @@ def refresh(key, poll_receipt=None, automatic=False):
 cd {path} || exit 3
 if test -s .job-id; then printf 'FPILOT_JOB_ID='; cat .job-id; fi
 if test -s .exit-status; then printf 'FPILOT_EXIT='; cat .exit-status; fi
-if test -f OUTCAR; then
-  printf 'FPILOT_TIMING='; grep -c 'General timing and accounting informations' OUTCAR || true
-  printf 'FPILOT_EDIFF='; grep -c 'aborting loop because EDIFF is reached' OUTCAR || true
-  printf 'FPILOT_IONIC='; awk '/Iteration[[:space:]]+[0-9]+[[:space:]]*\\([[:space:]]*[0-9]+[[:space:]]*\\)/{{converged=0}} /reached required accuracy/{{converged=1}} END{{print converged+0}}' OUTCAR
-fi
-if test -f vasp.out; then
-  printf 'FPILOT_MPI_SINGLETON='; grep -c 'PMI server not found' vasp.out || true
-fi
-if test -f INCAR && test -f OSZICAR; then
-  printf 'FPILOT_IONIC_STEP='; awk '/^[[:space:]]*[0-9]+[[:space:]]+F=/{{n=$1}} END{{print n+0}}' OSZICAR
-  ediff=$(awk 'BEGIN{{IGNORECASE=1}} /^[[:space:]]*EDIFF[[:space:]]*=/{{gsub(/[!#].*/,"",$0); split($0,a,"="); gsub(/[[:space:]]/,"",a[2]); value=a[2]}} END{{print value}}' INCAR)
-  last=$(awk '/^[[:space:]]*(DAV|RMM):/{{step=$2; de=$4; deps=$5}} END{{if(step!="") print step"|"de"|"deps}}' OSZICAR)
-  if test -n "$ediff" && test -n "$last"; then
-    printf 'FPILOT_EDIFF_NUMERIC=%s|%s\n' "$ediff" "$last"
-  fi
-fi
-'''
+''' + vasp_file_evidence_command()
     # Reuse file evidence while metadata is unchanged, but still query terminal scheduler receipts.
     if automatic:
         command=file_status_command(record,path,command,['OUTCAR','OSZICAR','INCAR','vasp.out','.exit-status','.job-id'])
@@ -1197,15 +1235,8 @@ fi
     state_match=re.search(r'job_state\s*=\s*([A-Z])',out)
     slurm_live=re.search(r'^FPILOT_SLURM_LIVE=([A-Z_+]+)',out,re.M)
     slurm_account=re.search(r'^FPILOT_SLURM_ACCOUNT=([A-Z_+]+)\|([^\s]+)',out,re.M)
-    timing_match=re.search(r'^FPILOT_TIMING=(\d+)',out,re.M)
-    timing_count=int(timing_match.group(1)) if timing_match else 0
-    timing=timing_count > 0
-    singleton_match=re.search(r'^FPILOT_MPI_SINGLETON=(\d+)',out,re.M)
-    singleton_count=int(singleton_match.group(1)) if singleton_match else 0
-    output_sanity=timing_count == 1 and singleton_count == 0
-    electronic = electronic_evidence(out)
-    ionic_match = re.search(r'^FPILOT_IONIC=(\d+)', out, re.M)
-    ionic_step_match = re.search(r'^FPILOT_IONIC_STEP=(\d+)', out, re.M)
+    file_evidence = vasp_file_evidence(out)
+    timing, output_sanity = file_evidence['vasp_timing'], file_evidence['output_sanity']
     trace_exit, trace_complete = pbs_history_evidence(out) if scheduler == 'pbs' else (None, False)
     state='UNKNOWN'
     if exit_match:
@@ -1231,11 +1262,7 @@ fi
                      slurm_live.group(1) if slurm_live else
                      slurm_account.group(1) if slurm_account else None)
     record.update(state=state,status_receipt=receipt,updated_at=now(),state_checked_at=now(),tracking_error='',
-                  evidence={'wrapper_exit':int(exit_match.group(1)) if exit_match else None,'vasp_timing':timing,
-                            'timing_count':timing_count,'mpi_singleton_count':singleton_count,
-                            'output_sanity':output_sanity,**electronic,
-                            'ionic_converged': int(ionic_match.group(1)) == 1 if ionic_match else None,
-                            'last_ionic_step': int(ionic_step_match.group(1)) if ionic_step_match else None,
+                  evidence={'wrapper_exit':int(exit_match.group(1)) if exit_match else None,**file_evidence,
                             'scheduler':scheduler,'scheduler_state':scheduler_state,
                             'scheduler_evidence_source':'tracejob' if trace_complete else 'qstat' if state_match else 'sacct' if slurm_account else None,
                             'scheduler_exit_code':slurm_account.group(2) if slurm_account else None,
@@ -1256,4 +1283,3 @@ def retry(key,probe_id,node,cores=None,reason=''):
 
 from .fast_prepare import batched as _batched_prepare
 prepare = _batched_prepare(prepare, 'vasp')
-

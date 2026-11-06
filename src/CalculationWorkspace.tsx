@@ -12,8 +12,9 @@ import ExecutionPanel from './ExecutionPanel';
 import WannierPanel from './WannierPanel';
 import ScanPanel from './ScanPanel';
 
+type Part='physics'|'source'|'files';
 type Props={
-  onProject:(project:Project)=>void;project:Project;nodeId:string;view:'config'|'run';bundleId?:string;
+  onProject:(project:Project)=>void;project:Project;nodeId:string;view:'config'|'run';bundleId?:string;configPart?:Part;onConfigPart?:(part:Part)=>void;
   onLayer:(nodeId:string|null,layer:ParameterLayer)=>void;
   onTemplates:(templates:NonNullable<NonNullable<Project['parameters']>['templates']>)=>void;
   onSource:(nodeId:string,value:SourceDraft)=>void;
@@ -24,14 +25,16 @@ type Props={
   onWannierDraft:(nodeId:string,key:string,value:import('./wannierDraft').WannierDraft)=>void;
   onWindowChange:(value:WindowDraft)=>void;onWindowAdopt:(value:WindowAdoption)=>void;
   onScanDraft:NonNullable<Parameters<typeof ScanPanel>[0]['onDraft']>;
-  onReview:(bundleId?:string)=>void;onConfigure:()=>void;initialAttemptId?:string;onAttemptChange?:(id:string)=>void;onResults:(nodeId:string,attemptId:string)=>void;
+  onReview:(bundleId?:string)=>void;onConfigure:()=>void;initialAttemptId?:string;onAttemptChange?:(id:string,reason:'user'|'default'|'replace')=>void;onResults:(nodeId:string,attemptId:string)=>void;
 };
 
 export default function CalculationWorkspace(props:Props) {
   const {project,nodeId,view,onReview,onConfigure}=props;
   const node=project.nodes.find(item=>item.id===nodeId)!;
   useEffect(()=>{if(node.data.executionMode==='vasp'&&!['structure','scan','wannier90'].includes(node.data.kind)&&!node.data.sourceDraft){const parent=project.nodes.find(n=>n.id===project.edges.find(e=>e.target===nodeId)?.source);props.onSource(nodeId,{mode:parent&&parent.data.kind!=='structure'?'upstream':'new',purpose:'charge',files:'charge'});}},[nodeId]);
-  const [part,setPart]=useSubmissionDraft<'physics'|'source'|'files'>('config:'+project.id+':'+nodeId+':part','physics');
+  const [localPart,setLocalPart]=useSubmissionDraft<Part>('config:'+project.id+':'+nodeId+':part','physics');
+  const part=props.configPart||localPart;
+  const setPart=props.onConfigPart||setLocalPart;
   if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   if(node.data.kind==='scan')return <IndependentScanWorkspace {...props}/>;
   return <div className="calculation-workspace">

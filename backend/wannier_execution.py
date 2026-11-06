@@ -211,6 +211,9 @@ def _builtin(alias):
 
 
 def _render_script(config, profile, template_id):
+    from .execution_modes import is_direct
+    if is_direct(config):
+        raise ValueError('直接运行目前支持单个 VASP 任务；Wannier90 可使用已支持的调度器或自定义命令')
     scheduler = servers.normalize_scheduler(config['scheduler'])
     resources = ex.template_resources(profile)
     if template_id is None:
@@ -841,4 +844,3 @@ def _source_singleflight(function):
 
 inspect=_source_singleflight(inspect)
 discover=_source_singleflight(discover)
-

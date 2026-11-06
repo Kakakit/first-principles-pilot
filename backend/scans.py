@@ -43,7 +43,6 @@ def incar_tag(raw):
     return raw.strip().upper()
 
 
-
 def incar_value(tag, raw):
     """Use the existing INCAR parser; one list item is exactly one assignment."""
     if not isinstance(raw, str) or not raw.strip() or len(raw.encode()) > 20000 or any(c in raw for c in '\r\n\0'):
@@ -54,7 +53,6 @@ def incar_value(tag, raw):
     if malformed or len(entries) != 1 or entries[0]['tag'] != tag or entries[0]['value'] != value:
         raise ValueError('每个列表项只能包含当前 tag 的值，不能另写赋值、注释或未闭合的引号')
     return value
-
 
 
 def axis(dimension, stage):
@@ -419,6 +417,8 @@ def freeze(project, scan_node_id, base_node_id, dimensions, reason, expected_def
 
 
 def resource_preview(batch_id, project_id, config, candidates):
+    from .execution_modes import require_batch_scheduler
+    require_batch_scheduler(config)
     batch = get(batch_id)
     if batch['project_id'] != project_id or batch['state'] != 'FROZEN':
         raise ValueError('请选择当前项目的冻结批次')
@@ -430,7 +430,8 @@ def resource_preview(batch_id, project_id, config, candidates):
 
 
 def authorize(batch_id, project_id, case_table_hash, config, node='', cores=None, reason='', approved_script='', approved_profile=None, template_id=None, dependency_attempt_id=None, dependency_reason='', candidates=None, approved_previews=None, max_parallel=None):
-    if config.get('scheduler')=='custom':raise ValueError('自定义命令仅手动运行，本轮不自动推进计算链或迭代')
+    from .execution_modes import require_batch_scheduler
+    require_batch_scheduler(config)
     batch = get(batch_id)
     from . import wannier_scans
     if wannier_scans.is_window(batch):

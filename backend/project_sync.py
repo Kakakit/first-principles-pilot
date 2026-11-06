@@ -61,7 +61,7 @@ def remote(config, action, pid=None, data=b'', **values):
     if config.get('snapshot_directory'):request['snapshot_directory']=True
     if pid is not None:request['project_id'] = pid
     receipt = ex.ssh(config['alias'], command, snapshot.packed(request) + b'\n' + data,
-                     timeout=180, stdout_limit=4 * 1024 * 1024, mutating=action not in ('status', 'catalog', 'missing', 'get', 'attempt', 'versions'))
+                     timeout=180, stdout_limit=4 * 1024 * 1024, mutating=action not in ('status', 'catalog', 'missing', 'get', 'attempt', 'versions','gc-preview'))
     if receipt.get('exit_code') is None or receipt.get('stdout_truncated'):
         from .execution_control import redact
         detail=redact(receipt.get('stderr',''))[-600:]

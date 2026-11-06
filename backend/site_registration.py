@@ -129,6 +129,7 @@ def register(value):
 
 
 def _register(value):
+    from .execution_modes import validate_mode, direct_limit
     alias=value.get('alias','')
     if not isinstance(alias,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}',alias):raise ValueError('请输入 SSH config 中的明确别名，只允许英文、数字、点、横线与下划线')
     if alias not in ssh_aliases():
@@ -158,6 +159,9 @@ def _register(value):
         'python':{'known_interpreter':value.get('python','')},'remote_workspace_root':remote_root,
         'registration_evidence':'USER_CONFIGURATION_ONLY','program_validation':'NOT_PERFORMED'}
     if script_mode:host['runtime_source']='script'
+    if scheduler == 'custom':
+        host.update(command_mode=validate_mode({**value, 'scheduler': scheduler}),
+                    direct_limit=direct_limit(value.get('direct_limit', 1)))
     host['pyw90']={'python':value.get('pyw90_python',''),'package':value.get('pyw90_package','')}
     from . import servers
     current=servers.load_registry(include_removed=True)['hosts'].get(alias)
@@ -250,8 +254,14 @@ def test_connection(alias, python='', remote_workspace_root=None):
 
 def update_paths(alias, value):
     from . import servers, remote_paths
+    from .execution_modes import command_mode, validate_mode, direct_limit
     with host_operation(alias), registry_operation():
         host=dict(servers.load_registry()['hosts'][alias])
+        if command_mode(host):
+            if 'command_mode' in value:
+                host['command_mode'] = validate_mode({**host, 'command_mode': value['command_mode']})
+            if 'direct_limit' in value:
+                host['direct_limit'] = direct_limit(value['direct_limit'])
         if 'remote_workspace_root' in value:
             if not value['remote_workspace_root']: raise ValueError('请填写服务器默认工作区绝对路径')
             host['remote_workspace_root']=remote_paths.new_directory(value['remote_workspace_root'],host.get('remote_workspace_root'))

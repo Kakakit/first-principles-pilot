@@ -420,7 +420,8 @@ def freeze(project, node_ids, reason, expected_definition_hash, source_alias=Non
 
 def authorize(run_id, project_id, plan_hash, mismatch_hash, config, resources, approved_previews,
               _initial_request_hash=None):
-    if config.get('scheduler')=='custom':raise ValueError('自定义命令仅手动运行，本轮不自动推进计算链或迭代')
+    from .execution_modes import require_batch_scheduler
+    require_batch_scheduler(config)
     run = get(run_id)
     recycle.assert_available('chains',run['id'],run)
     run.pop('local_cleanup_blocker',None)
@@ -518,6 +519,8 @@ def _node_config(config, choice):
 
 
 def resource_preview(run_id, project_id, config, resources):
+    from .execution_modes import require_batch_scheduler
+    require_batch_scheduler(config)
     run = get(run_id)
     if run['state'] != 'FROZEN' or run['project_id'] != project_id or set(resources) != set(run['node_ids']):
         raise ValueError('请选择当前冻结计算链的逐节点资源')

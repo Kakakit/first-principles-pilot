@@ -94,6 +94,13 @@ def snapshot_location(project_id: str, payload: dict):
     except (ValueError,OSError,KeyError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
+@app.post('/api/projects/{project_id}/sync/cleanup-objects')
+def snapshot_cleanup_objects(project_id: str, payload: dict):
+    from .snapshot_sync import cleanup_objects
+    try:return cleanup_objects(project_id,payload)
+    except (ValueError,OSError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
 @app.post('/api/analyses/{analysis_id}/resume')
 def resume_paused_analysis(analysis_id: str):
     from . import extension_runs
@@ -728,7 +735,7 @@ class WannierProbe(BaseModel):
 
 class WannierPreview(BaseModel):
     config: dict
-    probe_id: str
+    probe_id: str = ''
     node: str
     cores: Optional[int] = None
     resource_reason: str = ''
@@ -751,7 +758,7 @@ class WannierPrepare(BaseModel):
     node_id: str
     parent_id: str
     config: dict
-    probe_id: str
+    probe_id: str = ''
     node: str
     cores: Optional[int] = None
     resource_reason: str = ''
@@ -795,7 +802,7 @@ class WannierPlotPrepare(BaseModel):
     source_id: str
     band_id: str
     proposal: dict
-    probe_id: str
+    probe_id: str = ''
     node: str
     cores: Optional[int] = None
     resource_reason: str = ''
@@ -976,6 +983,70 @@ def local_analysis_output(key: str, name: str):
 @app.get('/api/recycle')
 def recycle_all():
     return recycle.all_items()
+
+
+@app.post('/api/cleanup/preview')
+def cleanup_preview(payload: dict):
+    from . import file_lifecycle
+    try:return file_lifecycle.preview(payload.get('kind'),payload.get('key'),payload.get('project_id'))
+    except (ValueError,OSError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/cleanup')
+def cleanup_execute(payload: dict, background_tasks: BackgroundTasks):
+    from . import file_lifecycle
+    try:
+        receipt=file_lifecycle.execute(payload.get('kind'),payload.get('key'),payload.get('project'),
+                                       payload.get('project_id'),payload.get('asset_ids'))
+        if receipt['assets']:background_tasks.add_task(file_lifecycle.tick)
+        return receipt
+    except (ValueError,OSError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/cleanup')
+def cleanup_assets():
+    from . import file_lifecycle
+    return file_lifecycle.list_assets()
+
+
+@app.post('/api/cleanup/assets')
+def cleanup_retained(payload: dict, background_tasks: BackgroundTasks):
+    from . import file_lifecycle
+    try:
+        receipt=file_lifecycle.queue(payload.get('asset_ids'),check_operation=payload.get('check_operation'))
+        if receipt['assets']:background_tasks.add_task(file_lifecycle.tick)
+        return receipt
+    except (ValueError,OSError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/cleanup/check')
+def cleanup_check(background_tasks: BackgroundTasks):
+    from . import file_lifecycle
+    background_tasks.add_task(file_lifecycle.tick)
+    return {'queued':True}
+
+
+@app.post('/api/cleanup/assets/{asset_id}/recovery-preview')
+def cleanup_recovery_preview(asset_id: str):
+    from . import file_lifecycle
+    try:return file_lifecycle.preview_recovery(asset_id)
+    except (ValueError,OSError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/cleanup/assets/{asset_id}/recover')
+def cleanup_recover(asset_id: str, payload: dict, background_tasks: BackgroundTasks):
+    from . import file_lifecycle
+    try:
+        receipt=file_lifecycle.confirm_recovery(asset_id,payload.get('token'))
+        background_tasks.add_task(file_lifecycle.tick)
+        return receipt
+    except (ValueError,OSError,KeyError,TypeError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/cleanup/{operation}')
+def cleanup_status(operation: str):
+    from . import file_lifecycle
+    return file_lifecycle.operation_status(operation)
 
 
 @app.post('/api/recycle/empty')
@@ -1205,7 +1276,9 @@ class WorkspaceSave(BaseModel):
 @app.get('/api/workspace')
 def read_workspace():
     try:
-        return WorkspaceStore().read()
+        result=WorkspaceStore().read()
+        view=recycle.workspace_after_recycle(result.get('workspace'))
+        return {**result,'workspace':view,'recycled_empty':bool(view and not view['projects'])}
     except Exception as exc:
         raise HTTPException(503, f'本机工作区不可读：{str(exc)[:300]}') from exc
 
@@ -1263,7 +1336,7 @@ class ExecutionPrepare(BaseModel):
     template_id: Optional[str] = None
     bundle_id: str
     config: dict
-    probe_id: str
+    probe_id: str = ''
     node: str
     cores: Optional[int] = None
     reason: str = ''
@@ -1311,7 +1384,7 @@ def execution_snapshot(key: str):
     except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
 
 class ExecutionRetry(BaseModel):
-    probe_id: str
+    probe_id: str = ''
     node: str
     cores: Optional[int] = None
     reason: str = ''
@@ -1524,6 +1597,27 @@ def preview_execution_path(payload: PathPreview):
         raise HTTPException(422,str(exc)) from exc
 
 
+@app.post('/api/projects/{project_id}/directory-preview')
+def preview_project_directory(project_id: str, payload: dict):
+    from . import remote_paths, servers
+    try:
+        project = payload['project']
+        if project['id'] != project_id:
+            raise ValueError('项目身份不一致')
+        alias = payload.get('alias', '')
+        hosts = servers.load_registry()['hosts']
+        if alias and alias not in hosts:
+            raise ValueError('请选择已登记的服务器')
+        if not project.get('remoteWorkspaceRoot') and not (project.get('remoteDirectories') or {}).get(alias) and not alias:
+            return {'path': None, 'source': 'server'}
+        root, relative = remote_paths.project_location(project, alias, hosts.get(alias, {}).get('remote_workspace_root') or '$HOME')
+        source = ('override' if (project.get('remoteDirectories') or {}).get(alias)
+                  else 'project' if project.get('remoteWorkspaceRoot') else 'server')
+        return {'path': remote_paths.project_path(root, relative), 'source': source}
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise HTTPException(422,str(exc)) from exc
+
+
 @app.get('/api/execution')
 def execution_history(project_id: Optional[str]=None, view: str='full', limit: int=50, cursor: Optional[str]=None, node_id: Optional[str]=None):
     if view=='summary':
@@ -1604,6 +1698,7 @@ class TaskCancelRequest(BaseModel):
     project_id: str
     token: Optional[str] = None
     confirm: bool = False
+    retry: bool = False
 
 
 @app.post('/api/execution/{key}/cancel-preview')
@@ -1616,7 +1711,7 @@ def preview_task_cancel(key: str, payload: TaskCancelRequest):
 @app.post('/api/execution/{key}/cancel')
 def cancel_task(key: str, payload: TaskCancelRequest):
     from . import execution_cancel
-    try: return execution_cancel.cancel(payload.project_id, key, payload.token, payload.confirm)
+    try: return execution_cancel.cancel(payload.project_id, key, payload.token, payload.confirm, retry=payload.retry)
     except (ValueError, OSError) as exc: raise HTTPException(422, str(exc)) from exc
 
 
@@ -1640,7 +1735,7 @@ class ServerConfig(BaseModel):
 
 
 class ServerPreview(ServerConfig):
-    probe_id: str
+    probe_id: str = ''
     node: str
     cores: Optional[int] = None
     reason: str = ''
@@ -1990,6 +2085,13 @@ def local_setup_save(payload:dict):
     except (OSError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
+@app.patch('/api/local-setup')
+def local_setup_update(payload:dict):
+    from . import local_setup
+    try:return local_setup.save(payload, partial=True)
+    except (OSError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
 @app.get('/api/sites')
 def site_records():
     from . import site_registration
@@ -2040,11 +2142,11 @@ def site_test_connection(payload:dict):
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 
-
 @app.get('/api/execution/{key}/command-output')
-def command_output(key: str, run_id: Optional[str]=None, stdout_offset: int=0, stderr_offset: int=0):
+def command_output(key: str, run_id: Optional[str]=None, stdout_offset: int=0, stderr_offset: int=0,
+                   stdout_token: str='', stderr_token: str='', tail: bool=False):
     from . import custom_commands
-    try: return custom_commands.read(key,run_id,stdout_offset,stderr_offset)
+    try: return custom_commands.read(key,run_id,stdout_offset,stderr_offset,stdout_token,stderr_token,tail)
     except (ValueError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
 
 

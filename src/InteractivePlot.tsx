@@ -1,4 +1,8 @@
 import {usePageVisible} from './usePageVisible';
+import {errorMessage,requestJson,requestTimeouts} from './apiClient';
+import {pollSerial} from './pollSerial';
+import {useRequestScope} from './useRequestScope';
+import {useSubmissionDraft} from './useSubmissionDraft';
 import {attemptLabel} from './humanLabels';
 import {memo,useEffect,useMemo,useRef,useState} from 'react';
 import * as echarts from 'echarts';
@@ -16,8 +20,11 @@ type CacheMeta={id:string;remote_parts?:Record<string,unknown>;band_attempt_id?:
 type Job={id:string;state:string;downloaded_bytes:number;total_bytes:number;available_bytes?:number;current_file?:string;error?:string;metadata?:CacheMeta};
 type Trace={element:string;orbital:string;weights?:number[][][];values?:number[][]};
 type PlotData={band?:{spins:number;x:number[];breaks:number[];ticks:Array<{x:number;label:string}>;energies:number[][][];traces:Trace[];reference:BandReference};dos?:{spins:number;energy:number[];total:number[][];traces:Trace[];reference:BandReference};compatible:boolean;compatibility_note:string};
+type PlotDraft={bandId:string;dosId:string;selected:string[]|null;emin:number;emax:number;pointSize:number;title:string};
 
-async function api(url:string,body?:unknown,signal?:AbortSignal){const response=await fetch(url,{signal,method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const value=await response.json();if(!response.ok)throw new Error(typeof value.detail==='string'?value.detail:'绘图请求失败');return value;}
+const api=(url:string,body?:unknown,signal?:AbortSignal)=>requestJson(url,body,undefined,{signal});
+const activePlotStates=['GENERATING','DOWNLOADING','PARSING'];
+const emptySelection:string[]=[];
 const groups:Record<string,string[]>={s:['s'],p:['px','py','pz'],d:['dxy','dyz','dz2','dxz','dx2-y2']};
 const label=(spin:number)=>spin===0?'Spin up':'Spin down';
 const bytes=(value:number)=>value<1048576?`${(value/1024).toFixed(1)} KiB`:`${(value/1048576).toFixed(1)} MiB`;
@@ -129,16 +136,27 @@ function dosOption(data:NonNullable<PlotData['dos']>,emin:number,emax:number,com
           yAxis:{type:'value',name:'E − E_F',min:emin,max:paddedEnergyMax(emin,emax),axisLine:{show:true},splitLine:{show:true}},series} as echarts.EChartsOption;
 }
 
-function InteractivePlot({project,initialBandId='',initialDosId='',compact=false}:{project:Project;initialBandId?:string;initialDosId?:string;compact?:boolean}){
+function InteractivePlot({project,initialBandId='',initialDosId='',compact=false,draftNodeId}:{project:Project;initialBandId?:string;initialDosId?:string;compact?:boolean;draftNodeId?:string}){
   const visible=usePageVisible();
   const projectId=project.id;
-  const [candidates,setCandidates]=useState<Candidate[]>([]),[bandId,setBandId]=useState(initialBandId),[dosId,setDosId]=useState(initialDosId);
+  const draftKey=draftNodeId?`plot:${projectId}:${draftNodeId}:${initialBandId}:${initialDosId}`:null;
+  const [draft,setDraft]=useSubmissionDraft<PlotDraft>(draftKey,{bandId:initialBandId,dosId:initialDosId,selected:null,emin:-4,emax:4,pointSize:0.5,title:''});
+  const {bandId,dosId,emin,emax,pointSize,title}=draft;
+  const selected=draft.selected??emptySelection;
+  const updateDraft=(patch:Partial<PlotDraft>)=>setDraft(current=>({...current,...patch}));
+  const requests=useRequestScope(JSON.stringify([projectId,bandId,dosId]));
+  const [candidates,setCandidates]=useState<Candidate[]>([]);
   const [job,setJob]=useState<Job|null>(null),[data,setData]=useState<PlotData|null>(null);
-  const [selected,setSelected]=useState<string[]>([]),[emin,setEmin]=useState(-4),[emax,setEmax]=useState(4);
-  const [pointSize,setPointSize]=useState(0.5);
-  const [error,setError]=useState(''),[message,setMessage]=useState(''),[title,setTitle]=useState('');
+  const [error,setError]=useState(''),[message,setMessage]=useState('');
+  const [pollError,setPollError]=useState(''),[pollRevision,setPollRevision]=useState(0),[preparing,setPreparing]=useState(false);
+  const jobId=job?.id;
+  const running=activePlotStates.includes(job?.state||'');
   const exporting=useRef(false),[saving,setSaving]=useState(false);
-  const seriesQueue=useRef<{running:boolean;pending?:()=>Promise<void>}>({running:false});
+  const seriesQueue=useRef<{running:boolean;pending?:()=>Promise<void>;controller?:AbortController}>({running:false});
+  useEffect(()=>{
+    const queue=seriesQueue.current;
+    return ()=>{queue.pending=undefined;queue.controller?.abort();};
+  },[]);
 
   const candidateLabel=(item:Candidate)=>{
     if('input_note' in item)return attemptLabel(item,project)+' · '+item.host;
@@ -149,17 +167,37 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
   };
   useEffect(()=>{const controller=new AbortController();void api(`/api/interactive-plots/candidates?project_id=${encodeURIComponent(projectId)}`,undefined,controller.signal).then(value=>{if(!controller.signal.aborted)setCandidates(value.attempts);}).catch(caught=>{if(!controller.signal.aborted)setError((caught as Error).message);});return()=>controller.abort();},[projectId]);
   useEffect(()=>{
-    let cancelled=false;const controller=new AbortController();setData(null);setJob(null);
-    if(bandId||dosId){const query=new URLSearchParams({project_id:projectId});if(bandId)query.set('band_attempt_id',bandId);if(dosId)query.set('dos_attempt_id',dosId);
-      void api(`/api/interactive-plots/cached?${query}`,undefined,controller.signal).then(value=>{if(!cancelled&&value.state==='READY')setJob(value);}).catch(caught=>{if(!cancelled)setError((caught as Error).message);});}
-    return ()=>{cancelled=true;controller.abort();};
-  },[bandId,dosId,projectId]);
+    setData(null);
+    setJob(null);
+    setError('');
+    setPollError('');
+    setPollRevision(0);
+    setPreparing(false);
+    if(!bandId&&!dosId)return;
+    const request=requests.start('selection');
+    const query=new URLSearchParams({project_id:projectId});
+    if(bandId)query.set('band_attempt_id',bandId);
+    if(dosId)query.set('dos_attempt_id',dosId);
+    void api(`/api/interactive-plots/cached?${query}`,undefined,request.signal)
+      .then(value=>{if(request.current()&&value.state!=='ABSENT')setJob(value);})
+      .catch(caught=>{if(request.current())setError(errorMessage(caught));});
+  },[requests]);
   useEffect(()=>{
-    if(!visible||!job||!['GENERATING','DOWNLOADING','PARSING'].includes(job.state))return;
-    const controller=new AbortController();
-    const timer=window.setTimeout(()=>void api(`/api/interactive-plots/${job.id}/status`,undefined,controller.signal).then(value=>{if(!controller.signal.aborted)setJob(value);}).catch(caught=>{if(!controller.signal.aborted)setError((caught as Error).message);}),1000);
-    return ()=>{controller.abort();window.clearTimeout(timer);};
-  },[job,visible]);
+    if(!visible||!jobId||!running)return;
+    const request=requests.start('status');
+    const stop=pollSerial(async()=>{
+      const value:Job=await api(`/api/interactive-plots/${encodeURIComponent(jobId)}/status`,undefined,request.signal);
+      if(!request.current())return;
+      setJob(value);
+      setPollError('');
+      if(!activePlotStates.includes(value.state))stop();
+    },caught=>{
+      if(!request.current())return;
+      const message=errorMessage(caught);
+      setPollError(message.startsWith('本次请求等待超时')?'等待状态响应超时。':message);
+    },1000,pollRevision?0:1000);
+    return ()=>{stop();requests.cancel('status');};
+  },[requests,jobId,running,visible,pollRevision]);
   const meta=job?.metadata;
   const available=useMemo(()=>{
     const elements=[...new Set([...(meta?.band?.elements||[]),...(meta?.dos?.elements||[])])];
@@ -169,7 +207,7 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
   const legendGroups=useMemo(()=>available.map(({element})=>({element,orbitals:selected.filter(item=>item.startsWith(`${element}|`)).map(item=>item.split('|')[1])})).filter(group=>group.orbitals.length),[available,selected]);
   useEffect(()=>{
     if(job?.state!=='READY'||!meta)return;
-    if(!selected.length){const defaults=[key('Fe','d'),key('Cr','d'),key('O','p')].filter(value=>{const [element,group]=value.split('|');return available.some(item=>item.element===element&&(item.orbitals.includes(group)||groups[group]?.some(name=>item.orbitals.includes(name))))});setSelected(defaults);}
+    if(draft.selected===null){const defaults=[key('Fe','d'),key('Cr','d'),key('O','p')].filter(value=>{const [element,group]=value.split('|');return available.some(item=>item.element===element&&(item.orbitals.includes(group)||groups[group]?.some(name=>item.orbitals.includes(name))))});updateDraft({selected:defaults});}
   },[job?.state,meta,available]);
   useEffect(()=>{
     if(!visible||job?.state!=='READY'||!Number.isFinite(emin)||!Number.isFinite(emax)||emin>=emax)return;
@@ -177,15 +215,46 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
     const remote=Boolean(meta?.remote_parts&&Object.keys(meta.remote_parts).length);
     const run=async()=>{
       const queue=seriesQueue.current;
-      queue.pending=async()=>{if(cancelled)return;try{const value=await api('/api/interactive-plots/series',{cache_id:job.id,selected:selected.map(item=>{const [element,orbital]=item.split('|');return {element,orbital};}),emin,emax},controller.signal);if(!cancelled)setData(value);}catch(caught){if(!cancelled)setError((caught as Error).message);}};
+      queue.pending=async()=>{
+        if(cancelled)return;
+        queue.controller=controller;
+        try{
+          const value=await api('/api/interactive-plots/series',{cache_id:job.id,selected:selected.map(item=>{const [element,orbital]=item.split('|');return {element,orbital};}),emin,emax},controller.signal);
+          if(!cancelled)setData(value);
+        }catch(caught){if(!cancelled)setError(errorMessage(caught));}
+        finally{queue.controller=undefined;}
+      };
       if(queue.running)return;queue.running=true;
       try{while(queue.pending){const request=queue.pending;queue.pending=undefined;await request();}}finally{queue.running=false;}
     };
     const timer=window.setTimeout(()=>void run(),remote?500:120);
     return ()=>{cancelled=true;if(!remote)controller.abort();window.clearTimeout(timer);};
   },[visible,job?.state,job?.id,selected,emin,emax]);
-  const prepare=async(force=false)=>{setError('');if(force)setData(null);try{setJob(await api('/api/interactive-plots/prepare',{project_id:projectId,band_attempt_id:bandId||null,dos_attempt_id:dosId||null,force}));}catch(caught){setError((caught as Error).message);}};
-  const toggle=(item:string)=>{setData(null);setSelected(old=>old.includes(item)?old.filter(value=>value!==item):[...old,item]);};
+  const prepare=async(force=false)=>{
+    const request=requests.start('selection');
+    setPreparing(true);
+    setError('');
+    setPollError('');
+    if(force)setData(null);
+    try{
+      const value=await requestJson('/api/interactive-plots/prepare',{project_id:projectId,band_attempt_id:bandId||null,dos_attempt_id:dosId||null,force},undefined,{signal:request.signal,timeoutMs:requestTimeouts.remote});
+      if(request.current())setJob(value);
+    }catch(caught){if(request.current())setError(errorMessage(caught));}
+    finally{if(request.current())setPreparing(false);}
+  };
+  const selectSource=(patch:Pick<PlotDraft,'bandId'>|Pick<PlotDraft,'dosId'>)=>{
+    requests.cancel();
+    setJob(null);
+    setData(null);
+    updateDraft(patch);
+  };
+  const toggle=(item:string)=>{
+    setData(null);
+    setDraft(current=>{
+      const items=current.selected??emptySelection;
+      return {...current,selected:items.includes(item)?items.filter(value=>value!==item):[...items,item]};
+    });
+  };
   const save=async()=>{
     if(!job||!data||exporting.current)return;
     exporting.current=true;setSaving(true);
@@ -225,19 +294,20 @@ function InteractivePlot({project,initialBandId='',initialDosId='',compact=false
     return items;
   },[data,emin,emax,pointSize,componentColor,compact]);
   return <section className="input-submit-card interactive-plot-workspace"><h3>内置交互式 fatband／PDOS</h3>
-    <div className="parameter-grid"><label className="field">已完成能带 attempt<select value={bandId} onChange={e=>setBandId(e.target.value)}><option value="">不显示 fatband</option>{candidates.filter(item=>item.stage==='bands').map(item=><option key={item.id} value={item.id} title={attemptLabel(item,project,true)}>{candidateLabel(item)}</option>)}</select></label><label className="field">已完成 DOS attempt<select value={dosId} onChange={e=>setDosId(e.target.value)}><option value="">不显示 PDOS</option>{candidates.filter(item=>item.stage==='dos').map(item=><option key={item.id} value={item.id} title={attemptLabel(item,project,true)}>{candidateLabel(item)}</option>)}</select></label></div>
+    <div className="parameter-grid"><label className="field">已完成能带 attempt<select value={bandId} onChange={e=>selectSource({bandId:e.target.value})}><option value="">不显示 fatband</option>{candidates.filter(item=>item.stage==='bands').map(item=><option key={item.id} value={item.id} title={attemptLabel(item,project,true)}>{candidateLabel(item)}</option>)}</select></label><label className="field">已完成 DOS attempt<select value={dosId} onChange={e=>selectSource({dosId:e.target.value})}><option value="">不显示 PDOS</option>{candidates.filter(item=>item.stage==='dos').map(item=><option key={item.id} value={item.id} title={attemptLabel(item,project,true)}>{candidateLabel(item)}</option>)}</select></label></div>
     {(bandId||dosId)&&<p>来源：{candidates.filter(item=>item.id===bandId||item.id===dosId).map(item=>`${candidateLabel(item)} · ${item.scf_attempt_id?'使用相连 SCF 参考':'使用本任务参考'}`).join('；')}</p>}
-    <button className="button primary" disabled={!bandId&&!dosId||job?.state==='GENERATING'||job?.state==='DOWNLOADING'||job?.state==='PARSING'} onClick={()=>void prepare()}>{job?.state==='READY'?'使用本机绘图缓存':'准备本地绘图数据'}</button>
-    {job?.state==='READY'&&<button className="button" onClick={()=>void prepare(true)}>刷新远端来源</button>}
+    <button className="button primary" disabled={!bandId&&!dosId||preparing||running} onClick={()=>void prepare()}>{preparing?'正在准备绘图数据…':job?.state==='READY'?'使用本机绘图缓存':'准备本地绘图数据'}</button>
+    {job?.state==='READY'&&<button className="button" disabled={preparing} onClick={()=>void prepare(true)}>刷新远端来源</button>}
     {job&&<p role="status">{job.state} · {bytes(job.downloaded_bytes||0)} / {bytes(job.total_bytes||0)} · 本机可用 {job.available_bytes?bytes(job.available_bytes):'未记录'} {job.current_file||''}{job.error&&` · ${job.error}`}</p>}
+    {pollError&&<div><p role="alert" className="structure-error">绘图状态暂时读取失败，稍后会继续查询。{pollError}</p><button className="button" type="button" onClick={()=>setPollRevision(value=>value+1)}>重新读取状态</button></div>}
     {meta&&<><p>{meta.sources.length} 个来源文件 · 绘图数据已保存到本机</p><p>能带 E_F：{meta.band?.energy_reference.fermi_eV??'未选'} eV；DOS E_F：{meta.dos?.energy_reference.fermi_eV??'未选'} eV。各图按各自来源归零。</p><details><summary>本机文件大小与来源</summary>{meta.sources.map((source,index)=><p key={index}>{source.name} · {bytes(source.size_bytes)} · <code>{source.local_path}</code></p>)}</details>{meta.dos?.projection_note&&<p className="handoff-warning">{meta.dos.projection_note}</p>}{meta.compatibility_note&&<p className="handoff-warning">{meta.compatibility_note}</p>}
-      {meta.band&&<BandEdges reference={meta.band.energy_reference}/>}<div className="parameter-grid"><label className="field">能量下界 E−E_F / eV<input type="number" step="0.1" value={emin} onChange={e=>{setData(null);setEmin(Number(e.target.value));}}/></label><label className="field">能量上界 E−E_F / eV<input type="number" step="0.1" value={emax} onChange={e=>{setData(null);setEmax(Number(e.target.value));}}/></label></div>
-      {meta.band&&<label className="field fatband-point-size">彩点大小 · {pointSize.toFixed(1)} 倍<input type="range" min="0.1" max="1.5" step="0.1" value={pointSize} onChange={e=>setPointSize(Number(e.target.value))}/></label>}
+      {meta.band&&<BandEdges reference={meta.band.energy_reference}/>}<div className="parameter-grid"><label className="field">能量下界 E−E_F / eV<input type="number" step="0.1" value={emin} onChange={e=>{setData(null);updateDraft({emin:Number(e.target.value)});}}/></label><label className="field">能量上界 E−E_F / eV<input type="number" step="0.1" value={emax} onChange={e=>{setData(null);updateDraft({emax:Number(e.target.value)});}}/></label></div>
+      {meta.band&&<label className="field fatband-point-size">彩点大小 · {pointSize.toFixed(1)} 倍<input type="range" min="0.1" max="1.5" step="0.1" value={pointSize} onChange={e=>updateDraft({pointSize:Number(e.target.value)})}/></label>}
       <div className="orbital-selector">{available.map(({element,orbitals})=><fieldset key={element}><legend>{element}</legend>{Object.entries(groups).map(([group,components])=><div key={group}><label><input type="checkbox" checked={selected.includes(key(element,group))} disabled={!components.some(name=>orbitals.includes(name))&&!orbitals.includes(group)} onChange={()=>toggle(key(element,group))}/>{group}-all</label><div className="orbital-components">{components.filter(name=>group!=='s').map(name=><label key={name}><input type="checkbox" checked={selected.includes(key(element,name))} disabled={!orbitals.includes(name)} onChange={()=>toggle(key(element,name))}/>{name}</label>)}</div></div>)}</fieldset>)}</div>
     </>}
     {data&&<div className={`interactive-plot-panels${data.band?.spins===1?' single-channel':''}`}>{plotBuilders.map(plot=><article key={plot.id} className={plot.id==='dos'?'interactive-dos-panel':''}><h4>{plot.title}</h4><DeferredChart build={plot.build} height={plot.height}/></article>)}</div>}
     {data&&<div className="plot-color-legend" aria-label="元素与轨道颜色图例">{legendGroups.map(group=><div className="plot-legend-group" key={group.element}><strong>{group.element}</strong>{group.orbitals.map(orbital=><span key={orbital}><i className="plot-legend-dot" style={{backgroundColor:componentColor(group.element,orbital)}}/>{orbital==='p'?'p-all':orbital==='d'?'d-all':orbital}</span>)}</div>)}{(data.band?.spins===2||data.dos?.spins===2)&&<small>自旋：实线／圆点为 up，虚线／三角为 down；颜色由元素和轨道决定。</small>}</div>}
-    {data&&<><label className="field">图片标题<input value={title} onChange={e=>setTitle(e.target.value)} placeholder="例如 CrFeO 投影能带与 DOS"/></label><button className="button primary" disabled={saving} onClick={()=>void save()}>{saving?'正在保存…':'保存当前图与曲线数据'}</button></>}
+    {data&&<><label className="field">图片标题<input value={title} onChange={e=>updateDraft({title:e.target.value})} placeholder="例如 CrFeO 投影能带与 DOS"/></label><button className="button primary" disabled={saving} onClick={()=>void save()}>{saving?'正在保存…':'保存当前图与曲线数据'}</button></>}
     {message&&<p role="status">{message}</p>}{error&&<p role="alert" className="structure-error">{error}</p>}
   </section>;
 }
