@@ -174,9 +174,12 @@ def _check(asset,record,recycling_analyses=()):
         refs=_attempt_dependents(key,recycling_analyses)
         if refs:return '仍有来源引用 · '+'、'.join(refs[:8])
     elif kind=='analyses':
-        if (record or asset.get('target') or {}).get('state') not in ANALYSIS_END:
+        analysis=record or asset.get('target') or {}
+        if analysis.get('state') not in ANALYSIS_END:
             return '等待分析结束并确认终态'
         if not re.fullmatch(r'[a-f0-9]{32}',key) or not asset['path'].endswith('/'+key):
+            if analysis.get('adopted_completed_analysis') is True and analysis.get('original_analysis_remote_path'):
+                return '这是补登记的分析，记录引用外部结果。原始分析目录不属于此回收操作。'
             return '不是已登记的独立分析目录'
         try:
             if remote_paths.validate_root(asset['path'])!=asset['path']:return '目录路径无法核对'
@@ -192,7 +195,9 @@ def _target(record,kind):
             'path_version','remote_relative_path','project_id','kind','attempt_path','remote_project_relative',
             'settings_snapshot','remote_project_path_absolute','remote_path','remote_path_policy',
             'project_slug','stage_slug','stage_sequence','flow_slug','stage_segment','path_schema_version')
-    if kind=='analyses':fields=('id','state','runtime','location','remote_dir','remote_dir_planned')
+    if kind=='analyses':
+        fields=('id','state','runtime','location','remote_dir','remote_dir_planned',
+                'adopted_completed_analysis','original_analysis_remote_path')
     return {k:record[k] for k in fields if k in record}
 
 
@@ -215,6 +220,7 @@ def preview(kind,key,project_id=None):
     else:raise ValueError('此记录类型没有远端目录清理入口')
     recycling_analyses={key for kind,key in candidates if kind=='analyses'}
     assets=[]
+    remote_note=None
     for owner_kind,owner_key in candidates:
         if owner_kind not in OWNERS:continue
         record=_record(owner_kind,owner_key)
@@ -224,7 +230,11 @@ def preview(kind,key,project_id=None):
         if asset:
             saved=_stored(asset['id'])
             assets.append({**_public(saved or asset),'blocked':_check(asset,record,recycling_analyses)})
-    return {'kind':kind,'key':key,'records':[{'kind':k,'key':v} for k,v in candidates],'assets':assets}
+        elif kind=='analyses' and record.get('location')=='local':
+            remote_note='这次分析在本机运行，结果只保存在本机。'
+    plan={'kind':kind,'key':key,'records':[{'kind':k,'key':v} for k,v in candidates],'assets':assets}
+    if remote_note:plan['remote_note']=remote_note
+    return plan
 
 
 def queue(asset_ids,allowed=None,check_operation=None):

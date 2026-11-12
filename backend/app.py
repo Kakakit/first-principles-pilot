@@ -419,6 +419,41 @@ def scan_authorize(batch_id: str, payload: ScanAuthorization):
     except (ValueError,KeyError,TypeError,OSError) as exc: raise HTTPException(422,str(exc)) from exc
 
 
+@app.get('/api/scans/{batch_id}/manifest')
+def scan_manifest(batch_id: str, project_id: str, format: Literal['json', 'csv', 'zip'] = 'json'):
+    from fastapi.responses import Response
+    from . import batch_manifest
+    try:
+        content, media_type, name = batch_manifest.export(batch_id, project_id, format)
+        return Response(content, media_type=media_type,
+                        headers={'Content-Disposition': 'attachment; filename="' + name + '"'})
+    except (ValueError, OSError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/api/artifact-refs')
+def artifact_catalog(project_id: str, producer_kind: Literal['attempt', 'analysis'], producer_id: str):
+    from . import artifact_refs
+    try:
+        return artifact_refs.catalog(project_id, producer_kind, producer_id)
+    except (ValueError, OSError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+class ArtifactResolution(BaseModel):
+    project_id: str
+    reference: dict
+
+
+@app.post('/api/artifact-refs/resolve')
+def artifact_resolve(payload: ArtifactResolution):
+    from . import artifact_refs
+    try:
+        return artifact_refs.resolve(payload.project_id, payload.reference)
+    except (ValueError, OSError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 class ScanResources(BaseModel):
     project_id: str
     config: dict

@@ -69,6 +69,10 @@ def start(payload:dict):return call(runs.start,payload)
 @router.get('/analyses')
 def history(project_id:str=None,attempt_id:str=None):return {'analyses':call(runs.history,project_id,attempt_id)}
 
+@router.get('/project-artifacts')
+def project_artifacts(project_id:str,producer:str,name:str):
+    return {'artifacts':call(runs.project_artifacts,project_id,producer,name)}
+
 @router.get('/analyses/{key}')
 def analysis(key:str):return call(runs.get,key)
 

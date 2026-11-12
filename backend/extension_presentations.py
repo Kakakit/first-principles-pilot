@@ -56,22 +56,29 @@ def schedule(key,frozen=False):
         previous=current(key)
         if not owned:return previous
         if previous and previous.get('status')=='GENERATING' and process_alive(previous.get('owner_pid')):return previous
+        presentation=receipt['manifest']['presentation']
+        frozen_presentation=record.get('manifest',{}).get('presentation') or {}
+        # A renderer moving to source-side generation can still declare the
+        # local inputs it supports for historical, already collected results.
+        local_legacy=bool(presentation.get('inputs')) and (
+            frozen_presentation.get('location')=='local' or (previous or {}).get('location')=='local')
+        local_renderer=presentation.get('location')=='local' or local_legacy
+        python=(record.get('runtime') or {}).get('python') or __import__('sys').executable
+        if local_renderer:
+            from .extension_environments import resolve
+            python=resolve(record['extension_id'],'local')['python']
         with _lock:
             if key in _pending:return previous
             _pending.add(key)
         version=uuid.uuid4().hex;dest=root(key)/version;dest.mkdir()
         view={'id':version,'status':'GENERATING','version':receipt['manifest']['version'],
-              'created_at':runs.now(),'owner_pid':os.getpid(),'python':(record.get('runtime') or {}).get('python') or __import__('sys').executable}
-        presentation=receipt['manifest']['presentation']
-        view['location']='local' if presentation.get('location')=='local' or record['location']=='local' else 'source'
-        if presentation.get('location')=='local':
-            from .extension_environments import resolve
-            view['python']=resolve(record['extension_id'],'local')['python']
+              'created_at':runs.now(),'owner_pid':os.getpid(),'python':python,
+              'location':'local' if local_renderer or record['location']=='local' else 'source'}
         view['inputs']=presentation.get('inputs')
         if previous and previous.get('status')=='READY':
             view['previous_id']=previous['id']
             old_state=state(key,previous['id'])
-            if old_state['revision']:p.atomic_json(dest/'state.json',old_state)
+            if old_state['revision'] or old_state['value']:p.atomic_json(dest/'state.json',old_state)
         p.atomic_json(dest/'view.json',view);p.atomic_json(root(key)/'current.json',view)
     try:
         shutil.copytree(receipt['root'],dest/'package',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))

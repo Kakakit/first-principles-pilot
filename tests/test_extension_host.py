@@ -46,6 +46,43 @@ class ExtensionHostTests(unittest.TestCase):
         self.assertEqual(runs.get(record['id'])['state'],'COMPLETED')
         self.assertTrue(runs.output(record['id'],'elements.csv')[0].is_file())
         self.assertEqual((package/'fixtures/POSCAR').read_text(),(TEMPLATE/'fixtures/POSCAR').read_text())
+    def test_remote_timeout_reports_the_stage_that_did_not_finish(self):
+        doctor = {'schema':'fpilot.extension-doctor.v2','ready':True,'missing':[]}
+        check = {'schema':'fpilot.extension-check.v2','status':'APPLICABLE','reason':'ready'}
+        for diagnosis, applicable, expected in [
+            (None, None, '环境自检超时'),
+            (doctor, None, '检查分析输入超时'),
+            (doctor, check, '执行分析超时'),
+        ]:
+            with self.subTest(expected=expected):
+                receipt = {'exit':{'exit_code':124},'doctor':diagnosis,'check':applicable}
+                record = {'id':'a'*32,'location':'ssh','runtime':{'python':sys.executable}}
+                with patch.object(remote,'inspect',return_value=receipt):
+                    refreshed = runs._refresh(record)
+                self.assertEqual(refreshed['state'],'FAILED')
+                self.assertIn(expected,refreshed['error'])
+    def test_completed_remote_run_can_retry_collection_without_dispatch(self):
+        key='a'*32
+        record={'id':key,'state':'FAILED','location':'ssh','exit_code':0,'remote_dir':'/work/analysis'}
+        with patch.object(runs,'get',return_value=record), patch.object(remote,'inspect',return_value={'exit':{'exit_code':0}}), patch.object(remote,'output_info',return_value={'result.json':{'size_bytes':11*1024**2}}), patch.object(remote,'pull') as pull:
+            updated=runs.refresh(key)
+        pull.assert_not_called()
+        self.assertIn('结果摘要 result.json 为 11.0 MiB',updated['error'])
+        self.assertEqual(updated['exit_code'],0)
+    def test_project_artifact_listing_uses_only_available_same_project_outputs(self):
+        key='b'*32
+        target=runs.directory(key)/'outputs'/'identity.json'
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b'{}')
+        record={'id':key,'project_id':'project-a','created_at':'2026-11-07',
+                'state':'COMPLETED','extension_id':'sample-analysis','manifest':{},
+                'sources':[{'attempt_id':'source-a','name':'frozen attempt'}],
+                'outputs':[{'path':target.name,'available':True,'size_bytes':2}]}
+        runs.save(record)
+        self.assertEqual(runs.project_artifacts('project-a','sample-analysis',target.name)[0]['sources'],record['sources'])
+        self.assertEqual(runs.project_artifacts('project-b','sample-analysis',target.name),[])
+        target.write_bytes(b'changed')
+        self.assertEqual(runs.project_artifacts('project-a','sample-analysis',target.name),[])
     def test_zip_one_action_and_no_external_schema(self):
         stream=io.BytesIO()
         with zipfile.ZipFile(stream,'w') as archive:
@@ -89,6 +126,7 @@ class ExtensionHostTests(unittest.TestCase):
         self.stack.enter_context(patch.object(ex,'get',side_effect=lambda key:{'id':key,'project_id':'project','node_id':'node-'+key,'stage':stage,'state':state,'config':{'alias':'jutai-1'},'path_schema':'fpilot.remote-attempt-path','remote_project_path_absolute':'/workspace/project','evidence':evidence}))
         self.stack.enter_context(patch.object(ex,'attempt_path',return_value={'root':'/workspace','relative':'source','shell':'/workspace/source'}))
         self.stack.enter_context(patch.object(artifacts,'listing',side_effect=lambda key:{'files':[{'name':name,'path':name,'size_bytes':len(data),'modified_at':'2026-10-01T00:00:00+00:00'} for name,data in files[key].items()]}))
+        self.stack.enter_context(patch.object(artifacts,'refresh',side_effect=lambda key:{'files':[{'name':name,'path':name,'size_bytes':len(data),'modified_at':'2026-10-01T00:00:00+00:00'} for name,data in files[key].items()]}))
         def pull(source,name,target):raw=files[source['attempt_id']][name];target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw);return raw
         self.stack.enter_context(patch.object(remote,'source_pull',side_effect=pull))
     def test_two_sources_preserve_result_units_and_lineage(self):

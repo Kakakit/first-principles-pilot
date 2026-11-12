@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {loadProjectArtifacts,matchingArtifacts} from '../src/extensionProjectArtifact';
 import {defaults,analysisLabel,runningAnalysis,preferredLocation,supportedLocation,sourceRuntime,sourceOptionsSchema,readableSource,formAvailability,executionCategories,runtimeChoice,environmentVersion} from '../src/extensionModel';
 test('schema defaults retain false/zero and only declared nested fields',()=>{const schema={type:'object',properties:{visible:{type:'boolean',default:false},count:{type:'integer',default:0},missing:{type:'string'},nested:{type:'object',properties:{level:{default:2}}}}};assert.deepEqual(defaults(schema),{visible:false,count:0,nested:{level:2}});const first=defaults(schema);first.nested.level=5;assert.equal(defaults(schema).nested.level,2);});
 test('UNKNOWN requires explicit reconciliation and cannot look completed',()=>{assert.equal(runningAnalysis('UNKNOWN'),false);assert.equal(analysisLabel('UNKNOWN'),'状态待核对');assert.equal(runningAnalysis('WAIT_RESOURCE'),true);assert.equal(analysisLabel('COMPLETED'),'分析程序完成');});
@@ -58,4 +59,35 @@ test('Python overrides stay scoped to package, location and exact server',()=>{
 test('environment caption keeps Python and library versions distinct',()=>{
  assert.equal(environmentVersion({ready:true,python_version:'3.11.9',version:'0.9.20',versions:{ase:'3.23'}}),'Python 3.11.9 · 版本 0.9.20 · ase 3.23');
  assert.equal(environmentVersion({ready:false}),'');
+});
+
+test('remote output paths use the frozen analysis directory and preserve nested Unicode filenames',async()=>{
+ const {remoteOutputPath}=await import('../src/extensionModel');
+ assert.equal(remoteOutputPath('/home/user/分析/analyses/id/','figure/能级.png'),'/home/user/分析/analyses/id/outputs/figure/能级.png');
+ assert.equal(remoteOutputPath('/home/user/analyses/id',''),'/home/user/analyses/id/outputs');
+ assert.equal(remoteOutputPath(undefined,'result.json'),undefined);
+ for(const name of ['../result.json','/tmp/file','sub/../../file','sub\\file','bad\nname'])assert.equal(remoteOutputPath('/remote/id',name),undefined);
+});
+
+test('project report matching requires the complete source pair regardless of order',()=>{
+ const artifacts=[
+  {id:'paired',created_at:'2026-11-07',size_bytes:4,sources:[{attempt_id:'down'},{attempt_id:'up'}]},
+  {id:'other',created_at:'2026-11-07',size_bytes:4,sources:[{attempt_id:'up'},{attempt_id:'other'}]},
+  {id:'single',created_at:'2026-11-07',size_bytes:4,sources:[{attempt_id:'up'}]},
+ ];
+ const rule={field:'report',producer:'sample-analysis',path:'identity.json',title:'身份报告',match:'same_sources' as const,source_count:2};
+ assert.deepEqual(matchingArtifacts(rule,artifacts,['up','down']).map(item=>item.id),['paired']);
+ assert.deepEqual(matchingArtifacts(rule,artifacts,['up']),[]);
+ assert.equal(matchingArtifacts({...rule,match:'project'},artifacts,['up']).length,3);
+});
+
+test('project report lookup uses completed project history when an older host returns 404',async(t)=>{
+ const artifact={path:'identity.json',available:true,size_bytes:25};
+ const record={id:'report',extension_id:'orbitals',state:'COMPLETED',created_at:'2026-11-07',sources:[{attempt_id:'scf',name:'SCF'}],outputs:[artifact]};
+ const request=t.mock.method(globalThis,'fetch',async(url:string)=>url.includes('project-artifacts')
+  ?Response.json({detail:'Not Found'},{status:404})
+  :Response.json({analyses:[record,{...record,id:'failed',state:'FAILED'},{...record,id:'absent',outputs:[]}]}));
+ const result=await loadProjectArtifacts('project_id=project-a&producer=orbitals&name=identity.json',new AbortController().signal);
+ assert.deepEqual(result,[{id:'report',created_at:'2026-11-07',size_bytes:25,sources:[{attempt_id:'scf',name:'SCF'}]}]);
+ assert.equal(request.mock.calls[1].arguments[0],'/api/extension-host/analyses?project_id=project-a');
 });

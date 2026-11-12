@@ -4,6 +4,7 @@ The host knows input roles, schemas and execution locations; it has no extension
 IDs or scientific algorithms. The v1 SDK remains a historical compatibility API.
 """
 import base64
+import copy
 import hashlib
 import io
 import json
@@ -27,6 +28,9 @@ REQUEST = 'fpilot.extension-request.v2'
 RESULT = 'fpilot.extension-result.v2'
 ID = re.compile(r'[a-z][a-z0-9-]{1,79}')
 MAX_PACKAGE = 20 * 1024 * 1024
+MAX_OPTION_JSON = 64 * 1024
+MAX_OPTION_FILE_DATA = 16 * 1024 * 1024
+DOCTOR_TIMEOUT_SECONDS = 60
 MODES = {'local', 'ssh', 'scheduler'}
 _cache = {}
 _doctor_cache = {}
@@ -81,7 +85,7 @@ def inspect_package(root):
     if key in _cache and _cache[key][0] == signature: return _cache[key][1]
     manifest = json.loads(inside(root, 'extension.manifest.json').read_text())
     required = {'schema','id','name','version','description','entrypoint','contexts','stages','sources','inputs','evidence','execution','dependencies','options_schema','ui_schema','outputs','fixtures'}
-    if not isinstance(manifest, dict) or not required <= set(manifest) or set(manifest)-required-{'presentation'} or manifest['schema'] != PROTOCOL or not ID.fullmatch(manifest.get('id','')):
+    if not isinstance(manifest, dict) or not required <= set(manifest) or set(manifest)-required-{'presentation','analysis_modes'} or manifest['schema'] != PROTOCOL or not ID.fullmatch(manifest.get('id','')):
         raise ValueError('扩展 v2 清单字段或 ID 无效')
     if any(not isinstance(manifest[k],str) or not manifest[k].strip() for k in ('name','version','description')):
         raise ValueError('名称、版本和说明不能为空')
@@ -118,6 +122,17 @@ def inspect_package(root):
         if type(role['max_bytes']) is not int or not 0 < role['max_bytes'] <= 1024**4: raise ValueError('输入大小上限无效')
     if len({r['role'] for r in roles}) != len(roles): raise ValueError('输入角色重复')
     if not isinstance(manifest['evidence'],list) or any(not isinstance(s,str) for s in manifest['evidence']): raise ValueError('证据声明无效')
+    modes=manifest.get('analysis_modes',[])
+    if not isinstance(modes,list) or 'analysis_modes' in manifest and not modes:raise ValueError('分析模式须为非空列表')
+    stages=set();ids=set();role_names={r['role'] for r in roles}
+    for mode in modes:
+        if not isinstance(mode,dict) or set(mode)!={'id','title','stages','input_roles','evidence'}:raise ValueError('分析模式字段无效')
+        if not isinstance(mode['id'],str) or not ID.fullmatch(mode['id']) or mode['id'] in ids or not isinstance(mode['title'],str) or not mode['title'].strip():raise ValueError('分析模式名称或 ID 无效')
+        for field in ('stages','input_roles','evidence'):
+            if not isinstance(mode[field],list) or any(not isinstance(v,str) for v in mode[field]) or len(set(mode[field]))!=len(mode[field]):raise ValueError('分析模式列表无效')
+        if not mode['stages'] or not mode['input_roles'] or set(mode['stages']) & stages or not set(mode['stages'])<=set(manifest['stages']) or not set(mode['input_roles'])<=role_names:raise ValueError('分析模式阶段重叠、越界或输入角色无效')
+        stages.update(mode['stages']);ids.add(mode['id'])
+    if modes and stages!=set(manifest['stages']):raise ValueError('分析模式须覆盖声明的计算阶段')
     execution = manifest['execution']
     if not isinstance(execution,dict) or not {'locations','timeout_seconds'} <= set(execution) or set(execution) - {'locations','timeout_seconds','preferred_location'} or not execution['locations'] or not set(execution['locations']) <= MODES or type(execution['timeout_seconds']) is not int or not 1 <= execution['timeout_seconds'] <= 86400:
         raise ValueError('运行位置或超时无效')
@@ -136,9 +151,49 @@ def inspect_package(root):
     return result
 
 
+def mode_manifest(manifest,sources):
+    """Stage-selected input/evidence contract; no package-specific branches."""
+    modes=manifest.get('analysis_modes')
+    if not modes:return manifest
+    chosen=[next((m for m in modes if s.get('stage') in m['stages']),None) for s in sources]
+    if not chosen or any(m is None for m in chosen):raise ValueError('来源阶段没有适用的分析模式')
+    mode=chosen[0]
+    if any(m['id']!=mode['id'] for m in chosen):raise ValueError('一次分析请选择同一种模式的来源')
+    result=copy.deepcopy(manifest)
+    result['inputs']=[r for r in result['inputs'] if r['role'] in mode['input_roles']]
+    result['evidence']=list(dict.fromkeys(manifest['evidence']+mode['evidence']))
+    result['stages']=mode['stages']
+    result['analysis_modes']=[copy.deepcopy(mode)]
+    return result
+
+
 def options_for(manifest, options):
-    if not isinstance(options,dict) or len(json.dumps(options,allow_nan=False)) > 65536: raise ValueError('参数须为有限 JSON 对象')
-    errors = sorted(Draft7Validator(manifest['options_schema']).iter_errors(options),key=lambda e:str(e.path))
+    if not isinstance(options, dict):
+        raise ValueError('参数须为有限 JSON 对象')
+    schema = manifest['options_schema']
+    fields = schema.get('properties', {})
+    ordinary = {}
+    file_data_size = 0
+    for name, value in options.items():
+        field = fields.get(name, {})
+        if (isinstance(field, dict) and field.get('format') == 'data-url'
+                and isinstance(value, str) and value.startswith('data:')):
+            # File widgets encode bytes as a data URL inside the frozen options.
+            field_limit = field.get('maxLength', MAX_OPTION_FILE_DATA)
+            if len(value) > field_limit:
+                raise ValueError(f'{field.get("title", name)}超过文件导入大小上限')
+            file_data_size += len(value.encode('utf-8'))
+        else:
+            ordinary[name] = value
+    if file_data_size > MAX_OPTION_FILE_DATA:
+        raise ValueError('参数附件的编码内容合计超过 16 MiB')
+    try:
+        size = len(json.dumps(ordinary, allow_nan=False))
+    except (TypeError, ValueError) as exc:
+        raise ValueError('参数须为有限 JSON 对象') from exc
+    if size > MAX_OPTION_JSON:
+        raise ValueError('普通参数超过 64 KiB')
+    errors = sorted(Draft7Validator(schema).iter_errors(options),key=lambda e:str(e.path))
     if errors: raise ValueError('参数不符合清单：' + '; '.join('.'.join(map(str,e.path)) + ': ' + e.message for e in errors[:8]))
     return options
 
@@ -176,7 +231,7 @@ def doctor(receipt, refresh=False, python=None, background=False):
     with lock:
         if not refresh and key in _doctor_cache:return _doctor_cache[key]
         try:
-            result = invoke(receipt['root'],'doctor',python=python,timeout=30)
+            result = invoke(receipt['root'],'doctor',python=python,timeout=DOCTOR_TIMEOUT_SECONDS)
             if result.get('schema') != 'fpilot.extension-doctor.v2' or type(result.get('ready')) is not bool: raise ValueError('doctor 回执格式无效')
             result = doctor_result(result,python)
         except Exception as exc: result = {'schema':'fpilot.extension-doctor.v2','ready':False,'missing':[],'python':python,'reason':str(exc)[:1500]}

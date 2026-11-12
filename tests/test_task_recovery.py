@@ -5,7 +5,7 @@ from contextlib import ExitStack
 from unittest.mock import patch
 
 import test_scans as fixtures
-from backend import task_recovery as recovery, execution as ex, scans, execution_control as control, inputs, servers, source_contracts
+from backend import task_recovery as recovery, execution as ex, scans, execution_control as control, inputs, servers, source_contracts, batch_manifest
 
 
 class TaskRecoveryTests(unittest.TestCase):
@@ -116,6 +116,10 @@ class TaskRecoveryTests(unittest.TestCase):
         self.assertEqual(after['cases'][2]['parameters'][0]['value'],'520')
         self.assertEqual(after['cases'][2]['derived_from_case_id'],b['cases'][0]['id'])
         self.assertEqual(ex.get(after['cases'][2]['attempt_id'])['scan_case_id'],after['cases'][2]['id'])
+        exported=batch_manifest.manifest(b['id'],'p')['cases'][2]
+        self.assertEqual(exported['derived_from_case_id'],b['cases'][0]['id'])
+        self.assertEqual(exported['derived_from_batch_id'],b['id'])
+        self.assertIsNone(exported['reused_from'])
 
     def test_competing_previews_cannot_claim_same_pending_case(self):
         b=self.batch();stack,prep,send=self.mocks()

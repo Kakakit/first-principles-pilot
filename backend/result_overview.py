@@ -68,14 +68,18 @@ def sources(record):
     return rows
 
 
+def read_cache(record):
+    try:
+        value=json.loads((ex.ROOT/'result-summaries'/(record['id']+'.json')).read_text())
+        if value['signature']==signature(record):return value
+    except (OSError,ValueError,KeyError):pass
+    return None
+
+
 def summary(project_id,key):
     record=ex.get(key)
     if record.get('project_id')!=project_id:raise ValueError('结果不属于当前项目')
-    cached=None
-    try:
-        value=json.loads((ex.ROOT/'result-summaries'/(key+'.json')).read_text())
-        if value['signature']==signature(record):cached=value
-    except (OSError,ValueError,KeyError):pass
+    cached=read_cache(record)
     from .analysis_datasets import context
     projects,attempts=context();project=projects.get(project_id) or {}
     source_rows=sources(record)

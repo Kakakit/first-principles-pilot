@@ -84,6 +84,7 @@ class PresentationHostTests(unittest.TestCase):
     def test_update_preserves_saved_view_state_and_uses_frozen_python(self):
         self.package();record=self.execute();view=record['presentation'];views.save_state(record['id'],view['id'],{'confirmed':True})
         views.schedule(record['id']);new=runs.get(record['id'])['presentation'];self.assertNotEqual(view['id'],new['id']);self.assertEqual(views.state(record['id'],new['id'])['value'],{'confirmed':True});self.assertEqual(new['python'],record['runtime']['python'])
+        request=json.loads((views.root(record['id'])/new['id']/'request.json').read_text());self.assertEqual(request['view_state']['value'],{'confirmed':True})
     def test_remote_analysis_can_render_declared_local_snapshot_without_ssh(self):
         receipt=self.package();record=self.execute();original=record['runtime']['python']
         root=Path(receipt['root']) if 'root' in receipt else p.installed('different-viewer-name')['root']
@@ -96,6 +97,20 @@ class PresentationHostTests(unittest.TestCase):
     def test_missing_declared_local_input_fails_without_remote_fallback(self):
         self.package();record=self.execute();receipt=p.installed('different-viewer-name');root=receipt['root'];manifest=receipt['manifest'];manifest['presentation'].update(location='local',inputs=[{'path':'not-returned.csv'}]);p.atomic_json(root/'extension.manifest.json',manifest);p.install_directory(root)
         views.schedule(record['id']);updated=runs.get(record['id']);self.assertEqual(updated['state'],'COMPLETED');self.assertEqual(updated['presentation']['status'],'FAILED');self.assertIn('不会自动连接服务器',updated['presentation']['error'])
+    def test_updated_source_renderer_supports_frozen_local_snapshot_contract(self):
+        self.package();record=self.execute();root=p.installed('different-viewer-name')['root']
+        old_view=views.current(record['id']);old_state={'revision':0,'value':{'legacy_setting':True}}
+        p.atomic_json(views.root(record['id'])/old_view['id']/'state.json',old_state)
+        manifest=json.loads((root/'extension.manifest.json').read_text())
+        manifest['presentation'].update(location='source',inputs=[{'path':'elements.csv'}])
+        p.atomic_json(root/'extension.manifest.json',manifest);p.install_directory(root)
+        record['manifest']['presentation']['location']='local'
+        record.update(location='ssh',runtime={'python':'/remote/only/python','alias':'fixture'},remote_dir='/remote/original');runs.save(record)
+        with patch.object(views,'remote_generate',side_effect=AssertionError('legacy local history must not use SSH')):
+            views.schedule(record['id'])
+        self.assertEqual(views.current(record['id'])['status'],'READY')
+        self.assertEqual(views.current(record['id'])['location'],'local')
+        self.assertEqual(views.state(record['id'],views.current(record['id'])['id']),old_state)
     def test_source_renderer_uses_actual_ssh_argument_contract(self):
         from contextlib import nullcontext
         self.package();record=self.execute();view=record['presentation'];dest=views.root(record['id'])/view['id'];record.update(remote_dir='/remote/original',runtime={'python':'/remote/python','alias':'fixture'})

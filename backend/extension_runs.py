@@ -76,6 +76,30 @@ def active_usage():
             if r['location']=='scheduler' and r['state'] in ACTIVE_REMOTE]
 
 
+def project_artifacts(project_id, producer, name):
+    """Return only metadata for a declared reusable result within one project."""
+    if not project_id or not p.ID.fullmatch(producer) or Path(name).name != name:
+        raise ValueError('项目产物查询参数无效')
+    candidates = []
+    for record in history(project_id=project_id):
+        if record['state'] != 'COMPLETED' or record['extension_id'] != producer:
+            continue
+        item = next((out for out in record.get('outputs', [])
+                     if out['path'] == name and out.get('available')), None)
+        if item is None:
+            continue
+        try:
+            path = p.inside(directory(record['id']) / 'outputs', name)
+            if path.stat().st_size != item['size_bytes']:
+                continue
+        except (OSError, ValueError):
+            continue
+        candidates.append({'id':record['id'], 'created_at':record['created_at'], 'size_bytes':item['size_bytes'],
+                           'sources':[{'attempt_id':s.get('attempt_id'), 'name':s.get('name')}
+                                      for s in record['sources']]})
+    return candidates
+
+
 @contextmanager
 def lock(key):
     with exclusive_lock(directory(key)/'run.lock') as owned:yield owned
@@ -145,7 +169,7 @@ def source_catalog(project_id):
     return {'attempts':rows,'max_sources':p.MAX_SOURCES}
 
 
-def describe_sources(raw,project_id=None):
+def describe_sources(raw,project_id=None,refresh_files=False):
     if not isinstance(raw,list) or not 1<=len(raw)<=p.MAX_SOURCES:raise ValueError(f'请选择 1–{p.MAX_SOURCES} 个来源')
     rows=[]
     for value in raw:
@@ -162,7 +186,7 @@ def describe_sources(raw,project_id=None):
             if record.get('recycled') or record.get('path_schema')!='fpilot.remote-attempt-path':raise ValueError('来源已回收或路径不受支持')
             assert_available('attempts',record['id'],record)
             if project_id and record.get('project_id')!=project_id:raise ValueError('来源不属于当前项目')
-            stage,model=_stage(record);listing=artifacts.listing(record['id'])
+            stage,model=_stage(record);listing=(artifacts.refresh if refresh_files else artifacts.listing)(record['id'])
             rows.append({'id':record['id'],'kind':'attempt','attempt_id':record['id'],'node_id':record.get('node_id'),
                          'stage':stage,'name':record.get('job_id') or ('已完成运行' if record['state']=='COMPLETED' else '未提交运行'),'alias':record['config']['alias'],
                          'state':record['state'],'evidence':record.get('evidence') or {},'input_summary':model,
@@ -187,6 +211,8 @@ def selected_input(role,source):
 
 
 def blockers(manifest,sources,location='local'):
+    try:manifest=p.mode_manifest(manifest,sources)
+    except ValueError as exc:return [str(exc)]
     if location not in ('local','ssh'):return ['扩展只支持本地或服务器直接命令行；大型计算请使用计算节点']
     reasons=[];bounds=manifest['sources']
     if not bounds['min']<=len(sources)<=bounds['max']:reasons.append(f"需要 {bounds['min']}–{bounds['max']} 个来源")
@@ -208,7 +234,7 @@ def blockers(manifest,sources,location='local'):
 
 
 def context(payload):
-    sources=describe_sources(payload['sources'],payload.get('project_id'))
+    sources=describe_sources(payload['sources'],payload.get('project_id'),refresh_files=payload.get('refresh_sources') is True)
     rows=[]
     for item in p.catalog():
         if not item.get('enabled'):continue
@@ -223,15 +249,18 @@ def context(payload):
                     environment=p.doctor(p.installed(item['id']),python=runtime['python'],background=True)
                     if environment and not environment['ready']:reasons.append('本机缺依赖或 Python 不可用：'+', '.join(environment.get('missing') or [environment.get('reason') or '请重新检查环境']))
             except ValueError as exc:reasons.append(str(exc))
-        rows.append({**item,'blockers':reasons,'runtime':runtime,'runtime_doctor':environment,
+        try:display=p.mode_manifest(item,sources)
+        except ValueError:display=item
+        rows.append({**display,'blockers':reasons,'runtime':runtime,'runtime_doctor':environment,
                      'environment_checking':location=='local' and runtime is not None and environment is None})
     return {'extensions':rows,'sources':[{k:v for k,v in s.items() if k!='poscar'} for s in sources]}
 
 
 def _input_request(record,dest):
-    inputs={r['role']:[] for r in record['manifest']['inputs']};local_copies={}
+    manifest=p.mode_manifest(record['manifest'],record['sources'])
+    inputs={r['role']:[] for r in manifest['inputs']};local_copies={}
     for index,source in enumerate(record['sources']):
-        for role in record['manifest']['inputs']:
+        for role in manifest['inputs']:
             fact=selected_input(role,source)
             if fact is None:
                 if role.get('required',True):raise ValueError('缺少 '+role['title'])
@@ -315,7 +344,7 @@ def _start(payload):
     receipt=p.installed(payload['extension_id']);manifest=receipt['manifest']
     if not receipt['enabled']:raise ValueError('扩展已停用')
     options=p.options_for(manifest,payload.get('options') or {})
-    location=payload.get('location','local');sources=describe_sources(payload['sources'],payload.get('project_id'))
+    location=payload.get('location','local');sources=describe_sources(payload['sources'],payload.get('project_id'),refresh_files=location=='local' and not payload.get('preview_id'))
     reasons=blockers(manifest,sources,location)
     if reasons:raise ValueError('；'.join(reasons))
     runtime=environments.resolve(manifest['id'],location,payload.get('alias',''))
@@ -388,7 +417,7 @@ def check(payload):
     receipt=p.installed(payload['extension_id']);manifest=receipt['manifest']
     if not receipt['enabled']:raise ValueError('扩展已停用')
     options=p.options_for(manifest,payload.get('options') or {})
-    sources=describe_sources(payload['sources'],payload.get('project_id'))
+    sources=describe_sources(payload['sources'],payload.get('project_id'),refresh_files=True)
     reasons=blockers(manifest,sources,payload.get('location','local'))
     if reasons:return {'status':'NOT_APPLICABLE','reason':'；'.join(reasons)}
     runtime=environments.resolve(manifest['id'],payload.get('location','local'),payload.get('alias',''));environments.expected(runtime,payload)
@@ -437,7 +466,11 @@ def _local(record):
 
 def _collect(record):
     dest=directory(record['id']);path=dest/'outputs/result.json'
-    if not path.exists():remote.pull(record,'outputs/result.json',path)
+    if not path.exists():
+        size = remote.output_info(record, ['result.json'])['result.json']['size_bytes']
+        if size > artifacts.MAX_PULL_BYTES:
+            raise ValueError(f'远端程序已完成；结果摘要 result.json 为 {size / 1024**2:.1f} MiB，超过 10 MiB 回传上限。原产物仍在服务器')
+        remote.pull(record,'outputs/result.json',path)
     if path.stat().st_size>artifacts.MAX_PULL_BYTES:raise ValueError('结果 JSON 超过回传上限')
     result=json.loads(path.read_text());errors=list(Draft7Validator(RESULT_SCHEMA).iter_errors(result))
     if errors:raise ValueError('远端结果协议无效：'+errors[0].message)
@@ -445,7 +478,11 @@ def _collect(record):
     for name,fact in info.items():
         if fact['size_bytes']<=artifacts.MAX_PULL_BYTES:
             file=dest/'outputs'/name
-            if not file.exists():remote.pull(record,'outputs/'+name,file)
+            if not file.exists():
+                try:
+                    remote.pull(record,'outputs/'+name,file)
+                except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                    raise ValueError(f'远端程序已完成；回传 {name} 失败：{exc}') from exc
             if file.stat().st_size!=fact['size_bytes']:raise ValueError('回传产物大小不一致')
     _complete(record)
 
@@ -489,6 +526,14 @@ def _refresh(record):
         doctor=receipt.get('doctor') or {}
         record.update(state='FAILED',runtime_doctor=doctor,error='远端分析环境未满足：'+', '.join(doctor.get('missing') or [doctor.get('reason') or '请查看 doctor.json']))
         save(record)
+    elif record['exit_code']==124:
+        if not receipt.get('doctor'):
+            reason='服务器 Python 环境自检超时，尚未检查输入或开始计算。请在扩展设置中重新检查所选环境'
+        elif not receipt.get('check'):
+            reason='服务器检查分析输入超时，尚未开始计算。请查看 check.err'
+        else:
+            reason='服务器执行分析超时。请查看运行日志，原分析目录已保留'
+        record.update(state='FAILED',error=reason)
     elif record['exit_code']:
         record.update(state='FAILED',error='远端分析非零退出：'+str(record['exit_code'])+'；查看独立目录中的 doctor.err/check.err/stderr.log');save(record)
     else:_collect(record);record.pop('error',None)
@@ -557,7 +602,9 @@ def refresh(key):
     with lock(key) as owned:
         record=get(key)
         if not owned:return {**record,'refresh_busy':True,'refresh_message':'后台正在核对或收集这条分析，请稍后查看记录'}
-        if record['location']=='local' or record['state'] not in ACTIVE_REMOTE:return {**record,'refresh_message':'本条分析已有终态，无需重新执行'}
+        can_collect = record['state']=='FAILED' and record.get('exit_code')==0
+        if record['location']=='local' or (record['state'] not in ACTIVE_REMOTE and not can_collect):
+            return {**record,'refresh_message':'本条分析已有终态，无需重新执行'}
         if not record.get('remote_dir'):
             record.update(state='UNKNOWN',error='准备期间中断，请检查独立目录；未自动重投');return save(record)
         try:return _refresh(record)
@@ -591,7 +638,7 @@ def output(key,name):
 def preview(payload):
     receipt=p.installed(payload['extension_id']);manifest=receipt['manifest']
     if not receipt['enabled']:raise ValueError('扩展已停用')
-    sources=describe_sources(payload['sources'],payload.get('project_id'));options=p.options_for(manifest,payload.get('options') or {})
+    sources=describe_sources(payload['sources'],payload.get('project_id'),refresh_files=True);options=p.options_for(manifest,payload.get('options') or {})
     location=payload.get('location','local');reasons=blockers(manifest,sources,location)
     if reasons:raise ValueError('；'.join(reasons))
     runtime=environments.resolve(manifest['id'],location,payload.get('alias',''));environments.expected(runtime,payload)

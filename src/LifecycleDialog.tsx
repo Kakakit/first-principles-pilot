@@ -4,8 +4,17 @@ import type {Project} from './model';
 
 export type CleanupTarget={kind:string;key:string;project_id?:string;project?:Project};
 export type RemoteAsset={id:string;kind:string;key:string;label:string;project_id?:string;alias:string;path:string;state:string;owner_state?:string;blocked?:string;error?:string;requested_at?:string;retained_at?:string;recovery_required?:boolean;operation?:string};
-export type CleanupPlan={records:{kind:string;key:string}[];assets:RemoteAsset[]};
-export const previewCleanup=(target:CleanupTarget)=>requestJson('/api/cleanup/preview',target) as Promise<CleanupPlan>;
+export type CleanupPlan={records:{kind:string;key:string}[];assets:RemoteAsset[];remote_note?:string};
+function cleanupError(cause:unknown){
+ const message=errorMessage(cause);
+ return /^not found$/i.test(message.trim())
+  ?'当前工作台服务没有加载远端文件管理接口。请在工作台控制中心重启服务，再重试。'
+  :message;
+}
+export async function previewCleanup(target:CleanupTarget):Promise<CleanupPlan>{
+ try{return await requestJson('/api/cleanup/preview',target);}
+ catch(cause){throw new Error(cleanupError(cause));}
+}
 export const lifecycleKinds=new Set(['attempts','analyses','local-analyses','plots']);
 const labels:Record<string,string>={attempts:'计算任务',analyses:'扩展分析',scans:'迭代批次',chains:'计算链','local-analyses':'本地分析',plots:'绘图'};
 export const assetState:Record<string,string>={retained:'保留',pending:'待清理',running:'核对或清理中',waiting:'等待连接',deleted:'已删除',already_missing:'原目录已不存在',blocked:'暂不可清理',unknown:'等待核对',failed:'清理失败'};
@@ -21,7 +30,7 @@ export default function LifecycleDialog({target,label,plan:initial,onClose,onDon
  async function execute(){
   setBusy(true);setError('');
   try{const receipt=await requestJson('/api/cleanup',{...target,asset_ids:mode==='clean'?chosen:[]});await onDone(receipt);onClose();}
-  catch(e){setError(errorMessage(e));}finally{setBusy(false);}
+  catch(e){setError(cleanupError(e));}finally{setBusy(false);}
  }
  const counts=plan?.records.reduce<Record<string,number>>((out,{kind})=>({...out,[kind]:(out[kind]||0)+1}),{});
  return <dialog ref={dialog} className="history-confirm lifecycle-dialog" aria-label="删除记录与远端文件" onCancel={e=>{e.preventDefault();if(!busy)onClose();}}>
@@ -34,9 +43,10 @@ export default function LifecycleDialog({target,label,plan:initial,onClose,onDon
     <legend>远端文件</legend>
     <label><input type="radio" checked={mode==='keep'} onChange={()=>setMode('keep')}/> 移入回收站，保留远端文件</label>
     <label><input type="radio" checked={mode==='clean'} disabled={!offered.length} onChange={()=>setMode('clean')}/> 移入回收站，并清理选中的远端目录</label>
+    {!plan.assets.length&&<p>{plan.remote_note||'这条记录没有登记可清理的远端目录。'}</p>}
     {mode==='clean'&&<p>远端删除无法恢复。本地记录仍可恢复。离线或未核实的目录会在回收站显示清理状态。</p>}
    </fieldset>
-   {plan.assets.length>0&&<details open={mode==='clean'||undefined} className="lifecycle-assets"><summary>{plan.assets.length} 个已登记目录</summary>
+   {plan.assets.length>0&&<details open={mode==='clean'||!offered.length||undefined} className="lifecycle-assets"><summary>{plan.assets.length} 个已登记目录</summary>
     {plan.assets.map(asset=><article key={asset.id}>
      {mode==='clean'&&offered.includes(asset)?<label><input type="checkbox" checked={!excluded.has(asset.id)} onChange={e=>setExcluded(old=>{const next=new Set(old);if(e.target.checked)next.delete(asset.id);else next.add(asset.id);return next;})}/> {asset.alias} · {asset.label}</label>:<strong>{asset.alias} · {asset.label}</strong>}
      <code>{asset.path}</code>

@@ -59,7 +59,7 @@ def _doctor(receipt,runtime):
     with tarfile.open(fileobj=stream,mode='w:gz') as archive:
         archive.add(receipt['root'],arcname='package',filter=lambda info:None if '__pycache__' in info.name else info)
         archive.add(Path(__file__).with_name('extension_process.py'),arcname='extension-runner.py')
-    doctor_timeout = 30
+    doctor_timeout = protocol.DOCTOR_TIMEOUT_SECONDS
     from . import file_lifecycle, site_registration
     key=directory.rsplit('/',1)[1]
     asset=file_lifecycle.temporary(runtime['alias'],directory,key,site_registration.connection_identity(runtime['alias']),runtime['python'])
@@ -122,7 +122,7 @@ def script(runtime, directory, entrypoint, mode, cores=None, timeout=300):
     header += ['set -u','cd '+remote_paths.shell_path(directory)+' || exit "$?"','export PYTHONDONTWRITEBYTECODE=1',
                'export OMP_NUM_THREADS='+str(cores or runtime.get('cores') or 1),
                'export OPENBLAS_NUM_THREADS=$OMP_NUM_THREADS MKL_NUM_THREADS=$OMP_NUM_THREADS NUMEXPR_NUM_THREADS=$OMP_NUM_THREADS',
-               command('doctor',30)+' > doctor.json 2> doctor.err',
+               command('doctor',protocol.DOCTOR_TIMEOUT_SECONDS)+' > doctor.json 2> doctor.err',
                'code=$?', 'if test "$code" -eq 0; then',
                shlex.quote(runtime['python'])+" -c 'import json,sys; sys.exit(0 if json.load(open(\"doctor.json\")).get(\"ready\") is True else 4)'",'code=$?','fi', 'if test "$code" -eq 0; then',
                command('check',min(timeout,60))+' --request request.json > check.json 2> check.err','code=$?','fi',
@@ -222,19 +222,32 @@ def pull(record,name,destination):
     return destination
 
 
+def source_identity(source,name):
+    path=source['remote_root'].rstrip('/')+'/'+name
+    command='set -e\ntest -f '+remote_paths.shell_path(path)+' || { echo FPILOT_SOURCE_MISSING; exit 3; }\ntest ! -L '+remote_paths.shell_path(path)+'\nstat -c \'FPILOT_SOURCE=%s:%Y\' -- '+remote_paths.shell_path(path)+'\ncd '+remote_paths.shell_path(source['remote_root'])+'\nprintf \'FPILOT_PATH=%s/%s\\n\' "$(pwd -P)" '+shlex.quote(name)
+    result=ex.ssh(source['alias'],command,timeout=30)
+    label=(source.get('name') or source['id'])+' / '+name
+    if 'FPILOT_SOURCE_MISSING' in result.get('stdout',''):raise ValueError(label+'：来源文件缺失')
+    if result.get('exit_code')!=0:raise ValueError(label+'：SSH 来源校验失败：'+result.get('stderr','')[-400:])
+    facts=re.findall(r'^FPILOT_SOURCE=(\d+:\d+)\s*$',result.get('stdout',''),re.M)
+    paths=re.findall(r'^FPILOT_PATH=(/[^\r\n]+)$',result.get('stdout',''),re.M)
+    if len(facts)!=1 or len(paths)!=1:raise ValueError(label+'：来源校验回执格式异常')
+    return facts[0],paths[0]
+
+
 def source_pull(source,name,destination):
     fact=next(f for f in source['files'] if f['name']==name)
     from datetime import datetime
     expected=str(fact['size_bytes'])+':'+str(int(datetime.fromisoformat(fact['modified_at']).timestamp()))
-    path=source['remote_root'].rstrip('/')+'/'+name
-    command='set -e\ntest -f '+remote_paths.shell_path(path)+'; test ! -L '+remote_paths.shell_path(path)+'\nstat -c \'%s:%Y\' -- '+remote_paths.shell_path(path)+'\ncd '+remote_paths.shell_path(source['remote_root'])+'\nprintf \'%s/%s\\n\' "$(pwd -P)" '+shlex.quote(name)
-    stat=ex.ssh(source['alias'],command,timeout=30);lines=stat.get('stdout','').strip().splitlines()
-    if stat.get('exit_code')!=0 or len(lines)!=2 or lines[0]!=expected or not lines[1].startswith('/'):raise ValueError('来源大小或修改时间变化，请刷新文件清单后重新准备')
-    path=lines[1]
+    actual,path=source_identity(source,name)
+    label=(source.get('name') or source['id'])+' / '+name
+    if actual!=expected:raise ValueError(label+'：来源大小或修改时间变化（大小 bytes:mtime epoch，预期 '+expected+'，实际 '+actual+'），请刷新来源文件清单后重新准备')
     destination.parent.mkdir(parents=True,exist_ok=True)
     from .safe_files import pull_many
     pull_many(source['alias'],[{'remote_path':path,'destination':str(destination)}],timeout=120)
-    if destination.stat().st_size!=fact['size_bytes']:raise ValueError('来源文件回传大小变化，请重新准备')
+    after,after_path=source_identity(source,name)
+    if after!=expected or after_path!=path:raise ValueError(label+'：传输过程中来源变化（预期 '+expected+'，实际 '+after+'），请重新准备')
+    if destination.stat().st_size!=fact['size_bytes']:raise ValueError(label+'：来源文件回传大小变化，请重新准备')
     return destination
 
 

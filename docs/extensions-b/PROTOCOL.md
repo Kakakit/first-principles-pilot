@@ -42,13 +42,17 @@ python scripts/cli.py check --request /absolute/request.json
 python scripts/cli.py run --request /absolute/request.json
 ```
 
-doctor 在 stdout 返回单个 JSON：`schema=fpilot.extension-doctor.v2`、布尔 `ready`、`missing` 模块列表和可选原因。推荐同时返回 `python`（实际解释器路径）、`python_version`、`versions`（模块名称到版本的映射）；科学程序版本也可用 `version` 返回。检查实际模块导入，不能把残留安装元数据当作可用。旧 helper 将 Python 版本放在 python 字段的回执仍兼容。check 返回 `schema=fpilot.extension-check.v2`、`status=APPLICABLE/NOT_APPLICABLE`、`reason`。stdout 不混入其他文字，诊断写 stderr。run 将结果写到请求的 `result_file`，正常结束返回 0；非零退出不能视为完成。
+doctor 在 stdout 返回单个 JSON：`schema=fpilot.extension-doctor.v2`、布尔 `ready`、`missing` 模块列表和可选原因。推荐同时返回 `python`（实际解释器路径）、`python_version`、`versions`（模块名称到版本的映射）；科学程序版本也可用 `version` 返回。检查实际模块导入，不能把残留安装元数据当作可用。旧 helper 将 Python 版本放在 python 字段的回执仍兼容。check 返回 `schema=fpilot.extension-check.v2`、`status=APPLICABLE/NOT_APPLICABLE`、`reason`。stdout 不混入其他文字，诊断写 stderr。 仅已知输入不适用返回 NOT_APPLICABLE。check 侧重来源、参数和文件元信息，完整解析在 run 执行。环境、读取和内部失败以非零退出及阶段诊断报告。run 将结果写到请求的 `result_file`，正常结束返回 0；非零退出不能视为完成。
 
 请求 `fpilot.extension-request.v2` 包含 `analysis_id`、`inputs`、`sources`、`options`、`output_dir`、`result_file`。`inputs.<role>` 按来源顺序排列，每项给出 `path/name/source_id/size_bytes`，可能附小文件 sha256。可选角色可能只有部分来源，或整个键缺省；扩展须按 source_id 关联，不能按数组下标配对。path 均为本次独立副本，扩展只向 output_dir 写文件。
 
 sources 是宿主冻结的来源摘要，包含具体 attempt、节点、主机、阶段、程序/收敛证据和实际冻结输入摘要。Wannier 摘要补充 seed、DFT 父 attempt、可读父运行名称、自旋模式、num_wann、冻结结构的 elements（已记录时）及本次冻结 energy_reference；不抓取其他计算或最新草稿的能量参考。结构草稿包含当前几何内容身份及原始文件身份提示。来源、选项、包 revision 和运行时创建时冻结，报告与下载 JSON 沿用冻结来源。
 
 数组选项可以在 `ui_schema[field]["ui:options"].source_enum` 声明 `"elements"`。宿主把冻结来源的元素并集作为该字段的字符串选项；不自动勾选或判断磁性。来源没有元素摘要时保持手工数组输入。独立 CLI 仍接收普通字符串数组，不依赖界面服务。缺少输入或运行时只阻止执行操作，允许先编辑参数。
+
+顶层文件选项可声明为字符串 `format: "data-url"`，表单把附件编码后保存于 `options`。附件遵循字段的 `maxLength`，全部附件的编码内容合计最多 16 MiB。其他选项合计最多 64 KiB，并须为有限 JSON。
+
+扩展可在 `ui_schema["ui:projectArtifact"]` 声明一个可复用文件选项，字段为 `field`、`producer`、`path`、`title`、`match`。宿主通过 `GET /project-artifacts` 列出同项目已完成且本机可用的产物。 `match: "project"` 由用户选择，`match: "same_sources"` 按完整 attempt 集合匹配，仅唯一候选自动选入。可用 `source_count` 限制来源个数，`auto_when` 指定开启自动选入的布尔选项。手动导入优先，实际字节冻结进同一个选项；CLI 仍负责核对数据语义和输入绑定。
 
 ## 结果与通用展示
 
@@ -106,14 +110,21 @@ TB2J 独立包见 [使用指南](../../resources/extensions/tb2j/README.md)，�
 /path/to/frozen/python scripts/presentation.py render --request /absolute/presentation-request.json
 ```
 
-请求标识 `fpilot.extension-presentation-request.v1`，包含 analysis_id、source_dir（已有输出只读）、output_dir（本次独立展示版本）。stdout 返回 `fpilot.extension-presentation.v1`、entry_html、assets（path/media_type），可附 data_schema。assets 必须是输出目录中的普通文件，最多 1000 项，每个不超过 10 MiB；扩展自行分片。数据含义与科学算法由包负责，宿主不解析扩展格式。
+请求标识 `fpilot.extension-presentation-request.v1`，包含 analysis_id、source_dir（已有输出只读）、output_dir（本次独立展示版本），以及可选 view_state（已保存的展示状态 revision/value 快照；缺省为空）。重新生成展示可读取该快照，仅处理冻结输出，不读取研究来源。stdout 返回 `fpilot.extension-presentation.v1`、entry_html、assets（path/media_type），可附 data_schema。assets 必须是输出目录中的普通文件，最多 1000 项，每个不超过 10 MiB；扩展自行分片。数据含义与科学算法由包负责，宿主不解析扩展格式。
 
 首次完成可用冻结包自动生成；旧记录或手动更新采用当前启用包，保存新的展示包副本和版本，缺省沿用原分析冻结 Python 与服务器。远端原始大数据留在原主机，宿主仅上传展示包、执行整理 CLI 并受控回传小文件，不调用分析 run。失败保留原结果及下载；并发请求共用同一生成记录。停用/卸载不能破坏已保存展示。上版保存的展示设置随更新继承，旧版本仍保留。
 
-可选 `presentation.location` 为 `source`（缺省）或 `local`。`local` 必须声明 `presentation.inputs`：最多 64 项 `{path, required?}`，required 缺省 true。路径相对原分析 outputs，只接受安全的普通文件；宿主仅从已回传本机文件独立复制，每个不超过 10 MiB，绝不因缺失自动连接服务器。整理使用当前本地扩展 Python，展示快照单独冻结实际位置、解释器、包版本和输入副本；原分析的 Python、服务器、参数和产物不变。源位置模式仍按旧规则执行。
+可选 `presentation.location` 为 `source`（缺省）或 `local`。`local` 必须声明 `presentation.inputs`：最多 64 项 `{path, required?}`，required 缺省 true。路径相对原分析 outputs，只接受安全的普通文件；宿主仅从已回传本机文件独立复制，每个不超过 10 MiB，绝不因缺失自动连接服务器。整理使用当前本地扩展 Python，展示快照单独冻结实际位置、解释器、包版本和输入副本；原分析的 Python、服务器、参数和产物不变。新分析按清单指定位置生成展示。迁移至 source 的扩展可保留本机 inputs 清单，声明新版 renderer 仍能读取历史 local 快照。已按 local 生成的展示或冻结为 local 的历史分析继续从本机准备输入。
 
 通用表单支持包自定义 `ui:groups`（title/fields/collapsed），按声明顺序展示常用区和折叠区；`ui:visibility` 按同表单字段值条件显示，source_spinors 仅在 auto 模式兼容冻结来源的 spinors。`ui:preview` 指定预览需突出显示的参数；预览 API 返回对应冻结 `options`。这些只改变展示，不跳过原 schema 校验；未声明的扩展保持旧表单。数组操作使用可辨认文字，固定长度数组可在原 ui:options 禁用添加/删除/排序。
 
-HTML 内联脚本、样式和绘图库，以无同源权的 iframe sandbox 隔离，禁止外部连接；普通运行不依赖网络或主体组件。页面与宿主使用 `fpilot.extension-view.v1` postMessage：read-file 只读清单内 JSON，read-state/save-state 保存最大 64 KiB 有限 JSON，resize 调整高度，failed 回退基础结果，download 交付本机生成的 CSV/JSON/文本/PNG（有限内容、简单文件名，最多 64 MiB）。每条 RPC 带字符串 id，宿主验证消息来源为当前 iframe，返回 kind=response、同 id 和 value/error。扩展不调用工作台 API，也不读取宿主 DOM；原生单位、映射与计算规则不进入宿主。
+HTML 内联脚本、样式和绘图库，以无同源权的 iframe sandbox 隔离，禁止外部连接；普通运行不依赖网络或主体组件。页面与宿主使用 `fpilot.extension-view.v1` postMessage：read-file 只读清单内 JSON，read-state/save-state 保存最大 64 KiB 有限 JSON，resize 调整高度，failed 回退基础结果，download 交付本机生成的 CSV/JSON/文本/PNG（有限内容、简单文件名，最多 64 MiB）。新增 refresh-view RPC 仅供原分析可更新展示：保存状态后调用既有展示生成接口并刷新记录，不重新运行分析或读取来源；归档/数据集只读展示拒绝更新。每条 RPC 带字符串 id，宿主验证消息来源为当前 iframe，返回 kind=response、同 id 和 value/error。扩展不调用工作台 API，也不读取宿主 DOM；原生单位、映射与计算规则不进入宿主。
 
 通用 API：POST analyses/{id}/presentation 生成；GET presentation/{version}/files/{path} 只读声明文件；GET/PUT presentation/{version}/state 读写独立展示设置。均位于 `/api/extension-host/`。设置每次保存写独立版本，不改原分析来源、选项、产物或科学状态。分析可返回 presentation、presentation_supported、last_checked_at、refresh_message、refresh_busy；界面显示核对进度、完成/错误反馈和最后核对时间。
+# 可选的阶段分析模式（2026-10-20）
+
+v2 清单可追加 `analysis_modes`：非空列表，每项包含 `id`、`title`、`stages`、`input_roles`、`evidence`。模式 ID 唯一，各模式阶段不重叠且共同覆盖清单 stages；输入角色引用清单 inputs 中的角色。无此字段时完全沿用原合同。
+
+宿主按本次来源的 stage 选择同一模式；混合模式来源报错。模式筛选输入角色，保留角色原 required 和大小限制；模式证据与清单公共 evidence 合并。上下文返回该模式的有效输入及阶段，检查、预览、冻结和执行采用同一规则。原始完整清单冻结在分析记录，来源、大小/mtime、解释器和预览身份核验不变。请求 schema 不增加业务字段，独立 CLI 仍可从 sources.stage 确定自己的算法。宿主不认识任何扩展 ID 或物理量。
+
+兼容性：旧包不需要更新；声明 analysis_modes 的新包需要此版宿主。协议源码/校验/测试在 main，扩展分支只维护兼容文档与 schema 快照，不整体合并分支。
