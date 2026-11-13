@@ -1,0 +1,62 @@
+name: SQLite lifecycle and local Windows regressions
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/sqlite-lifecycle.yml'
+      - 'backend/**'
+      - 'scripts/installed_launcher.py'
+      - 'tests/test_sqlite_lifecycle.py'
+      - 'tests/test_installed_launcher.py'
+      - 'tests/test_history_index.py'
+      - 'tests/test_history_cleanup.py'
+      - 'tests/test_execution_cancel.py'
+      - 'tests/test_file_transfers.py'
+      - 'tests/test_structures.py'
+      - 'packaging/requirements-runtime.txt'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sqlite-lifecycle.yml'
+      - 'backend/**'
+      - 'scripts/installed_launcher.py'
+      - 'tests/**'
+      - 'packaging/requirements-runtime.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  local-regressions:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      FPILOT_NOTIFICATIONS: '0'
+      FPILOT_WORKSPACE: '${{ runner.temp }}/fpilot-sqlite-tests'
+      MPLCONFIGDIR: '${{ runner.temp }}/fpilot-sqlite-mpl'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: 'python -m pip install --only-binary=:all: -r packaging/requirements-runtime.txt'
+      - name: Handles, rollback, launcher and local data preservation
+        shell: bash
+        run: |
+          python -m unittest discover -s tests -p test_sqlite_lifecycle.py -v
+          python -m unittest discover -s tests -p test_installed_launcher.py -v
+          python -m unittest discover -s tests -p test_history_index.py -v
+          python -m unittest discover -s tests -p test_history_cleanup.py -v
+          python -m unittest discover -s tests -p test_file_transfers.py -v
+          python -m unittest discover -s tests -p test_structures.py -v
+          python -m unittest discover -s tests -p test_local_json.py -v
+      - name: Host cancellation receipts (no remote scheduler)
+        env:
+          PYTHONPATH: tests
+        run: python -m unittest test_execution_cancel.CancelTests -v

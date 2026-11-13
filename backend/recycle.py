@@ -6,6 +6,7 @@ import sqlite3
 import shutil
 import uuid
 import zipfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,7 +21,7 @@ TABLES = {'attempts':'attempts','chains':'chain_runs','scans':'scan_batches'}
 def _rows(table):
     database=ROOT/'execution.sqlite3'
     if not database.exists():return []
-    with sqlite3.connect('file:'+str(database.resolve())+'?mode=ro',uri=True) as connection:
+    with closing(sqlite3.connect(database.resolve().as_uri()+'?mode=ro',uri=True)) as connection:
         try:return [json.loads(row[0]) for row in connection.execute('SELECT body FROM '+table)]
         except sqlite3.OperationalError:return []
 
@@ -169,7 +170,7 @@ def _purge(kind,key,confirm_local,include_children):
             if target.exists() or target.is_symlink():
                 temporary=quarantine/str(index);target.replace(temporary);moved.append((target,temporary))
         if kind in TABLES:
-            with sqlite3.connect(ROOT/'execution.sqlite3') as connection:
+            with closing(sqlite3.connect(ROOT/'execution.sqlite3')) as connection, connection:
                 connection.execute('DELETE FROM '+TABLES[kind]+' WHERE id=?',(key,))
                 if kind=='attempts':connection.execute('DELETE FROM execution_events WHERE attempt_id=?',(key,))
     except Exception as exc:
@@ -414,7 +415,7 @@ def _pause_dependents(kind,key,reason):
             if item.get('state') not in ('FROZEN','COMPLETE'):item['state']='PAUSED'
             item['local_cleanup_blocker']=reason
             item['revision']=item.get('revision',0)+1
-            with sqlite3.connect(database) as connection:
+            with closing(sqlite3.connect(database)) as connection, connection:
                 connection.execute('UPDATE '+table+' SET state=?,body=? WHERE id=?',(item['state'],json.dumps(item,ensure_ascii=False),item['id']))
 
 

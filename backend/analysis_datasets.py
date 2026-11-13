@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from filelock import FileLock
@@ -81,13 +82,13 @@ def context():
     projects, attempts = {}, {}
     database = ROOT / 'index.sqlite3'
     if database.is_file():
-        with sqlite3.connect('file:' + str(database.resolve()) + '?mode=ro', uri=True) as connection:
+        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
             row = connection.execute('SELECT digest FROM revisions JOIN current ON revisions.revision=current.revision WHERE current.id=1').fetchone()
             if row:
                 projects = {item['id']: item for item in read_json(inside(ROOT, 'snapshots/' + row[0]), 32 * 1024 * 1024).get('projects', [])}
     database = ROOT / 'execution.sqlite3'
     if database.is_file():
-        with sqlite3.connect('file:' + str(database.resolve()) + '?mode=ro', uri=True) as connection:
+        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
             attempts = {item['id']: item for item in (json.loads(row[0]) for row in connection.execute('SELECT body FROM attempts'))}
     return projects, attempts
 

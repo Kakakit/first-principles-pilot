@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import URLError
@@ -55,7 +56,7 @@ def dispatching_count(workspace):
     database = workspace / 'execution.sqlite3'
     if not database.exists():
         return 0
-    with sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True, timeout=5) as connection:
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True, timeout=5)) as connection:
         return connection.execute("SELECT count(*) FROM attempts WHERE state='DISPATCHING'").fetchone()[0]
 
 

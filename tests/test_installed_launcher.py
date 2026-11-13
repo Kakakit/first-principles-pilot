@@ -9,6 +9,7 @@ import socket
 import tarfile
 import tempfile
 import unittest
+from contextlib import closing
 from unittest.mock import Mock, patch
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -23,13 +24,15 @@ launch=module('installed_backend','launch.py')
 
 
 class InstalledLauncherTests(unittest.TestCase):
-    def test_platform_icons_are_valid_and_macos_bundle_carries_resource(self):
+    def test_platform_icons_are_valid(self):
         from PIL import Image
-        import plistlib
         for extension in ('png','ico','icns'):
             with Image.open(ROOT/'packaging/icons'/('fpilot.'+extension)) as image:
                 image.load();self.assertGreaterEqual(min(image.size),256)
                 if extension=='ico':self.assertIn((16,16),image.ico.sizes());self.assertIn((256,256),image.ico.sizes())
+    @unittest.skipIf(os.name=='nt','macOS bundle symlink requires POSIX filesystem semantics')
+    def test_macos_bundle_carries_icon_resource(self):
+        import plistlib
         with tempfile.TemporaryDirectory() as tmp:
             output=Path(tmp);app=output/'FPilot';(app/'branding').mkdir(parents=True)
             import shutil
@@ -55,7 +58,7 @@ class InstalledLauncherTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             controller=launcher.Controller(Path(tmp))
             controller.workspace.mkdir()
-            with sqlite3.connect(controller.workspace/'execution.sqlite3') as c:
+            with closing(sqlite3.connect(controller.workspace/'execution.sqlite3')) as c, c:
                 c.execute('CREATE TABLE attempts(state TEXT)')
                 c.execute("INSERT INTO attempts VALUES('DISPATCHING')")
                 c.executemany('INSERT INTO attempts VALUES(?)',[('COMPLETED',)]*200)
