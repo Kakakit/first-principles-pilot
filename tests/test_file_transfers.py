@@ -102,9 +102,15 @@ class FileTransferTests(unittest.TestCase):
         self.assertEqual(t.download(row['id'])[0].read_bytes(),self.source.read_bytes())
 
     def test_symlink_source_and_unknown_job(self):
-        link=self.root/'link';link.symlink_to(self.source)
-        with self.assertRaisesRegex(ValueError,'普通文件'):t.observe({'kind':'local','path':str(link)})
         with self.assertRaises(ValueError):t.get('invalid')
+        link=self.root/'link'
+        try:
+            link.symlink_to(self.source)
+        except OSError as exc:
+            if os.name=='nt' and exc.winerror==1314:
+                self.skipTest('Windows user lacks symbolic-link privilege')
+            raise
+        with self.assertRaisesRegex(ValueError,'普通文件'):t.observe({'kind':'local','path':str(link)})
     def test_input_preparation_uses_version_pinned_cache(self):
         source={'attempt_id':'source','project_id':'project','alias':'school','remote_root':'/case','files':[{'name':'OUTCAR','size_bytes':self.stamp['size_bytes'],'modified_at':__import__('datetime').datetime.fromtimestamp(self.stamp['mtime_ns']/1e9,__import__('datetime').timezone.utc).isoformat()}]}
         with patch.object(t,'observe',return_value=self.stamp):

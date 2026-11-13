@@ -42,9 +42,9 @@ class StructureTests(unittest.TestCase):
         np.testing.assert_allclose(p.structure.lattice.matrix,s['lattice'],atol=1e-12)
 
     def test_reject_ambiguous_species_disorder_and_multi_cif(self):
-        raw=(FIXTURES/'Si.POSCAR').read_bytes()
+        raw=(FIXTURES/'Si.POSCAR').read_bytes().replace(b'\r\n',b'\n')
         with self.assertRaisesRegex(ValueError,'元素名称'):parse(raw.replace(b'Si\n2',b'2'))
-        cif=(FIXTURES/'Si.cif').read_bytes()
+        cif=(FIXTURES/'Si.cif').read_bytes().replace(b'\r\n',b'\n')
         with self.assertRaisesRegex(ValueError,'占位'):parse(cif.replace(b'Si1 Si 0 0 0 1',b'Si1 Si 0 0 0 0.5'),'cif')
         with self.assertRaisesRegex(ValueError,'多个结构'):parse(cif+cif.replace(b'data_Si',b'data_Second'),'cif')
 
@@ -62,7 +62,7 @@ class StructureTests(unittest.TestCase):
         np.testing.assert_allclose(p.structure.distance_matrix,[[0,2.35125897,2.35125897],[2.35125897,0,4.70251794],[2.35125897,4.70251794,0]],atol=1e-7)
 
     def test_bom_crlf_original_unchanged(self):
-        raw=b'\xef\xbb\xbf'+(FIXTURES/'Si.POSCAR').read_bytes().replace(b'\n',b'\r\n')
+        raw=b'\xef\xbb\xbf'+(FIXTURES/'Si.POSCAR').read_bytes().replace(b'\r\n',b'\n').replace(b'\n',b'\r\n')
         self.assertEqual(base64.b64decode(parse(raw)['source']['base64']),raw)
 
 if __name__=='__main__':unittest.main()

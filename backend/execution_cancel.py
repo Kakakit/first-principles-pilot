@@ -4,7 +4,7 @@ import json
 import re
 import shlex
 import uuid
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -142,7 +142,7 @@ def response(record):
 
 def journal(record, event):
     operation = record.get('cancellation', {})
-    with ex.db() as db:
+    with closing(ex.db()) as db, db:
         control.journal(db, record['id'], event, {k: operation.get(k) for k in
                         ('operation_id', 'state', 'requested_at', 'accepted_at', 'confirmed_at', 'error')})
 

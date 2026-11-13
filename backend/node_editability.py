@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from .file_cache import identity, ByteCache
 
@@ -45,7 +46,7 @@ def usage(root, project_id, expected_kinds=None, warnings=None):
     records = {}
     database = root / 'execution.sqlite3'
     if database.exists():
-        with sqlite3.connect('file:' + str(database.resolve()) + '?mode=ro', uri=True) as db:
+        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as db:
             tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for table in ('attempts', 'chain_runs', 'scan_batches'):
                 records[table] = [json.loads(r[0]) for r in db.execute(
