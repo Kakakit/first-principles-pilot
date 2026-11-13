@@ -8,8 +8,8 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(application):
     from . import problem_records
-    from . import analysis_queue,remote_transport
-    analysis_queue.start()
+    from . import analysis_queue,remote_transport,file_transfers
+    analysis_queue.start();file_transfers.start()
     try:problem_records.backfill()
     except Exception:
         import logging
@@ -19,10 +19,22 @@ async def lifespan(application):
     threading.Thread(target=extension_protocol.warm_doctors,name='extension-startup',daemon=True).start()
     try:yield
     finally:
-        analysis_queue.stop();remote_transport.close_all()
+        file_transfers.stop();analysis_queue.stop();remote_transport.close_all()
 
 
 app = FastAPI(title="First Principles Workbench", version="1.0.0",lifespan=lifespan)
+
+from .scan_continuation_api import router as scan_continuation_router
+app.include_router(scan_continuation_router)
+from .file_transfer_api import router as file_transfer_router
+app.include_router(file_transfer_router)
+
+@app.get('/api/result-catalog')
+def result_catalog(project_id:str=None):
+    from . import result_catalog as catalog
+    try:return {'records':catalog.listing(project_id)}
+    except (OSError,ValueError,KeyError,TypeError) as exc:raise HTTPException(400,str(exc))
+
 
 
 @app.get('/api/project-sync/hosts')

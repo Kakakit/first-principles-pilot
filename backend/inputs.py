@@ -469,7 +469,7 @@ def generate(project, node_id, context=None):
             **({'kmesh_generation':kmesh_generation} if kmesh_generation else {})}
 
 
-def freeze(project, node_id, reason, *, context=None, report=None, verification_mode='lightweight', defer_sources=False, execution_scope=None):
+def freeze(project, node_id, reason, *, context=None, report=None, verification_mode='lightweight', defer_sources=False, execution_scope=None, prepared_source=None):
     from . import recycle
     recycle.assert_available('projects',project['id'])
     if not isinstance(reason,str) or len(reason)>2000:raise ValueError('备注最多 2000 字')
@@ -485,7 +485,10 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
     source_contracts.validate_pead(report['files']['INCAR'])
     policy = report['source_plan']
     node = next(n for n in project['nodes'] if n['id'] == node_id)
-    if (defer_sources or not node['data'].get('sourceDraft')) and policy['parent_id']:
+    if prepared_source is not None:
+        # Internal batch preparation already used source_contracts.bind for this report.
+        source_contract = deepcopy(prepared_source)
+    elif (defer_sources or not node['data'].get('sourceDraft')) and policy['parent_id']:
         source_contract = {'schema': 'fpilot.source-contract.v2', 'mode': 'planned',
                            'purpose': policy['purpose'], 'files': policy['files'], 'structure': 'planned',
                            'roles': {}, 'plan_nodes': report.get('dependencies', []),

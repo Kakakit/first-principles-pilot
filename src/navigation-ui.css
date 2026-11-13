@@ -11,8 +11,11 @@
 .green-workbench .recent-visits>div{width:max-content}
 .green-workbench :is(.recent-visits,.workflow-templates,.project-menu)>div button{text-align:left;padding:8px;white-space:normal;color:var(--color-text)}
 .green-workbench :is(.recent-visits,.workflow-templates,.project-menu)>div button:hover{background:var(--color-accent-soft)}
-.green-workbench .project-list-entry:has(.project-menu[open]){padding-bottom:192px}
-.green-workbench .project-menu>div{inset:100% 0 auto auto}
+.green-workbench .project-list-row{display:block}
+.green-workbench .project-menu{position:static}
+.green-workbench .project-menu>summary{position:absolute;top:8px;right:0}
+.green-workbench .project-menu>div{position:static;inset:auto;min-width:0;width:100%;max-width:100%;margin-top:4px;overflow-wrap:anywhere}
+.green-workbench .project-menu>div button{min-width:0;max-width:100%}
 .green-workbench .workflow-templates>div{inset:100% 0 auto auto}
 .green-workbench .project-properties{padding:24px;max-width:768px;width:100%;margin:0 auto;color:var(--color-text)}
 .green-workbench .project-properties>header{margin-bottom:24px}

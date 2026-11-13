@@ -36,7 +36,7 @@ def _item(record, kind, fact, origin, locations, verification):
                  'producer_kind': kind, 'producer_id': record['id'], 'artifact_id': name,
                  'batch_id': record.get('scan_batch_id'), 'case_id': record.get('scan_case_id'),
                  'data_type': data_type, 'format_version': None, 'version': version}
-    return {'reference': reference, 'label': fact.get('label') or name, 'media_type': media,
+    return {'reference': reference, 'origin_kind': origin['kind'], 'label': fact.get('label') or name, 'media_type': media,
             'locations': locations, 'verification_status': verification,
             'requires_verification': True}
 
@@ -85,7 +85,7 @@ def catalog_record(record, kind):
         if remote_root and remote_fact:
             origin = {'kind': 'remote', 'alias': record['runtime']['alias'],
                       'path': remote_root.rstrip('/') + '/outputs/' + path}
-            fact.update(size_bytes=remote_fact['size_bytes'], modified_at=remote_fact.get('modified_at'))
+            fact.update(size_bytes=remote_fact['size_bytes'], modified_at=remote_fact.get('modified_at'),mtime_ns=remote_fact.get('mtime_ns'))
             if not cleaned:
                 locations.append(origin)
         try:

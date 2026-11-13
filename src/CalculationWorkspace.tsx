@@ -11,9 +11,11 @@ import InputPanel from './InputPanel';
 import ExecutionPanel from './ExecutionPanel';
 import WannierPanel from './WannierPanel';
 import ScanPanel from './ScanPanel';
+import type {ContinuationCreated} from './scanContinuation';
 
 type Part='physics'|'source'|'files';
 type Props={
+  onContinuationCreated?:(result:ContinuationCreated)=>void;
   onProject:(project:Project)=>void;project:Project;nodeId:string;view:'config'|'run';bundleId?:string;configPart?:Part;onConfigPart?:(part:Part)=>void;
   onLayer:(nodeId:string|null,layer:ParameterLayer)=>void;
   onTemplates:(templates:NonNullable<NonNullable<Project['parameters']>['templates']>)=>void;
@@ -35,6 +37,7 @@ export default function CalculationWorkspace(props:Props) {
   const [localPart,setLocalPart]=useSubmissionDraft<Part>('config:'+project.id+':'+nodeId+':part','physics');
   const part=props.configPart||localPart;
   const setPart=props.onConfigPart||setLocalPart;
+  if(node.data.continuationBatchId)return <ScanPanel project={project} scanNode={node} view={view} onDraft={props.onScanDraft} onReview={()=>onReview()} onConfigure={onConfigure} onContinuationCreated={props.onContinuationCreated}/>;
   if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   if(node.data.kind==='scan')return <IndependentScanWorkspace {...props}/>;
   return <div className="calculation-workspace">

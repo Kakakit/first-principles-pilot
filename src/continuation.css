@@ -1,0 +1,8 @@
+.continuation-dialog{width:min(960px,calc(100vw - 48px));max-width:960px;max-height:85vh;overflow:auto}
+.continuation-dialog .continuation-options{border:0;padding:0;margin:16px 0}
+.continuation-options label{display:grid;gap:4px;margin:8px 0;min-width:0}
+.continuation-options textarea{min-height:96px;font-family:var(--font-code)}
+.continuation-dialog .atoms-scroll{max-height:256px;margin:12px 0}
+.continuation-dialog details{padding:8px 0;overflow-wrap:anywhere}
+.continuation-dialog .input-text{max-height:256px}
+.continuation-dialog .checkbox-row{display:flex;align-items:center;gap:8px}

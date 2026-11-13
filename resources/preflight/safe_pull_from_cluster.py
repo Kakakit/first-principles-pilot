@@ -52,10 +52,7 @@ for item in json.loads(sys.argv[1]):
 '''
 
 
-def session_pull(host, request):
-    """One controlled batch over the app's already established SSH exec session."""
-    if host not in allowed_hosts(): raise PullError('不允许的 SSH 别名')
-    files=request.get('files',[])
+def prepare_batch(files, interpreter, companion=''):
     if not isinstance(files,list) or len(files)>128: raise PullError('明确文件清单无效')
     targets={}
     for item in files:
@@ -66,24 +63,12 @@ def session_pull(host, request):
         if fallback and (any(c in fallback for c in '\x00\n') or any(c in fallback for c in WILDCARDS)):
             raise PullError('备用来源必须是明确普通文件')
         targets[remote]=destination_path(remote,item['destination'])
-    interpreter=request['interpreter']
     if not interpreter.startswith('/') or '\n' in interpreter: raise PullError('必须使用登记解释器')
-    companion=request.get('companion_command','')
     command='set -e\n'+companion+'\n'+shlex.quote(interpreter)+' -c '+shlex.quote(SMALL_READER)+' '+shlex.quote(json.dumps(files))+'\n'
-    address=os.environ['FPILOT_REMOTE_SOCKET']
-    if address.startswith('tcp:127.0.0.1:'):
-        sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM);endpoint=('127.0.0.1',int(address.rsplit(':',1)[1]))
-    else:
-        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);endpoint=address
-    sock.settimeout(request.get('timeout',180)+65)
-    try:
-        sock.connect(endpoint);stream=sock.makefile('rwb')
-        stream.write(json.dumps({'alias':host,'command':command,'scope':os.environ.get('FPILOT_REMOTE_SCOPE'),
-            'token':os.environ.get('FPILOT_REMOTE_TOKEN'),
-            'lane':request.get('lane','normal'),'timeout':request.get('timeout',180),
-            'stdout_limit':sum(2*MAX_BYTES for _ in files)+1024*1024}).encode()+b'\n');stream.flush()
-        receipt=json.loads(stream.readline())
-    finally: sock.close()
+    return command,targets
+
+
+def publish_batch(host, targets, receipt):
     if receipt.get('exit_code')!=0 or receipt.get('stdout_truncated'):
         raise PullError('会话回传失败：'+receipt.get('stderr','')[-500:])
     copied=[];companion_lines=[]
@@ -101,6 +86,27 @@ def session_pull(host, request):
     if targets: raise PullError('受控回传文件回执不完整')
     return {'status':'downloaded','host':host,'files':copied,'companion_stdout':'\n'.join(companion_lines),
             'timing':receipt.get('timing'),'limit_bytes':MAX_BYTES}
+
+
+def session_pull(host, request):
+    if host not in allowed_hosts():raise PullError('不允许的 SSH 别名')
+    files=request.get('files',[])
+    command,targets=prepare_batch(files,request['interpreter'],request.get('companion_command',''))
+    address=os.environ['FPILOT_REMOTE_SOCKET']
+    if address.startswith('tcp:127.0.0.1:'):
+        sock=socket.socket(socket.AF_INET,socket.SOCK_STREAM);endpoint=('127.0.0.1',int(address.rsplit(':',1)[1]))
+    else:
+        sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);endpoint=address
+    sock.settimeout(request.get('timeout',180)+65)
+    try:
+        sock.connect(endpoint);stream=sock.makefile('rwb')
+        stream.write(json.dumps({'alias':host,'command':command,'scope':os.environ.get('FPILOT_REMOTE_SCOPE'),
+            'token':os.environ.get('FPILOT_REMOTE_TOKEN'),
+            'lane':request.get('lane','normal'),'timeout':request.get('timeout',180),
+            'stdout_limit':sum(2*MAX_BYTES for _ in files)+1024*1024}).encode()+b'\n');stream.flush()
+        receipt=json.loads(stream.readline())
+    finally: sock.close()
+    return publish_batch(host,targets,receipt)
 
 
 def remote_stat(host: str, remote_path: str) -> int:

@@ -46,6 +46,8 @@ def get(key):
 def _presentation_record(record):
     from . import extension_presentations as views
     record.update(views.describe(record))
+    record['computation_state']=('NOT_STARTED' if record.get('preparation_state') in ('PENDING','RUNNING','FAILED') and not record.get('analysis_started') else 'COMPLETED' if record.get('exit_code')==0 else record.get('state'))
+    record['collection_state']=record.get('collection_state') or ('COMPLETED' if record.get('result') else 'FAILED' if record.get('exit_code')==0 and record.get('state')=='FAILED' else 'PENDING')
     return record
 
 
@@ -60,7 +62,8 @@ def save(record):
 
 def history(project_id=None,attempt_id=None,include_recycled=False):
     base=ROOT/'analyses-v2';rows=[]
-    for path in base.glob('*/analysis.json') if base.exists() else []:
+    from .history_index import paths
+    for path in paths(ROOT,'analyses-v2',project_id=project_id,attempt_id=attempt_id):
         try:
             record=json.loads(path.read_text())
             if project_id and record['project_id']!=project_id:continue
@@ -187,7 +190,7 @@ def describe_sources(raw,project_id=None,refresh_files=False):
             assert_available('attempts',record['id'],record)
             if project_id and record.get('project_id')!=project_id:raise ValueError('来源不属于当前项目')
             stage,model=_stage(record);listing=(artifacts.refresh if refresh_files else artifacts.listing)(record['id'])
-            rows.append({'id':record['id'],'kind':'attempt','attempt_id':record['id'],'node_id':record.get('node_id'),
+            rows.append({'id':record['id'],'project_id':record.get('project_id'),'kind':'attempt','attempt_id':record['id'],'node_id':record.get('node_id'),
                          'stage':stage,'name':record.get('job_id') or ('已完成运行' if record['state']=='COMPLETED' else '未提交运行'),'alias':record['config']['alias'],
                          'state':record['state'],'evidence':record.get('evidence') or {},'input_summary':model,
                          'remote_root':ex.attempt_path(record)['shell'],'files':[f for f in listing['files'] if f['path']==f['name']],
@@ -229,7 +232,7 @@ def blockers(manifest,sources,location='local'):
             if candidate is None and not role.get('required',True):continue
             if not candidate or not 0<candidate['size_bytes']<=role['max_bytes']:
                 reasons.append(source['name']+('：文件清单待更新' if source.get('needs_refresh') or source.get('files_incomplete') else '：缺少有效 '+role['title']))
-            elif location=='local' and candidate['size_bytes']>artifacts.MAX_PULL_BYTES:reasons.append(source['name']+'：'+candidate['name']+' 超过 10 MiB，请在远端运行')
+
     return reasons
 
 
@@ -271,7 +274,11 @@ def _input_request(record,dest):
             elif record['location']=='local':
                 identity=(source['alias'],source['remote_root'],name,fact['size_bytes'],fact['modified_at'])
                 if identity not in local_copies:
-                    remote.source_pull(source,name,target)
+                    if target.is_file() and not target.is_symlink() and target.stat().st_size==fact['size_bytes']:
+                        actual,_=remote.source_identity(source,name)
+                        expected=str(fact['size_bytes'])+':'+str(int(datetime.fromisoformat(fact['modified_at']).timestamp()))
+                        if actual!=expected:raise ValueError('来源版本已变化，不能继续准备原分析')
+                    else:remote.source_pull(source,name,target)
                     digest=hashlib.sha256()
                     with target.open('rb') as stream:
                         for chunk in iter(lambda:stream.read(1024*1024),b''):
@@ -404,7 +411,8 @@ def _complete(record):
         outputs.append({**item,'size_bytes':size,'available':size<=artifacts.MAX_PULL_BYTES})
     # Downloads and the on-screen record must carry the same frozen lineage.
     p.atomic_json(path,result)
-    record.update(state=result['status'],result=result,outputs=outputs,scientific_validation=result['scientific_validation'])
+    record.update(state=result['status'],result=result,outputs=outputs,scientific_validation=result['scientific_validation'],
+                  computation_state='COMPLETED' if record.get('exit_code')==0 else result['status'],collection_state='COMPLETED',collection_error=None)
     save(record)
     if record['state']=='COMPLETED' and record['manifest'].get('presentation') and not inactive('analyses',record['id'],record):
         from . import extension_presentations as views
@@ -442,13 +450,16 @@ def _local(record):
     python=(record.get('runtime') or {}).get('python') or sys.executable
     environment=p.doctor(p.inspect_package(dest/'package'),python=python);record['runtime_doctor']=environment;save(record)
     if not environment['ready']:raise ValueError('本地环境未满足：'+', '.join(environment.get('missing') or [environment.get('reason') or '请检查依赖']))
+    record['preparation_state']='RUNNING';save(record)
     request=_input_request(record,dest);p.atomic_json(dest/'request.json',request)
+    record['preparation_state']='COMPLETED';save(record)
     checked=_check_result(p.invoke(dest/'package','check',dest/'request.json',python=python,timeout=min(record['manifest']['execution']['timeout_seconds'],60)))
     assert_available('analyses',record['id'],record)
     record['check']=checked;save(record)
     if checked['status']!='APPLICABLE':record.update(state='NOT_APPLICABLE',error=checked['reason']);save(record);return
     from .analysis_queue import subprocess_environment
     with (dest/'stdout.log').open('w') as stdout,(dest/'stderr.log').open('w') as stderr:
+        record['analysis_started']=True;save(record)
         process=subprocess.Popen([python,str(p.inside(dest/'package',record['manifest']['entrypoint'])),'run','--request',str(dest/'request.json')],cwd=dest,stdout=stdout,stderr=stderr,start_new_session=True,env=subprocess_environment((record.get('runtime') or {}).get('cores')))
         with _process_lock:_local_processes[record['id']]=process
         try:
@@ -465,6 +476,7 @@ def _local(record):
 
 
 def _collect(record):
+    record.update(computation_state='COMPLETED',collection_state='RUNNING');save(record)
     dest=directory(record['id']);path=dest/'outputs/result.json'
     if not path.exists():
         size = remote.output_info(record, ['result.json'])['result.json']['size_bytes']
@@ -595,20 +607,29 @@ def _execute(key):
         except Exception as exc:
             # A submission timeout is uncertainty, not a reason to resubmit.
             uncertain=record.get('stop_unconfirmed') or (record.get('submission_started') and record.get('exit_code') is None)
-            record.update(state='UNKNOWN' if uncertain else 'FAILED',error=str(exc)[-2500:]);save(record)
+            record.update(state='UNKNOWN' if uncertain else 'FAILED',error=str(exc)[-2500:])
+            if record.get('preparation_state')=='RUNNING' and not record.get('analysis_started'):record['preparation_state']='FAILED'
+            save(record)
 
 
 def refresh(key):
     with lock(key) as owned:
         record=get(key)
         if not owned:return {**record,'refresh_busy':True,'refresh_message':'后台正在核对或收集这条分析，请稍后查看记录'}
+        if record['state']=='FAILED' and record.get('preparation_state')=='FAILED' and not record.get('analysis_started'):
+            assert_available('analyses',key,record)
+            record.update(state='QUEUED',preparation_state='PENDING',error=None);save(record);schedule(key)
+            return {**record,'refresh_message':'正在继续准备原分析输入；分析程序尚未执行'}
         can_collect = record['state']=='FAILED' and record.get('exit_code')==0
         if record['location']=='local' or (record['state'] not in ACTIVE_REMOTE and not can_collect):
             return {**record,'refresh_message':'本条分析已有终态，无需重新执行'}
         if not record.get('remote_dir'):
             record.update(state='UNKNOWN',error='准备期间中断，请检查独立目录；未自动重投');return save(record)
         try:return _refresh(record)
-        except Exception as exc:record.update(state='FAILED' if record.get('exit_code') is not None else 'UNKNOWN',last_checked_at=now(),refresh_message='本次核对未完成；原任务未重新执行',error=str(exc)[-2500:]);return save(record)
+        except Exception as exc:
+            record.update(state='FAILED' if record.get('exit_code') is not None else 'UNKNOWN',last_checked_at=now(),refresh_message='本次核对未完成；原任务未重新执行',error=str(exc)[-2500:])
+            if record.get('computation_state')=='COMPLETED' or record.get('exit_code')==0:record.update(computation_state='COMPLETED',collection_state='FAILED',collection_error=str(exc)[-2500:])
+            return save(record)
 
 
 def tick():
@@ -620,7 +641,10 @@ def tick():
             refresh(record['id']);count+=1
         elif record['location']=='local' and record['state']=='RUNNING':
             if not process_alive(record.get('owner_pid')):
-                record.update(state='UNKNOWN',error='本地分析进程已中断，历史输入保留');save(record)
+                if record.get('preparation_state')=='RUNNING' and not record.get('analysis_started'):
+                    record.update(state='FAILED',preparation_state='FAILED',error='输入准备中断，可继续准备原输入；分析程序尚未执行')
+                else:record.update(state='UNKNOWN',error='本地分析进程已中断，历史输入保留')
+                save(record)
     return {'checked':count}
 
 

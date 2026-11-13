@@ -1,0 +1,20 @@
+.file-collection {margin-block:12px; min-width:0}
+.collection-selector {margin-block:12px;padding:12px;border:1px solid var(--border);border-radius:4px;max-height:360px;overflow:auto}
+.collection-selector label {display:flex;gap:8px;align-items:center;padding:6px 0}
+.collection-selector label input {width:auto;flex:none}
+.collection-selector label span {overflow-wrap:anywhere;flex:1}
+.collection-jobs {list-style:none;padding:0;display:grid;gap:8px}
+.collection-jobs li {display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px;border:1px solid var(--border);border-radius:4px}
+.collection-jobs li p {flex-basis:100%;margin:0;overflow-wrap:anywhere}
+.collection-jobs small {color:var(--text-muted)}
+.collection-jobs progress {max-width:150px}
+.result-catalog-entry {display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;border-bottom:1px solid var(--border)}
+.result-catalog-entry>button:first-child {text-align:left;flex:1;min-width:180px}
+.result-catalog-entry small {display:block;color:var(--text-muted);margin-top:4px}
+.analysis-datasets.embedded .handoff-heading,.analysis-datasets.embedded>.result-mode,.analysis-datasets.embedded>.filter-bar,.analysis-datasets.embedded .analysis-dataset-layout>aside {display:none}
+.analysis-datasets.embedded .analysis-dataset-layout {display:block}
+
+.result-catalog-entry>.catalog-open {display:flex;flex-direction:column;align-items:flex-start;text-align:left;gap:4px;padding:8px 12px;min-width:180px;white-space:normal}
+.result-catalog-entry>.catalog-open[aria-pressed="true"] {background:var(--surface-muted,#f2f7f5)}
+
+.result-catalog-entry {position:relative;padding-right:48px}

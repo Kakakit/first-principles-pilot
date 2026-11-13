@@ -13,7 +13,7 @@ import sys
 import tarfile
 import uuid
 from pathlib import Path
-from . import execution as ex, remote_paths, servers
+from . import execution as ex, remote_paths, servers, artifacts
 from . import extension_protocol as protocol
 from .storage import ROOT
 
@@ -243,8 +243,12 @@ def source_pull(source,name,destination):
     label=(source.get('name') or source['id'])+' / '+name
     if actual!=expected:raise ValueError(label+'：来源大小或修改时间变化（大小 bytes:mtime epoch，预期 '+expected+'，实际 '+actual+'），请刷新来源文件清单后重新准备')
     destination.parent.mkdir(parents=True,exist_ok=True)
-    from .safe_files import pull_many
-    pull_many(source['alias'],[{'remote_path':path,'destination':str(destination)}],timeout=120)
+    if fact['size_bytes']<=artifacts.MAX_PULL_BYTES:
+        from .safe_files import pull_many
+        pull_many(source['alias'],[{'remote_path':path,'destination':str(destination)}],timeout=120)
+    else:
+        from .file_transfers import prepare_source
+        prepare_source(source,name,destination)
     after,after_path=source_identity(source,name)
     if after!=expected or after_path!=path:raise ValueError(label+'：传输过程中来源变化（预期 '+expected+'，实际 '+after+'），请重新准备')
     if destination.stat().st_size!=fact['size_bytes']:raise ValueError(label+'：来源文件回传大小变化，请重新准备')
@@ -258,7 +262,7 @@ root=pathlib.Path('outputs').resolve(); out={}
 for name in json.loads(sys.argv[1]):
  p=root/name
  if not name or pathlib.Path(name).is_absolute() or '..' in pathlib.Path(name).parts or p.is_symlink() or not p.is_file() or root not in p.resolve().parents: raise ValueError('invalid output path')
- out[name]={'size_bytes':p.stat().st_size}
+ stamp=p.stat();out[name]={'size_bytes':stamp.st_size,'mtime_ns':stamp.st_mtime_ns}
 print(json.dumps(out))"""
     command='set -e\ncd '+remote_paths.shell_path(record['remote_dir'])+'\n'+shlex.quote(record['runtime']['python'])+' -c '+shlex.quote(code)+' '+shlex.quote(json.dumps(names))
     result=ex.ssh(record['runtime']['alias'],command,timeout=30)

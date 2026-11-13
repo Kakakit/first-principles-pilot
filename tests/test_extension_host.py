@@ -69,6 +69,23 @@ class ExtensionHostTests(unittest.TestCase):
         pull.assert_not_called()
         self.assertIn('结果摘要 result.json 为 11.0 MiB',updated['error'])
         self.assertEqual(updated['exit_code'],0)
+        self.assertEqual(updated['computation_state'],'COMPLETED')
+        self.assertEqual(updated['collection_state'],'FAILED')
+        self.assertIn('result.json',updated['collection_error'])
+    def test_interrupted_input_preparation_resumes_same_frozen_analysis(self):
+        self.install('sample-attempt');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'out'}})
+        payload={'extension_id':'sample-attempt','project_id':'project','sources':[{'kind':'attempt','attempt_id':'aa'}],'options':{'tolerance':1e-8}}
+        with patch.object(remote,'source_pull',side_effect=ValueError('input transfer interrupted')):
+            record=self.execute(payload)
+        self.assertEqual(record['preparation_state'],'FAILED');self.assertFalse(record.get('analysis_started'))
+        key=record['id'];sources=copy.deepcopy(record['sources'])
+        with patch.object(runs,'schedule') as schedule:
+            refreshed=runs.refresh(key);schedule.assert_called_once_with(key)
+        self.assertEqual(refreshed['state'],'QUEUED');self.assertEqual(refreshed['sources'],sources)
+        runs._execute(key)
+        completed=runs.get(key);self.assertEqual(completed['state'],'COMPLETED',completed.get('error'))
+        self.assertEqual(completed['id'],key);self.assertEqual(completed['sources'],sources)
+
     def test_project_artifact_listing_uses_only_available_same_project_outputs(self):
         key='b'*32
         target=runs.directory(key)/'outputs'/'identity.json'
@@ -138,7 +155,7 @@ class ExtensionHostTests(unittest.TestCase):
         self.install('sample-attempt');self.mock_attempts({'aa':{'POSCAR':SI.encode(),'OUTCAR':b'x'}},evidence={'vasp_timing':True})
         sources=runs.describe_sources([{'kind':'attempt','attempt_id':'aa'}],'project');m=p.installed('sample-attempt')['manifest'];self.assertIn('已完成运行：缺少 ediff_reached 证据',runs.blockers(m,sources))
         sources[0]['evidence']['ediff_reached']=True;sources[0]['files'][1]['size_bytes']=artifacts.MAX_PULL_BYTES+1
-        self.assertTrue(any('10 MiB' in s for s in runs.blockers(m,sources,'local')));self.assertFalse(runs.blockers(m,sources,'ssh'));self.assertTrue(runs.blockers(m,sources,'scheduler'))
+        self.assertFalse(runs.blockers(m,sources,'local'));self.assertFalse(runs.blockers(m,sources,'ssh'));self.assertTrue(runs.blockers(m,sources,'scheduler'))
     def test_64_sources_manifest_and_request_share_limits(self):
         from jsonschema import Draft7Validator
         package=self.root/'many';shutil.copytree(TEMPLATE,package)

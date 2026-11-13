@@ -10,6 +10,7 @@ export function staticDefaults(kind:Kind):Record<string,string>{
 }
 export function clearExecutionBindings(original:StepData):StepData {
   const data=structuredClone(original);
+  delete data.continuationBatchId;
   for(const key of Object.keys(data))if(/authorization|binding|attempt|result|prepared|chainState|execution_scope|remote|wannierDrafts|activeWannierDraft|windowAdoption|sourceDraft|audit|confirmation/i.test(key))delete data[key];
   if(data.parameters)delete data.parameters.confirmed_custom_tags;
   if(data.inputDraft){

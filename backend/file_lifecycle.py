@@ -140,7 +140,8 @@ def before_purge(kind,key):
 
 
 def _attempt_dependents(key, recycling_analyses=()):
-    refs=[]
+    from .file_transfers import dependents
+    refs=dependents('attempt',key)
     for row in recycle._rows('attempts'):
         if row['id']!=key and row.get('state') not in ATTEMPT_END-{'PREPARED'} and ('attempts',key) in recycle.source_ids(row):
             refs.append('下游任务 '+row['id'][:12])
@@ -174,6 +175,9 @@ def _check(asset,record,recycling_analyses=()):
         refs=_attempt_dependents(key,recycling_analyses)
         if refs:return '仍有来源引用 · '+'、'.join(refs[:8])
     elif kind=='analyses':
+        from .file_transfers import dependents
+        refs=dependents('analysis',key)
+        if refs:return '仍有文件收集引用 · '+'、'.join(refs[:8])
         analysis=record or asset.get('target') or {}
         if analysis.get('state') not in ANALYSIS_END:
             return '等待分析结束并确认终态'

@@ -122,6 +122,7 @@ def summary(kind, record, projects, attempts):
     return {'source_kind': kind, 'source_id': record['id'], 'project_id': owner,
             'project_name': project.get('name') or '未关联项目', 'source_names': names,
             'source_attempt_ids': ids, 'analysis_name': name, 'analysis_version': manifest.get('version') or '未记录',
+            'display_title':record.get('title') or ' · '.join([name,'／'.join(names)]).strip(' ·'),
             'created_at': record.get('created_at', ''), 'state': 'COMPLETED' if kind=='comparison' else record.get('state'),
             'summary': result.get('summary') or record.get('summary') or '',
             'warnings': result.get('warnings') or [], 'scientific_validation': record.get('scientific_validation') or 'NOT_PERFORMED',
@@ -142,7 +143,8 @@ def available(project_id=None):
     projects, attempts = context()
     rows = []
     for kind, (folder, schema, recycle_kind) in SOURCES.items():
-        for path in (ROOT / folder).glob('*/record.json' if kind=='comparison' else '*/analysis.json'):
+        from .history_index import paths
+        for path in paths(ROOT,folder,'record.json' if kind=='comparison' else 'analysis.json'):
             try:
                 record = source_record(kind, path.parent.name)
                 item = summary(kind, record, projects, attempts)

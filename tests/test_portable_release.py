@@ -158,7 +158,7 @@ class TransferTests(unittest.TestCase):
     def tearDown(self):transport.close_all()
     def test_windows_tcp_bridge_uses_same_small_file_gate_and_single_request(self):
         helper=Path(__file__).parents[1]/'resources/preflight/safe_pull_from_cluster.py'
-        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'FPILOT_IPC_MODE':'tcp'}),patch.object(safe_files,'CONTROLLED',helper),patch.object(transport,'_interpreter',return_value=sys.executable):
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'FPILOT_IPC_MODE':'tcp'}),patch.object(transport,'_interpreter',return_value=sys.executable):
             source=Path(tmp)/'source';source.write_text('same values');destination=Path(tmp)/'returned'
             def local(alias,command,**kwargs):
                 result=subprocess.run(['bash','-c',command],capture_output=True,text=True)

@@ -52,6 +52,17 @@ class AnalysisDatasetTests(unittest.TestCase):
             (dest / 'outputs/table.csv').write_text('value,unit\n1,eV\n')
         return dest
 
+    def test_unified_catalog_lists_results_without_registration_and_optional_snapshot(self):
+        from backend import result_catalog, extension_runs, execution
+        with patch.object(extension_runs,'ROOT',self.root),patch.object(execution,'ROOT',self.root):
+            rows=result_catalog.listing(self.project['id'])
+            self.assertEqual({row['kind'] for row in rows},{'attempt','v2'})
+            item=next(row for row in rows if row['kind']=='v2')
+            self.assertEqual(item['focus'],'history:v2:'+self.record['id'])
+            datasets.register('v2',self.record['id'],'independent copy','')
+            self.assertEqual({row['kind'] for row in result_catalog.listing(self.project['id'])},{'attempt','v2','snapshot'})
+            self.assertEqual(result_catalog.listing('other-project'),[])
+
     def test_comparison_registers_old_record_independently_and_survives_removal(self):
         record={'schema':'fpilot.wannier-band-comparison.v1','id':'e'*32,'project_id':self.project['id'],
                 'wannier_attempt_id':self.attempt['id'],'band_attempt_id':self.attempt['id'],'created_at':self.record['created_at'],
