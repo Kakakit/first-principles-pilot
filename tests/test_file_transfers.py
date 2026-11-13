@@ -90,6 +90,9 @@ class FileTransferTests(unittest.TestCase):
     @unittest.skipUnless(__import__('shutil').which('rsync') and os.name=='posix','requires local rsync')
     def test_rsync_adapter_resumes_through_local_ssh_stub(self):
         import sys
+        source_path=self.root/"中文 ' file [1];$name#.bin"
+        self.source.rename(source_path);self.source=source_path
+        self.stamp=t.observe({'kind':'local','path':str(self.source)})
         tools=self.root/'tools';tools.mkdir();ssh=tools/'ssh'
         ssh.write_text('#!'+sys.executable+'\nimport os,sys\na=sys.argv[1:]\nwhile a and a[0]=="-o":a=a[2:]\nassert a.pop(0)=="synthetic"\nos.execv("/bin/sh",["sh","-c"," ".join(a)])\n');ssh.chmod(0o755)
         source={**self.stamp,'kind':'remote','alias':'synthetic','connection':{}}

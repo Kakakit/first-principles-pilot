@@ -185,9 +185,10 @@ def _copy_remote(row, part):
     source = row['source'];alias = source['alias']
     if not shutil.which('rsync'):raise ValueError('本机尚无 rsync，无法进行可恢复文件传输')
     # Only the private .part is modified in-place. Readers see payload only after verification.
-    argv = ['rsync','--partial','--inplace','--no-whole-file','--timeout=60','-t',
+    # Send the path through rsync's protocol, not a second layer of shell quoting.
+    argv = ['rsync','--protect-args','--partial','--inplace','--no-whole-file','--timeout=60','-t',
             '-e','ssh -o BatchMode=yes -o ConnectTimeout=15', '--',
-            alias+':'+shlex.quote(source['path']),str(part)]
+            alias+':'+source['path'],str(part)]
     with (part.parent/'transport.log').open('wb') as log:
         process = subprocess.Popen(argv,stdout=log,stderr=log)
         try:
