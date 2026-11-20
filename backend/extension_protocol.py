@@ -194,7 +194,20 @@ def options_for(manifest, options):
     if size > MAX_OPTION_JSON:
         raise ValueError('普通参数超过 64 KiB')
     errors = sorted(Draft7Validator(schema).iter_errors(options),key=lambda e:str(e.path))
-    if errors: raise ValueError('参数不符合清单：' + '; '.join('.'.join(map(str,e.path)) + ': ' + e.message for e in errors[:8]))
+    if errors:
+        from .action_issues import ActionBlocked
+        issues=[];seen=set()
+        for error in errors[:8]:
+            paths=[list(error.path)]
+            if error.validator=='required' and isinstance(error.instance,dict):
+                paths=[list(error.path)+[name] for name in error.validator_value if name not in error.instance]
+            for path in paths:
+                field='extension.options.'+'.'.join(map(str,path))
+                if field in seen:continue
+                seen.add(field)
+                issues.append({'code':'extension.option','message':error.message,'level':'error','action':'edit',
+                               'target':{'page':'results','subpage':'post','field':field}})
+        raise ActionBlocked('参数不符合清单：' + '; '.join('.'.join(map(str,e.path)) + ': ' + e.message for e in errors[:8]),issues)
     return options
 
 

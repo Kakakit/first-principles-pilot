@@ -1,6 +1,7 @@
 """Prepare a separate restart=plot attempt from an immutable Wannier90 model."""
 from __future__ import annotations
 
+from . import batch_scheduler
 from . import wannier_lineage
 
 import hashlib
@@ -204,8 +205,7 @@ def submit(key):
         copy_checks += '\n' + '\n'.join(line for name, info in frozen['source_files'].items() for line in guard(shlex.quote(name), info))
     else:
         copy_checks = 'test "$(sha256sum "$dest"/'+shlex.quote(seed+'.chk')+" | awk '{print $1}')\" = "+shlex.quote(frozen['source_hashes'][seed+'.chk'])
-    submit_command = ('sbatch --parsable --export=ALL,W90_SEED=' + seed + ' ' + script_name if record['scheduler'] == 'slurm'
-                      else 'qsub -v W90_SEED=' + seed + ' ' + script_name)
+    submit_command = batch_scheduler.submit_command(record['scheduler'],script_name,seed)
     command = f'''set -e
 root={remote_paths.shell_path(record['remote_workspace_root'])}
 test "$(cd "$root" && pwd -P)" = {shlex.quote(record['remote_workspace_root_abs'])}
@@ -233,11 +233,10 @@ cat .job-id
     try:
         receipt = ex.ssh(record['config']['alias'], command, stream.getvalue(), timeout=900)
         if receipt.get('transport_state')=='NOT_SENT' and fast_dispatch.known_not_submitted(record,receipt):return ex.get(key)
-        token = r'\d+(?:\.[A-Za-z0-9_.-]+)?' if record['scheduler'] == 'pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
-        match = re.search(r'^FPILOT_JOB_ID=(' + token + r')\s*$', receipt['stdout'], re.M)
-        record.update(state='SUBMITTED' if match and receipt['exit_code'] == 0 else 'UNKNOWN',
-                      job_id=match.group(1).split(';', 1)[0] if match else None,
-                      dispatch_receipt=receipt, updated_at=ex.now())
+        identity=batch_scheduler.job_identity(record['scheduler'],receipt['stdout'])
+        record.update(state='SUBMITTED' if identity and receipt['exit_code']==0 else 'UNKNOWN',
+                      dispatch_receipt=receipt,updated_at=ex.now())
+        record.update({'job_id':None,**identity})
         fast_dispatch.tracking_note(record)
         ex.save(record)
         return ex.get(key)
@@ -246,4 +245,3 @@ cat .job-id
         fast_dispatch.tracking_note(record)
         ex.save(record)
         raise
-

@@ -5,7 +5,7 @@ export function runtimeFor(config:ServerConfig,profiles:RegisteredProfile[],sett
  const profile=profiles.find(item=>item.alias===alias);
  const registered=profile?{...config,alias,scheduler:profile.scheduler.toLowerCase(),queue:profile.queue,remote_workspace_root:profile.remote_workspace_root||'',pyw90_python:profile.pyw90_python||'',pyw90_package:profile.pyw90_package||'',mpi_executable:profile.mpi_executable,vasp_executable:program==='vasp_ncl'?profile.ncl_executable||'':profile.vasp_executable,environment_script:profile.environment_script,module:profile.module,launcher:profile.launcher,runtime_environment:profile.runtime_environment,pmi_library:profile.pmi_library,pmi_type:profile.pmi_type}:config;
  const saved=settings.runtimes[alias+':'+program];
- const next:ServerConfig={...registered,...saved,program,resource_policy:config.resource_policy||saved?.resource_policy||'scheduler_queue'};
+ const next:ServerConfig={...registered,...saved,program,resource_policy:profile?.resource_policy||(config.alias===alias&&config.resource_policy)||saved?.resource_policy||'scheduler_queue'};
  if(profile){
   next.scheduler=registered.scheduler;
   delete next.command_mode;

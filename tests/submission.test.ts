@@ -6,6 +6,9 @@ import {runtimeFor,emptySettings} from '../src/submissionDefaults.ts';
 
 test('resource policy defaults to the scheduler but never replaces an explicit or saved idle-wait choice',()=>{
  const config={alias:'host'},settings={...emptySettings,runtimes:{'host:vasp_std':{resource_policy:'wait_idle'}}};
+ const sites=[{alias:'b',scheduler:'pbs',resource_policy:'wait_idle'}] as Parameters<typeof runtimeFor>[1];
+ assert.equal(runtimeFor({...config,resource_policy:'scheduler_queue'},sites,emptySettings,'b').resource_policy,'wait_idle');
+ assert.equal(runtimeFor({...config,resource_policy:'wait_idle'},[],emptySettings,'new-host').resource_policy,'scheduler_queue');
  assert.equal(runtimeFor(config,[],emptySettings,'host').resource_policy,'scheduler_queue');
  assert.equal(runtimeFor(config,[],settings,'host').resource_policy,'wait_idle');
  assert.equal(runtimeFor({...config,resource_policy:'wait_idle'},[],emptySettings,'host').resource_policy,'wait_idle');

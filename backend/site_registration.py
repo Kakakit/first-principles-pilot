@@ -123,6 +123,11 @@ def status():
     return {**servers.read_config(),'removed_hosts':removed_records()}
 
 
+def resource_policy(value):
+    if value not in ('scheduler_queue','wait_idle'):raise ValueError('资源提交方式无效')
+    return value
+
+
 def register(value):
     with host_operation(value.get('alias')),registry_operation():
         return _register(value)
@@ -158,6 +163,7 @@ def _register(value):
     host={'status':'USER_CONFIGURED','scheduler':scheduler,'queue':queue,'partition':queue,'runtimes':runtimes,
         'python':{'known_interpreter':value.get('python','')},'remote_workspace_root':remote_root,
         'registration_evidence':'USER_CONFIGURATION_ONLY','program_validation':'NOT_PERFORMED'}
+    if scheduler!='custom':host['resource_policy']=resource_policy(value.get('resource_policy','scheduler_queue'))
     if script_mode:host['runtime_source']='script'
     if scheduler == 'custom':
         host.update(command_mode=validate_mode({**value, 'scheduler': scheduler}),
@@ -257,6 +263,9 @@ def update_paths(alias, value):
     from .execution_modes import command_mode, validate_mode, direct_limit
     with host_operation(alias), registry_operation():
         host=dict(servers.load_registry()['hosts'][alias])
+        if 'resource_policy' in value:
+            if command_mode(host):raise ValueError('仅调度器服务器支持排队偏好')
+            host['resource_policy']=resource_policy(value['resource_policy'])
         if command_mode(host):
             if 'command_mode' in value:
                 host['command_mode'] = validate_mode({**host, 'command_mode': value['command_mode']})
@@ -280,6 +289,7 @@ def update_paths(alias, value):
         if config_path.exists():
             config=json.loads(config_path.read_text(encoding='utf-8'))
             if config.get('alias')==alias:
+                if 'resource_policy' in value:config['resource_policy']=host['resource_policy']
                 config['remote_workspace_root']=host.get('remote_workspace_root',config.get('remote_workspace_root'))
                 write_json(config_path,config)
     return status()

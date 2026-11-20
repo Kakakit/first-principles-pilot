@@ -225,7 +225,7 @@ class SourceContractV2Tests(unittest.TestCase):
             with self.subTest(final_accuracy=expected):
                 (root / 'OUTCAR').write_text(early+last+'General timing and accounting informations\n')
                 record = copy.deepcopy(self.source); record['state'] = 'RUNNING'; self.store(record)
-                with patch.object(ex, 'ssh', side_effect=local), patch.object(ex, 'pbs_history_command', return_value="printf 'job_state = C\\n'\n"):
+                with patch.object(ex, 'ssh', side_effect=local), patch.object(ex.batch_scheduler, 'pbs_history_command', return_value="printf 'job_state = C\\n'\n"):
                     refreshed = ex.refresh(record['id'])
                 self.assertEqual(refreshed['evidence']['ionic_converged'], expected)
                 self.assertTrue(sources.electronic(refreshed['evidence']))

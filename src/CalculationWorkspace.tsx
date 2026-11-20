@@ -27,7 +27,7 @@ type Props={
   onWannierDraft:(nodeId:string,key:string,value:import('./wannierDraft').WannierDraft)=>void;
   onWindowChange:(value:WindowDraft)=>void;onWindowAdopt:(value:WindowAdoption)=>void;
   onScanDraft:NonNullable<Parameters<typeof ScanPanel>[0]['onDraft']>;
-  onReview:(bundleId?:string)=>void;onConfigure:()=>void;initialAttemptId?:string;onAttemptChange?:(id:string,reason:'user'|'default'|'replace')=>void;onResults:(nodeId:string,attemptId:string)=>void;
+  onReview:(bundleId?:string)=>void;onConfigure:()=>void;initialAttemptId?:string;onAttemptChange?:(id:string,reason:'user'|'default'|'replace')=>void;onResults:(nodeId:string,attemptId:string,subpage?:string)=>void;
 };
 
 export default function CalculationWorkspace(props:Props) {
@@ -51,7 +51,7 @@ export default function CalculationWorkspace(props:Props) {
         <ParameterPanel project={project} initialNodeId={nodeId} embedded onLayer={props.onLayer} onTemplates={props.onTemplates} onNumWann={props.onNumWann} onProjections={props.onProjections}/>
         <div className="configuration-next"><button className="button" onClick={()=>setPart('source')}>计算来源与重启</button><button className="button primary" onClick={()=>setPart('files')}>继续：k 点与输入审查</button></div>
       </div>}
-      {part==='source'&&<SourcePanel advanced project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/>}
+      {part==='source'&&<div data-action-field="input.source"><SourcePanel advanced project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/></div>}
       {part==='files'&&<div className="configuration-section">
         <InputPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onDraft} onSharedPotcar={props.onSharedPotcar} onReview={onReview}/>
       </div>}

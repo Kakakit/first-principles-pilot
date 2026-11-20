@@ -95,6 +95,11 @@ class SetupTests(unittest.TestCase):
                 'mpi_executable':'/opt/mpi/mpirun','environment_script':'/opt/env.sh','remote_workspace_root':'$HOME/230269265lht/my-work'}
             with patch.object(site_registration,'ROOT',root),patch.object(servers,'ROOT',root),patch.object(servers,'REGISTRY_PATH',registry),patch.object(servers.Path,'home',return_value=root):
                 saved=site_registration.register(config)
+                self.assertEqual(saved['config']['resource_policy'],'scheduler_queue')
+                site_registration.update_paths('my-lab',{'resource_policy':'wait_idle'})
+                self.assertEqual(servers.select_profile('my-lab')['resource_policy'],'wait_idle')
+                self.assertEqual(servers.registered_profiles()[0]['resource_policy'],'wait_idle')
+                with self.assertRaisesRegex(ValueError,'资源提交方式'):site_registration.update_paths('my-lab',{'resource_policy':'unknown'})
                 self.assertEqual(saved['config']['vasp_executable'],config['vasp_executable'])
                 self.assertEqual(servers.load_registry()['hosts']['my-lab']['program_validation'],'NOT_PERFORMED')
                 self.assertEqual(servers.registered_profiles()[0]['runtime_status'],'USER_CONFIGURED')

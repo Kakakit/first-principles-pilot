@@ -8,7 +8,7 @@ from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from . import execution as ex, execution_control as control, recycle, scans, chain_runs
+from . import batch_scheduler, execution as ex, execution_control as control, recycle, scans, chain_runs
 from .attempt_operations import locked
 from .execution_modes import is_direct
 
@@ -84,6 +84,7 @@ def remote(record, action):
     operation = record.get('cancellation', {})
     # Only a previously accepted cancellation of this exact immutable identity
     # can use scheduler accounting after the user has removed its directory.
+    if payload['scheduler']=='slurm':payload['job_cluster']=batch_scheduler.cluster_for(record)
     payload['allow_missing_identity'] = (action == 'inspect' and bool(operation.get('accepted_at'))
         and operation.get('state') in PENDING and operation.get('binding') == binding(record)
         and bool(operation.get('facts', {}).get('owner')))
@@ -105,6 +106,7 @@ def remote(record, action):
 
 def binding(record):
     value = {k: record.get(k) for k in ('id', 'project_id', 'job_id', 'remote_path_absolute', 'dispatch_started_at')} | {'alias': record['config']['alias'], 'scheduler': ex.scheduler_name(record)}
+    if value['scheduler']=='slurm' and batch_scheduler.cluster_for(record):value['job_cluster']=batch_scheduler.cluster_for(record)
     if is_direct(record['config']):
         value.update(command_mode='direct', command_run_id=record.get('command_run_id'))
     return value

@@ -1,4 +1,5 @@
 from .calculation_nodes import kind as calculation_kind, owner as attempt_owner
+from . import batch_scheduler
 """C2: one explicit Wannier90 attempt from a completed VASP interface attempt.
 
 Large matrices stay on the same host.  A PREPARED record freezes their hashes,
@@ -637,8 +638,7 @@ def submit(key):
     if expected_links != record['source_file_plan']:
         raise ValueError('Wannier90 矩阵链接策略与准备时不同，没有提交')
     links = ex.source_file_commands({'source_path': bundle['source_path']}, expected_links)
-    submit_command = ('sbatch --parsable --export=ALL,W90_SEED=' + bundle['seed'] + ' ' + script_name if scheduler == 'slurm'
-                      else 'qsub -v W90_SEED=' + bundle['seed'] + ' ' + script_name)
+    submit_command = None if scheduler=='custom' else batch_scheduler.submit_command(scheduler,script_name,bundle['seed'])
     if scheduler=='custom':
         from .custom_commands import start_command
         submit_command=start_command(record,key,record['script'])
@@ -668,11 +668,10 @@ cat .job-id
         if scheduler=='custom':
             from .custom_commands import dispatch_result
             return dispatch_result(record,receipt)
-        token = r'\d+(?:\.[A-Za-z0-9_.-]+)?' if scheduler == 'pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
-        match = re.search(r'^FPILOT_JOB_ID=(' + token + r')\s*$', receipt['stdout'], re.M)
-        job_id = match.group(1).split(';', 1)[0] if match else None
-        record.update(state='SUBMITTED' if job_id and receipt['exit_code'] == 0 else 'UNKNOWN',
-                      job_id=job_id, dispatch_receipt=receipt, updated_at=ex.now())
+        identity=batch_scheduler.job_identity(scheduler,receipt['stdout'])
+        record.update(state='SUBMITTED' if identity and receipt['exit_code']==0 else 'UNKNOWN',
+                      dispatch_receipt=receipt,updated_at=ex.now())
+        record.update({'job_id':None,**identity})
         fast_dispatch.tracking_note(record)
         ex.save(record)
         return ex.get(key)
@@ -709,15 +708,7 @@ if test -s ''' + seed + '''.wout; then
 fi
 '''
     if automatic:command=ex.file_status_command(record,root,command,[seed+'.wout',seed+'.win','.exit-status','.job-id'])
-    if record.get('job_id'):
-        job = shlex.quote(record['job_id'])
-        if scheduler == 'pbs':
-            command += ex.pbs_history_command(record['job_id'])
-        else:
-            command += "squeue -h -j {} -o 'FPILOT_SLURM_LIVE=%T' || true\n".format(job)
-            command += "sacct -n -P -j {} --format=JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' '$1 == \"{}\" {{print \"FPILOT_SLURM_ACCOUNT=\"$2\"|\"$3; exit}}' || true\n".format(job, record['job_id'])
-    else:
-        command += ex.recovered_job_command(scheduler)
+    command+=batch_scheduler.query(scheduler,record)
     receipt = ex.ssh(record['config']['alias'], command, timeout=30)
     if receipt.get('exit_code')!=0 or 'FPILOT_FILES_CHANGED' in receipt.get('stdout',''):
         record.update(tracking_error=receipt.get('stderr') or '原文件核查未完成；保留上次状态与证据',
@@ -726,30 +717,17 @@ fi
         return ex.save(record,expected_updated_at=previous)
     if automatic:ex.remember_file_status(record,receipt)
     out = receipt['stdout']
-    recovered=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',out,re.M)
-    if recovered and not record.get('job_id'):record['job_id']=recovered.group(1)
+    if not record.get('job_id'):record.update(batch_scheduler.job_identity(scheduler,out))
     exit_match = re.search(r'^FPILOT_EXIT=(\d+)', out, re.M)
     done = re.search(r'^FPILOT_DONE=([1-9]\d*)', out, re.M) is not None
     final = re.search(r'^FPILOT_FINAL=([1-9]\d*)', out, re.M) is not None
     disentangled = re.search(r'^FPILOT_DIS=([1-9]\d*)', out, re.M) is not None
-    pbs_state = re.search(r'job_state\s*=\s*([A-Z])', out)
-    slurm_live = re.search(r'^FPILOT_SLURM_LIVE=([A-Z_+]+)', out, re.M)
-    slurm_account = re.search(r'^FPILOT_SLURM_ACCOUNT=([A-Z_+]+)\|([^\s]+)', out, re.M)
-    trace_exit, trace_complete = ex.pbs_history_evidence(out) if scheduler == 'pbs' else (None, False)
-    terminal = bool((pbs_state and pbs_state.group(1) == 'C') or (trace_complete and trace_exit == 0)) if scheduler == 'pbs' else bool(slurm_account and slurm_account.group(1).split('+',1)[0] == 'COMPLETED')
-    state = 'UNKNOWN'
+    state,terminal,scheduler_evidence=batch_scheduler.observation(scheduler,out)
     if exit_match:
-        state = 'FAILED' if exit_match.group(1) != '0' or not done else 'COMPLETED' if terminal else 'EXITING'
-    elif pbs_state:
-        state = {'Q':'QUEUED','R':'RUNNING','H':'HELD','E':'EXITING'}.get(pbs_state.group(1), 'UNKNOWN')
-    elif slurm_live:
-        state = {'PENDING':'QUEUED','RUNNING':'RUNNING','COMPLETING':'EXITING'}.get(slurm_live.group(1), 'UNKNOWN')
-    elif slurm_account and slurm_account.group(1).split('+',1)[0] in {'FAILED','CANCELLED','TIMEOUT','NODE_FAIL','OUT_OF_MEMORY','PREEMPTED'}:
-        state = 'FAILED'
+        if exit_match[1]!='0' or not done:state='FAILED'
+        elif state!='FAILED':state='COMPLETED' if terminal else 'EXITING'
     record.update(state=state, status_receipt=receipt, updated_at=ex.now(),tracking_error='',tracking_checked_at=ex.now(),
-                  evidence={'scheduler':scheduler,
-                            'scheduler_state':pbs_state.group(1) if pbs_state else 'C' if trace_complete and trace_exit == 0 else slurm_live.group(1) if slurm_live else slurm_account.group(1) if slurm_account else None,
-                            'scheduler_evidence_source':'tracejob' if trace_complete else 'qstat' if pbs_state else 'sacct' if slurm_account else None,
+                  evidence={**scheduler_evidence,
                             'wrapper_exit':int(exit_match.group(1)) if exit_match else None,
                             'wannier_all_done':done, 'localization_final_state':final,
                             'disentanglement_converged':disentangled,

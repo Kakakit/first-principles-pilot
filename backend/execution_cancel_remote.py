@@ -24,16 +24,26 @@ def small(path):
         os.close(fd)
 
 
+def cluster_args(payload):
+    cluster=payload.get('job_cluster')
+    if not cluster:return []
+    if payload['scheduler']!='slurm' or cluster.lower()=='all' or not re.fullmatch(r'[A-Za-z0-9_.-]+',cluster):
+        raise ValueError('Slurm 集群名无效')
+    return ['-M',cluster]
+
+
 def inspect(payload):
     root, job = payload['root'], payload['job_id']
     if not re.fullmatch(r'\d+(?:\.[A-Za-z0-9_.-]+)?', job):
         raise ValueError('需要准确的单个作业号')
     if not root.startswith('/') or os.path.realpath(root) != root:
         raise ValueError('远端目录或符号链接身份不符')
+    options=cluster_args(payload)
+    marker_job=job+';'+options[1] if options else job
     identity_verified = False
     try:
         marker = json.loads(small(root + '/_fpilot/attempt.json'))
-        if marker.get('id') != payload['attempt_id'] or small(root + '/.job-id').strip() != job:
+        if marker.get('id') != payload['attempt_id'] or small(root + '/.job-id').strip() != marker_job:
             raise ValueError('远端 attempt 或作业号与记录不符')
         identity_verified = True
     except FileNotFoundError:
@@ -68,7 +78,7 @@ def inspect(payload):
         raise ValueError('无法核对原作业状态；队列中缺失不证明已停止。' + error[-250:])
     if payload['scheduler'] != 'slurm' or not job.isdigit():
         raise ValueError('调度器或作业号格式不受支持')
-    code, text, _ = command(['scontrol', 'show', 'job', job, '-o'])
+    code, text, _ = command(['scontrol', *options, 'show', 'job', job, '-o'])
     if code == 0:
         found = re.search(r'\bJobId=(\S+)', text)
         owner = re.search(r'\bUserId=([^\s(]+)', text)
@@ -79,7 +89,7 @@ def inspect(payload):
         status = state[1]
         return {'scheduler_state': status, 'terminal': status in TERMINAL,
                 'exit_code': (int(exit_status[1]) or int(exit_status[2])) if exit_status else None, 'owner': user}
-    code, text, _ = command(['sacct', '-n', '-P', '-j', job, '--format=JobIDRaw,State,ExitCode,User'])
+    code, text, _ = command(['sacct', *options, '-n', '-P', '-j', job, '--format=JobIDRaw,State,ExitCode,User'])
     for line in text.splitlines() if code == 0 else []:
         parts = line.split('|')
         if len(parts) >= 4 and parts[0].strip() == job and parts[3].strip() == user:
@@ -96,7 +106,7 @@ TERMINAL = {'COMPLETED', 'CANCELLED', 'FAILED', 'TIMEOUT', 'NODE_FAIL', 'OUT_OF_
 def run(payload):
     facts = inspect(payload)
     if payload['action'] == 'cancel' and not facts['terminal']:
-        args = ['qdel', payload['job_id']] if payload['scheduler'] == 'pbs' else ['scancel', payload['job_id']]
+        args = ['qdel', payload['job_id']] if payload['scheduler'] == 'pbs' else ['scancel', *cluster_args(payload), payload['job_id']]
         # Exactly one scheduler command. Any ambiguous reply is recovered with
         # inspect only; it is never sent again by this operation.
         try:

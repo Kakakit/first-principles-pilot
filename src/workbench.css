@@ -39,3 +39,83 @@
 @media(max-width:1200px){.green-workbench .workspace-tabs>div{gap:16px}.green-workbench .toolbar-right>select{width:128px}.green-workbench .canvas-toolbar{padding:8px;gap:8px}.workflow-task-strip{gap:12px;padding-left:12px;padding-right:12px}}
 @media(max-width:900px){.green-workbench .sidebar{width:256px}.green-workbench .workflow-inspector{position:absolute;inset:0 0 0 auto;width:min(var(--workflow-panel-width),84vw);max-width:84vw;min-width:0;border-left:1px solid var(--ui-divider);box-shadow:var(--shadow-menu);z-index:15}.workflow-panel-resizer{display:none}.green-workbench .workspace-tabs>div{gap:12px}.green-workbench .topbar{padding-left:12px;padding-right:12px}.green-workbench .top-right{gap:8px}.green-workbench .canvas-toolbar .toolbar-right{margin-left:auto}.workflow-task-strip{gap:8px 12px}.workflow-task-strip>span:first-child{display:none}.green-workbench .structure-workspace{padding:16px}.green-workbench .structure-data{grid-template-columns:1fr}}
 @media(max-width:960px){.green-workbench .sidebar{width:min(var(--project-sidebar-width,256px),calc(100vw - 48px))}.project-sidebar-resizer{display:none}}
+
+/* Flow editing surfaces use node colour for identity and accent for selection. */
+.green-workbench .flow-surface .step-card {
+  background:var(--color-surface);
+  border:1px solid var(--ui-divider);
+  border-radius:12px;
+  box-shadow:0 2px 6px color-mix(in srgb,var(--color-text) 8%,transparent);
+  padding:16px;
+  transition:border-color 120ms ease-out,box-shadow 120ms ease-out;
+}
+.green-workbench .flow-surface .step-icon {
+  background:var(--node-fill);
+  border-radius:8px;
+  width:32px;
+  height:32px;
+}
+.green-workbench .flow-surface .step-top {margin:0;color:var(--color-muted-text)}
+.green-workbench .flow-surface .step-top strong {color:var(--color-text);font-size:var(--ui-section);overflow-wrap:anywhere}
+.green-workbench .flow-surface .step-card>strong {min-height:0;margin:8px 0}
+.green-workbench .flow-surface .node-inheritance {margin:12px 0;color:var(--color-muted-text)}
+.green-workbench .flow-surface .step-foot {
+  border-top:1px solid var(--ui-divider);
+  margin-top:12px;
+  padding-top:8px;
+  color:var(--color-muted-text);
+}
+.green-workbench .flow-surface .step-foot>span:first-child::before {
+  content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  background:currentColor;margin-right:6px;vertical-align:middle;
+}
+.green-workbench .flow-surface .step-card.is-selected {
+  border-color:var(--color-accent);outline:none;
+  box-shadow:0 0 0 2px var(--color-accent),0 4px 12px color-mix(in srgb,var(--color-text) 12%,transparent);
+}
+.green-workbench .flow-surface .react-flow__node.dragging .step-card {
+  box-shadow:0 8px 24px color-mix(in srgb,var(--color-text) 22%,transparent);
+}
+.green-workbench .toolbar-right>select {width:clamp(96px,9vw,144px)}
+@media(prefers-reduced-motion:no-preference) {
+  .workflow-inspector {animation:workflow-inspector-enter 180ms ease-out}
+  .flow-surface .react-flow__edge-path {transition:stroke 120ms ease-out,stroke-width 120ms ease-out}
+}
+@keyframes workflow-inspector-enter {from {opacity:0;transform:translateX(8px)} to {opacity:1;transform:none}}
+.green-workbench .step-identity {display:grid;gap:2px;min-width:0;overflow-wrap:anywhere}
+.green-workbench .step-identity>strong {font-size:var(--ui-section);color:var(--color-text);line-height:1.4}
+
+/* Keep React Flow's measured anchor fixed; enlarge its visible ring and drag target. */
+.flow-surface .react-flow__handle.connectable {
+  background:transparent;
+  border-color:transparent;
+}
+.flow-surface .react-flow__handle.connectable::before,
+.flow-surface .react-flow__handle.connectable::after {
+  content:"";
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+}
+.flow-surface .react-flow__handle.connectable::before {
+  width:32px;
+  height:32px;
+}
+.flow-surface .react-flow__handle.connectable::after {
+  box-sizing:border-box;
+  width:16px;
+  height:16px;
+  border:2px solid var(--color-canvas-edge);
+  background:var(--color-surface);
+  pointer-events:none;
+}
+.flow-surface .react-flow__handle.connectable:is(:hover,.connectingfrom,.valid)::after {
+  border-color:var(--color-accent);
+  background:var(--color-accent-soft);
+  box-shadow:0 0 0 3px var(--color-accent-soft);
+}
+@media(pointer:coarse) {
+  .flow-surface .react-flow__handle.connectable::before {width:44px;height:44px}
+}

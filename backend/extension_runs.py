@@ -173,6 +173,7 @@ def source_catalog(project_id):
 
 
 def describe_sources(raw,project_id=None,refresh_files=False):
+    from .calculation_nodes import owner
     if not isinstance(raw,list) or not 1<=len(raw)<=p.MAX_SOURCES:raise ValueError(f'请选择 1–{p.MAX_SOURCES} 个来源')
     rows=[]
     for value in raw:
@@ -190,7 +191,7 @@ def describe_sources(raw,project_id=None,refresh_files=False):
             assert_available('attempts',record['id'],record)
             if project_id and record.get('project_id')!=project_id:raise ValueError('来源不属于当前项目')
             stage,model=_stage(record);listing=(artifacts.refresh if refresh_files else artifacts.listing)(record['id'])
-            rows.append({'id':record['id'],'project_id':record.get('project_id'),'kind':'attempt','attempt_id':record['id'],'node_id':record.get('node_id'),
+            rows.append({'id':record['id'],'project_id':record.get('project_id'),'kind':'attempt','attempt_id':record['id'],'owner_node_id':owner(record),'node_id':record.get('node_id'),
                          'stage':stage,'name':record.get('job_id') or ('已完成运行' if record['state']=='COMPLETED' else '未提交运行'),'alias':record['config']['alias'],
                          'state':record['state'],'evidence':record.get('evidence') or {},'input_summary':model,
                          'remote_root':ex.attempt_path(record)['shell'],'files':[f for f in listing['files'] if f['path']==f['name']],
@@ -214,24 +215,29 @@ def selected_input(role,source):
 
 
 def blockers(manifest,sources,location='local'):
+    from .action_issues import IssueMessages
+    reasons=IssueMessages()
     try:manifest=p.mode_manifest(manifest,sources)
-    except ValueError as exc:return [str(exc)]
-    if location not in ('local','ssh'):return ['扩展只支持本地或服务器直接命令行；大型计算请使用计算节点']
-    reasons=[];bounds=manifest['sources']
-    if not bounds['min']<=len(sources)<=bounds['max']:reasons.append(f"需要 {bounds['min']}–{bounds['max']} 个来源")
-    if location not in manifest['execution']['locations']:reasons.append('清单不支持此运行位置')
+    except ValueError as exc:
+        reasons.add('extension.mode',str(exc),'extension.sources',page='results',subpage='post');return reasons
+    if location not in ('local','ssh'):
+        reasons.add('extension.location','扩展只支持本地或服务器直接命令行；大型计算请使用计算节点','extension.location',page='results',subpage='post');return reasons
+    bounds=manifest['sources']
+    if not bounds['min']<=len(sources)<=bounds['max']:reasons.add("extension.source-count",f"需要 {bounds['min']}–{bounds['max']} 个来源","extension.sources",page="results",subpage="post")
+    if location not in manifest['execution']['locations']:reasons.add('extension.location','清单不支持此运行位置','extension.location',page='results',subpage='post')
     for source in sources:
-        if source['kind'] not in manifest['contexts']:reasons.append(source['name']+'：来源类型不适用')
-        if manifest['stages'] and source['stage'] not in manifest['stages']:reasons.append(source['name']+'：计算阶段不适用')
+        if source['kind'] not in manifest['contexts']:reasons.add('extension.source-kind',source['name']+'：来源类型不适用','extension.sources',page='results',subpage='post')
+        if manifest['stages'] and source['stage'] not in manifest['stages']:reasons.add('extension.source-stage',source['name']+'：计算阶段不适用','extension.sources',page='results',subpage='post')
         for required in manifest['evidence']:
             if not (source['state']=='COMPLETED' if required=='COMPLETED' else source['evidence'].get(required) is True):
-                reasons.append(source['name']+'：缺少 '+required+' 证据')
+                reasons.add('extension.source-evidence',source['name']+'：缺少 '+required+' 证据','run.history',page='run',subpage=None,action='inspect',node_id=source.get('owner_node_id') or source.get('node_id'))
+                reasons.issues[-1]['target']['attemptId']=source.get('attempt_id','')
         for role in manifest['inputs']:
             try:candidate=selected_input(role,source)
-            except ValueError as exc:reasons.append(source['name']+'：'+str(exc));continue
+            except ValueError as exc:reasons.add('extension.input-selection',source['name']+'：'+str(exc),'extension.sources',page='results',subpage='post');continue
             if candidate is None and not role.get('required',True):continue
             if not candidate or not 0<candidate['size_bytes']<=role['max_bytes']:
-                reasons.append(source['name']+('：文件清单待更新' if source.get('needs_refresh') or source.get('files_incomplete') else '：缺少有效 '+role['title']))
+                reasons.add('extension.input-file',source['name']+('：文件清单待更新' if source.get('needs_refresh') or source.get('files_incomplete') else '：缺少有效 '+role['title']),'extension.sources',page='results',subpage='post')
 
     return reasons
 
@@ -244,17 +250,20 @@ def context(payload):
         # Stage/role filtering comes only from the manifest, never an ID branch.
         if any(s['kind'] not in item['contexts'] or item['stages'] and s['stage'] not in item['stages'] for s in sources):continue
         reasons=blockers(item,sources,payload.get('location','local'))
+        if not hasattr(reasons,'issues'):
+            from .action_issues import IssueMessages
+            legacy=reasons;reasons=IssueMessages();reasons.extend(legacy)
         runtime=None;environment=None;location=payload.get('location','local')
         if location in item['execution']['locations']:
             try:
                 runtime=environments.resolve(item['id'],location,payload.get('alias',''))
                 if location=='local':
                     environment=p.doctor(p.installed(item['id']),python=runtime['python'],background=True)
-                    if environment and not environment['ready']:reasons.append('本机缺依赖或 Python 不可用：'+', '.join(environment.get('missing') or [environment.get('reason') or '请重新检查环境']))
-            except ValueError as exc:reasons.append(str(exc))
+                    if environment and not environment['ready']:reasons.add('extension.environment','本机缺依赖或 Python 不可用：'+', '.join(environment.get('missing') or [environment.get('reason') or '请重新检查环境']),'settings.extensions',page='settings',section='extensions',subpage=None)
+            except ValueError as exc:reasons.add('extension.runtime',str(exc),'settings.extensions',page='settings',section='extensions',subpage=None)
         try:display=p.mode_manifest(item,sources)
         except ValueError:display=item
-        rows.append({**display,'blockers':reasons,'runtime':runtime,'runtime_doctor':environment,
+        rows.append({**display,'blockers':reasons,'blocking_issues':reasons.issues,'runtime':runtime,'runtime_doctor':environment,
                      'environment_checking':location=='local' and runtime is not None and environment is None})
     return {'extensions':rows,'sources':[{k:v for k,v in s.items() if k!='poscar'} for s in sources]}
 

@@ -71,6 +71,19 @@ class LoadTests(unittest.TestCase):
         self.assertEqual(ssh.call_count,2);self.assertIn('--jobs=123_2,124',ssh.call_args_list[0].args[1])
         self.assertEqual(remote_monitor.active_state(rows[0],result['a']),'RUNNING')
 
+    def test_slurm_same_host_and_job_number_on_different_clusters(self):
+        base={'job_id':'12','state':'RUNNING','config':{'alias':'shared','scheduler':'slurm'}}
+        rows=[dict(base,id='a',job_cluster='east'),
+              dict(base,id='b',dispatch_receipt={'stdout':'FPILOT_JOB_ID=12;west'})]
+        with patch.object(remote_monitor.ex,'ssh',side_effect=[
+            {'exit_code':0,'stdout':'12|PENDING'}, {'exit_code':0,'stdout':'12|RUNNING'}
+        ]) as ssh:
+            result=remote_monitor.batch(rows)
+        self.assertIn('-M east',ssh.call_args_list[0].args[1])
+        self.assertIn('-M west',ssh.call_args_list[1].args[1])
+        self.assertEqual(remote_monitor.active_state(rows[0],result['a']),'QUEUED')
+        self.assertEqual(remote_monitor.active_state(rows[1],result['b']),'RUNNING')
+
     def test_get_listing_never_launches_ssh_and_stale_cache_is_not_absence_evidence(self):
         record={'id':'a','state':'RUNNING','config':{'alias':'fixture'}}
         folder=self.root/'artifact-cache';folder.mkdir()

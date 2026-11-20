@@ -30,7 +30,7 @@ export function normalizeLocation(route:TaskDestination):TaskNavigation{
    if(programNames.includes(route.program||''))result.program=route.program;
   }
  }
- if(route.focus&&['settings','datasets','problems'].includes(page))result.focus=route.focus;
+ if(route.focus&&['settings','datasets','problems','config','run','results','flow','structure'].includes(page))result.focus=route.focus;
  if(route.bundleId&&node&&page==='run')result.bundleId=route.bundleId;
  return result;
 }

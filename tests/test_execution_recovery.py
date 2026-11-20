@@ -32,11 +32,11 @@ class RecoveryTests(unittest.TestCase):
             c.execute('INSERT INTO attempts VALUES(?,?,?)',(key,state,json.dumps(r)));c.commit()
         return r
 
-    def test_disconnect_unknown_then_reconnect_exact_job_without_submission(self):
+    def test_disconnect_keeps_last_state_then_reconnects_exact_job_without_submission(self):
         self.record()
         with patch.object(ex,'submit') as submit,patch.object(ex,'ssh',return_value={'exit_code':255,'stdout':'','stderr':'offline'}):
             self.assertEqual(worker.tick()['checked'],1)
-            self.assertEqual(ex.get('a')['state'],'UNKNOWN');submit.assert_not_called()
+            self.assertEqual(ex.get('a')['state'],'RUNNING');self.assertEqual(ex.get('a')['tracking_error'],'offline');submit.assert_not_called()
         with patch.object(ex,'submit') as submit,patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'FPILOT_EXIT=0\nFPILOT_TIMING=1\nFPILOT_EDIFF=1\njob_state = C\n','stderr':''}) as ssh:
             worker.tick();self.assertEqual(ex.get('a')['state'],'COMPLETED')
             self.assertIn('qstat -f 123.node01',ssh.call_args.args[1]);submit.assert_not_called()
@@ -137,7 +137,7 @@ class RecoveryTests(unittest.TestCase):
     def test_limit_blocks_submit_before_upload_and_preserves_prepared(self):
         control.save_settings({'max_inflight_total':2,'max_inflight_per_host':1,'max_cores_per_host':None})
         self.record('a','UNKNOWN');target=self.record('b','PREPARED')
-        with patch.object(ex.servers,'probe',return_value={'id':'new'}),patch.object(ex.servers,'preview',return_value={'resource_ready':True,'profile':target['profile']}),patch.object(ex,'bundle',return_value=({},{})),patch.object(ex,'ssh') as ssh:
+        with patch.object(ex.servers,'probe',return_value={'id':'new'}),patch.object(ex.servers,'preview',return_value={'resource_ready':True,'profile':target['profile']}),patch.object(ex,'bundle',return_value=({'stage':'scf'},{'INCAR':b''})),patch.object(ex,'ssh') as ssh:
             with self.assertRaisesRegex(ValueError,'在途'):ex.submit('b')
             ssh.assert_not_called();self.assertEqual(ex.get('b')['state'],'PREPARED')
 

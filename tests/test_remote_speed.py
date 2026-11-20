@@ -220,6 +220,11 @@ class SingleDispatchTests(unittest.TestCase):
             offline={'exit_code':None,'stdout':'','stderr':'offline','transport_state':'NOT_SENT'}
             receipt={'exit_code':0,'stdout':'FPILOT_JOB_ID=123.mock\n','stderr':''}
             with patch.object(execution,'bundle',return_value=({'stage':'scf'},files)),patch.object(execution,'ssh',side_effect=[waiting,offline,receipt]) as ssh,patch.object(execution,'start_watcher'),patch.object(servers,'capacity_probe') as probe:
+                with patch.object(execution,'source_file_plan',return_value={'changed':True}):
+                    with self.assertRaisesRegex(ValueError,'策略与准备时不同'):execution.submit(key)
+                self.assertEqual(execution.get(key)['state'],'PREPARED')
+                self.assertEqual(branch_bindings.inspect('p',['n'])['state'],'UNBOUND')
+                ssh.assert_not_called()
                 wait=execution.submit(key);self.assertEqual(wait['state'],'PREPARED');self.assertEqual(wait['waiting_kind'],'CAPACITY')
                 wait=execution.submit(key);self.assertEqual(wait['state'],'PREPARED');self.assertEqual(wait['waiting_kind'],'CONNECTION')
                 def sent(*args,**kwargs):

@@ -188,3 +188,16 @@ class SchedulerAdapterTests(unittest.TestCase):
         with patch.object(adapter,'command') as command:
             with self.assertRaisesRegex(ValueError,'记录不符'):adapter.run(self.payload)
             command.assert_not_called()
+
+    def test_slurm_cluster_scopes_inspection_and_cancel(self):
+        self.payload.update(job_id='12',scheduler='slurm',job_cluster='east')
+        with patch.object(adapter,'command') as cmd:
+            (self.root/'.job-id').write_text('12;west')
+            with self.assertRaises(ValueError):adapter.run(self.payload)
+            cmd.assert_not_called()
+        (self.root/'.job-id').write_text('12;east')
+        row='JobId=12 UserId=user(1000) JobState=RUNNING'
+        with patch.object(adapter.getpass,'getuser',return_value='user'),patch.object(adapter,'command',side_effect=[(0,row,''),(0,'','')]) as cmd:
+            self.assertEqual(adapter.run(self.payload)['result'],'ACCEPTED')
+            self.assertEqual(cmd.call_args_list[0].args[0],['scontrol','-M','east','show','job','12','-o'])
+            self.assertEqual(cmd.call_args_list[1].args[0],['scancel','-M','east','12'])

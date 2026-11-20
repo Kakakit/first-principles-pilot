@@ -234,7 +234,7 @@ class ExecutionTests(unittest.TestCase):
         record['script']='#!/bin/bash\nset -euo pipefail\ntrue\n'
         record['script_sha256']=ex.hashlib.sha256(record['script'].encode()).hexdigest()
         with ex.db() as c:c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(record),'a'))
-        receipts=[{'exit_code':0,'stdout':'FPILOT_JOB_ID=12345\n','stderr':''},
+        receipts=[{'exit_code':0,'stdout':'FPILOT_JOB_ID=12345;east\n','stderr':''},
                   {'exit_code':0,'stdout':'FPILOT_JOB_ID=12345\nFPILOT_SLURM_LIVE=RUNNING\n','stderr':''}]
         with patch.object(ex.servers,'probe',return_value={'id':'fresh'}), \
              patch.object(ex.servers,'preview',return_value={'resource_ready':True,'profile':record['profile']}), \
@@ -242,12 +242,21 @@ class ExecutionTests(unittest.TestCase):
              patch.object(ex,'ssh',side_effect=receipts) as ssh,patch.object(ex,'start_watcher'):
             result=ex.submit('a')
         self.assertEqual(result['state'],'RUNNING');self.assertEqual(result['job_id'],'12345')
+        self.assertEqual(result['job_cluster'],'east')
+        self.assertIn('sacct -M east',ssh.call_args_list[1].args[1])
         self.assertEqual(ssh.call_args_list[0].args[1].count('sbatch --parsable run.slurm'),1)
         with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'FPILOT_EXIT=0\nFPILOT_TIMING=1\nFPILOT_EDIFF=1\nFPILOT_SLURM_ACCOUNT=COMPLETED|0:0\n','stderr':''}):
             result=ex.refresh('a')
         self.assertEqual(result['state'],'COMPLETED')
         self.assertEqual(result['evidence']['scheduler'],'slurm')
         self.assertEqual(result['evidence']['scheduler_exit_code'],'0:0')
+    def test_terminal_accounting_needs_successful_exit(self):
+        observe=ex.batch_scheduler.observation
+        self.assertEqual(observe('pbs','job_state = F\nExit_status = 0')[1],True)
+        self.assertEqual(observe('pbs','job_state = F')[1],False)
+        self.assertEqual(observe('pbs','job_state = C\nExit_status = 1')[:2],('FAILED',False))
+        self.assertEqual(observe('slurm','FPILOT_SLURM_ACCOUNT=COMPLETED|0:9')[:2],('FAILED',False))
+
     def test_slurm_program_exit_waits_for_accounting_terminal(self):
         record=self.record();record.update(state='RUNNING',job_id='12345',scheduler='slurm',config={'alias':'gengzi-187','scheduler':'slurm'})
         with ex.db() as c:c.execute('UPDATE attempts SET state=?,body=? WHERE id=?',('RUNNING',json.dumps(record),'a'))

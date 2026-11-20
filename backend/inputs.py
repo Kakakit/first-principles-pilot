@@ -105,7 +105,13 @@ class GenerationContext:
         self.geometry = {}
 
 
-def generate(project, node_id, context=None):
+def generate(project,node_id,context=None):
+    report=_generate(project,node_id,context)
+    report['issues']=getattr(report.get('errors'),'issues',report.get('issues',[]))
+    return report
+
+
+def _generate(project, node_id, context=None):
     context = context or GenerationContext(project)
     if context.project is not project:
         raise ValueError('输入生成上下文与项目不一致')
@@ -114,7 +120,8 @@ def generate(project, node_id, context=None):
     kind = calculation_kind(node, project)
     if kind not in ("relax", "scf", "bands", "dos", "vasp-wannier"):
         raise ValueError("请选择计算节点")
-    errors, warnings, dependencies = [], [], []
+    from .action_issues import IssueMessages
+    errors, warnings, dependencies = IssueMessages(project['id'],node_id), [], []
     shared = project.get("parameters", {}).get("shared", {})
     local = node["data"].get("parameters", {})
     values, origins = {}, {}
@@ -130,7 +137,8 @@ def generate(project, node_id, context=None):
     layers.append(("节点覆盖", local.get("values", {}), local.get('manualIncarText','')))
     try: values, origins, manual_tags, manual_fragments = incar_text.resolve(layers)
     except ValueError as exc:
-        return {'errors':[str(exc)],'warnings':[],'dependencies':[],'files':{},'ready':False}
+        errors.add('input.incar',str(exc),'parameter.incar',subpage='physics')
+        return {'errors':errors,'warnings':[],'dependencies':[],'files':{},'ready':False}
     if kind in ('bands', 'dos', 'vasp-wannier') and 'LORBIT' not in values:
         values['LORBIT'], origins['LORBIT'] = '11', '节点执行合同'
     confirmations = set(shared.get('confirmed_custom_tags', [])) | set(local.get('confirmed_custom_tags', []))
@@ -181,7 +189,7 @@ def generate(project, node_id, context=None):
     except ValueError: errors.append('节点类型合同无法读取 NSW；请核对最终 INCAR')
     parents = context.parents[node_id]
     if len(parents) != 1:
-        errors.append("计算节点必须具有唯一直接上游")
+        errors.add('input.upstream-count','计算节点必须具有唯一直接上游','project.flow',page='flow',subpage=None)
     visited, roots = set(), []
     def visit(key, stack):
         if key in stack:
@@ -197,7 +205,7 @@ def generate(project, node_id, context=None):
                 visit(parent_id, stack | {key})
     visit(node_id, set())
     if len(roots) != 1 or not roots[0]["data"].get("structure"):
-        errors.append("需要唯一、已导入的上游结构")
+        errors.add('input.structure','需要唯一、已导入的上游结构','project.flow',page='flow',subpage=None)
         return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
     source = roots[0]["data"]["structure"]
     # Revalidate explicit edits; legacy cached POSCARs remain untrusted.
@@ -208,7 +216,7 @@ def generate(project, node_id, context=None):
     geometry_scan = node['data'].get('poscarScan')
     if geometry_scan and (not isinstance(geometry_scan, dict) or kind not in ('relax', 'scf') or geometry_scan.get('schema') != 'fpilot.poscar-scan.v1' or
                           geometry_scan.get('poscar_sha256') != digest(geometry['poscar'].encode())):
-        errors.append('POSCAR 扫描记录与实际结构不一致，请重新预览批次')
+        errors.add('input.scan-structure','POSCAR 扫描记录与实际结构不一致，请重新预览批次','input.source',subpage='source')
     species = []
     for atom in geometry["atoms"]:
         if not species or species[-1] != atom["element"]:
@@ -219,7 +227,7 @@ def generate(project, node_id, context=None):
     try:
         source_plan = source_contracts.plan(project, node_id, values)
     except ValueError as exc:
-        errors.append(str(exc))
+        errors.add('input.source',str(exc),'input.source',subpage='source')
         return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
     if source_plan['parent_id']:
         for name in source_plan['required_files']:
@@ -325,7 +333,7 @@ def generate(project, node_id, context=None):
             if tag not in manual_tags: origins[tag] = 'VASP-Wannier 节点合同'
     moments = dict(shared.get("moments", {}))
     if inherited and inherited["moments"]:
-        if [a["element"] for a in geometry["atoms"]] != inherited["elements"]: errors.append("case 磁矩与当前结构元素或原子顺序不符")
+        if [a["element"] for a in geometry["atoms"]] != inherited["elements"]: errors.add('input.case-atoms','case 磁矩与当前结构元素或原子顺序不符','parameter.MAGMOM',subpage='physics')
         else: moments.update(dict(zip([a["id"] for a in geometry["atoms"]], inherited["moments"])))
     moments.update(local.get("moments", {}))
     if noncollinear and 'MAGMOM' not in manual_tags:
@@ -401,7 +409,7 @@ def generate(project, node_id, context=None):
                 if min(grid) < 2:
                     errors.append("当前四面体模式要求三个方向至少各 2 个网格点")
     except ValueError as exc:
-        errors.append(f"KPOINTS: {exc}")
+        errors.add('input.kpoints',f'KPOINTS: {exc}','input.path' if kind=='bands' else 'input.grid')
     potcar = None
     try:
         raw = potcar_bytes(effective_potcar_id)
@@ -421,14 +429,14 @@ def generate(project, node_id, context=None):
             potcar["library_provenance"] = receipt
         records = potcar["records"]
         if raw.count(b"End of Dataset") != len(species) or any("lexch" not in r or "enmax" not in r for r in records):
-            errors.append("POTCAR 数据集数或 LEXCH / ENMAX 不完整")
-        expected = "CA" if values["XC_FUNCTIONAL"] == "LDA" else "PE"
+            errors.add('input.potcar-content','POTCAR 数据集数或 LEXCH / ENMAX 不完整','input.potcar')
+        expected = "CA" if values.get("XC_FUNCTIONAL") == "LDA" else "PE"
         if any(r.get("lexch", "").upper() != expected for r in records):
             errors.append("POTCAR 泛函元数据与所选泛函不匹配（PBEsol 使用 PBE 势）")
         if records and number(values["ENCUT"]) < max(r.get("enmax", 0) for r in records):
             warnings.append("ENCUT 低于 POTCAR 最大 ENMAX，请给出收敛依据")
     except (ValueError, OSError) as exc:
-        errors.append(f"POTCAR: {exc}")
+        errors.add('input.potcar',f'POTCAR: {exc}','input.potcar')
     files["INCAR"] = incar_text.render(tags, manual_fragments)
     # Source checks and displayed metadata must describe the exact saved text.
     tags = incar_text.parse(files['INCAR'])[0]
@@ -480,7 +488,9 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
     # Keep shared generation reports and project drafts unchanged.
     from copy import deepcopy
     report = deepcopy(report)
-    if report['errors']:raise ValueError('请先修正输入错误：'+'; '.join(report['errors']))
+    if report['errors']:
+        from .action_issues import ActionBlocked
+        raise ActionBlocked('请先修正输入错误：'+'; '.join(report['errors']),report.get('issues',[]))
     from . import source_contracts
     source_contracts.validate_pead(report['files']['INCAR'])
     policy = report['source_plan']

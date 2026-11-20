@@ -1,0 +1,24 @@
+.action-issues-dialog {width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto;padding:24px;border:1px solid var(--color-border);border-radius:4px;color:var(--color-text);background:var(--color-surface)}
+.action-issues-dialog::backdrop {background:hsl(160 10% 10% / .4)}
+.action-issues-dialog h2 {font-size:20px;margin:0 0 12px}
+.action-issues-dialog ul {list-style:none;padding:0;margin:16px 0;display:grid;gap:12px}
+.action-issues-dialog li {display:grid;grid-template-columns:1fr auto;gap:8px;padding:16px;border:1px solid var(--color-border);border-radius:4px;overflow-wrap:anywhere}
+.action-issues-dialog li small {grid-column:1;color:var(--color-muted-text)}
+.action-issues-dialog li button {grid-column:2;grid-row:1 / span 2;align-self:center}
+.action-return {position:fixed;bottom:48px;right:24px;z-index:60;max-width:min(640px,calc(100vw - 32px));padding:16px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border);border-radius:4px;box-shadow:0 4px 6px hsl(0 0% 0% / .2);display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.action-field-highlight {outline:3px solid var(--color-primary,#16836e);outline-offset:4px;scroll-margin:96px}
+@media(max-width:640px){.action-issues-dialog li {grid-template-columns:1fr}.action-issues-dialog li button{grid-column:1;grid-row:auto}.action-return{right:16px;bottom:48px}}
+
+.action-issues-dialog {border-radius:12px;box-shadow:0 16px 48px hsl(160 20% 8% / .2)}
+.action-issues-dialog ul {gap:0}
+.action-issues-dialog li {border:0;border-top:1px solid var(--color-border);border-radius:0;padding:16px 0}
+.action-issues-dialog li:last-child {border-bottom:1px solid var(--color-border)}
+.action-issues-dialog li button {justify-self:start}
+.action-issues-dialog .action-row {justify-content:flex-end}
+.action-return {border-radius:8px;border-inline-start:3px solid var(--color-accent)}
+@media(prefers-reduced-motion:no-preference) {
+  .action-issues-dialog[open],.action-return {animation:issue-enter 160ms ease-out}
+  .action-field-highlight {animation:issue-arrival 1100ms ease-out}
+}
+@keyframes issue-enter {from {opacity:0;transform:translateY(4px)} to {opacity:1;transform:none}}
+@keyframes issue-arrival {from {box-shadow:0 0 0 8px var(--color-accent-soft)} to {box-shadow:0 0 0 0 transparent}}

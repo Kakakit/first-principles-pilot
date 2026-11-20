@@ -2,7 +2,7 @@
 import re
 import shlex
 from collections import defaultdict
-from . import execution as ex
+from . import execution as ex, batch_scheduler
 
 
 def batch(records):
@@ -11,11 +11,14 @@ def batch(records):
               and ex.scheduler_name(r) in ('pbs','slurm')]
     if not eligible:return {}
     groups=defaultdict(list);result={}
-    for record in eligible:groups[(record['config']['alias'],ex.scheduler_name(record))].append(record)
-    for (alias,scheduler),rows in groups.items():
+    for record in eligible:
+        scheduler=ex.scheduler_name(record)
+        cluster=batch_scheduler.cluster_for(record) if scheduler=='slurm' else None
+        groups[(record['config']['alias'],scheduler,cluster)].append(record)
+    for (alias,scheduler,cluster),rows in groups.items():
         ids=list(dict.fromkeys(str(row['job_id']) for row in rows))
         command=('qstat -f '+ ' '.join(map(shlex.quote,ids)) if scheduler=='pbs' else
-                 "squeue -h --array --jobs="+shlex.quote(','.join(ids))+" -o '%i|%T'")
+                 "squeue"+(" -M "+shlex.quote(cluster) if cluster else "")+" -h --array --jobs="+shlex.quote(','.join(ids))+" -o '%i|%T'")
         receipt=ex.ssh(alias,command,timeout=30,mutating=False)
         if receipt.get('exit_code') is None:
             result.update({row['id']:receipt for row in rows});continue
@@ -34,10 +37,5 @@ def batch(records):
 
 
 def active_state(record,receipt):
-    text=receipt.get('stdout','')
-    if ex.scheduler_name(record)=='pbs':
-        match=re.search(r'job_state\s*=\s*([A-Z])',text)
-        return {'Q':'QUEUED','R':'RUNNING','H':'HELD','E':'EXITING'}.get(match.group(1)) if match else None
-    match=re.search(r'^FPILOT_SLURM_LIVE=([A-Z_+]+)',text,re.M)
-    return {'PENDING':'QUEUED','CONFIGURING':'QUEUED','RUNNING':'RUNNING',
-            'COMPLETING':'EXITING','SUSPENDED':'HELD'}.get(match.group(1)) if match else None
+    state,_,_=batch_scheduler.observation(ex.scheduler_name(record),receipt.get('stdout',''))
+    return state if state in ('QUEUED','RUNNING','EXITING','HELD') else None

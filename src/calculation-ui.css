@@ -39,3 +39,7 @@
 }
 @container(max-width:640px){.green-workbench .parameter-embedded>.parameter-heading,.green-workbench .parameter-embedded>.parameter-tools{grid-column:1/-1;grid-row:auto}}
 @container(max-width:512px){.green-workbench .parameter-grid{grid-template-columns:minmax(0,1fr)}}
+.run-record-heading>div {flex:1;min-width:0}
+.run-record-heading>div>small {font-size:var(--ui-caption);color:var(--color-muted-text)}
+.run-record-heading>div>h2 {margin:4px 0 0;overflow-wrap:anywhere}
+.run-record-meta {font-variant-numeric:tabular-nums}

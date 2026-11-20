@@ -1,0 +1,254 @@
+/* Shared dimensions for the workbench shell and host forms. */
+.green-workbench {
+  --page-inset:var(--space-6);
+  --field-height:max(38px,calc(var(--ui-control) * 1.5 + 14px));
+  --field-radius:var(--radius);
+}
+.green-workbench :is(.canvas-toolbar,.workspace-tabs,.topbar,.workflow-context,.configuration-parts,.review-body>.review-guide) {
+  padding-inline:var(--page-inset);
+}
+.green-workbench :is(.workflow-context,.parameter-workspace,.input-workspace,.settings-workbench .settings-content,.node-results,.canvas-toolbar,.project-properties) :is(input:where(:not([type]),[type=text],[type=number],[type=search],[type=url],[type=email],[type=password]),select:where(:not([multiple],[size]))) {
+  box-sizing:border-box;
+  height:var(--field-height);
+  min-height:var(--field-height);
+  padding-block:4px;
+  padding-inline:12px;
+  border-radius:var(--field-radius);
+  font-size:var(--ui-control);
+  line-height:1.5;
+}
+.green-workbench :is(.workflow-context,.canvas-toolbar,.run-record-heading,.kmesh-controls,.result-context,.input-review-actions) .button {
+  min-height:var(--field-height);
+  border-radius:var(--field-radius);
+}
+.green-workbench .workflow-context {
+  display:grid;
+  grid-template-columns:minmax(160px,288px) minmax(128px,1fr) minmax(160px,256px) auto;
+  align-items:end;
+  gap:12px 24px;
+  padding-block:12px;
+}
+.green-workbench .workflow-context label,.green-workbench .workflow-context .workflow-source {
+  display:grid;
+  gap:4px;
+  min-width:0;
+  max-width:none;
+  white-space:normal;
+  color:var(--ui-muted);
+  font-size:var(--ui-caption);
+}
+.green-workbench .workflow-context select {width:100%;min-width:0}
+.green-workbench .workflow-source strong {
+  display:flex;
+  align-items:center;
+  min-height:var(--field-height);
+  color:var(--ui-text);
+}
+.green-workbench .configuration-parts {padding-block:4px}
+.green-workbench .configuration-parts button.active {
+  border-radius:0;
+  background:transparent;
+  box-shadow:inset 0 -2px var(--color-accent);
+}
+.green-workbench .configuration-section>.parameter-workspace,
+.green-workbench .configuration-section>.input-workspace,
+.green-workbench .simple-submit,.green-workbench .node-results {
+  padding:var(--space-6) var(--page-inset) var(--space-8);
+  background:var(--color-surface);
+}
+.green-workbench .parameter-workspace :is(.configuration-presets,.advanced-parameters)>summary {
+  background:transparent;color:var(--ui-muted);font-size:var(--ui-control);padding:8px 0;
+}
+.green-workbench .parameter-workspace .advanced-parameters {
+  border:0;border-top:1px solid var(--ui-divider);background:none;padding:8px 0;
+}
+.green-workbench .parameter-group-nav {gap:4px;padding:8px 0}
+.green-workbench .parameter-grid {gap:0 24px}
+.green-workbench .parameter-card {
+  display:grid;grid-template-rows:subgrid;grid-row:span 4;
+  padding:16px 0;align-content:start;
+}
+.green-workbench .parameter-card-title {
+  display:grid;justify-content:start;align-content:start;gap:2px;margin-bottom:8px;
+}
+.green-workbench .parameter-card-title strong {font-size:var(--ui-body);line-height:1.4}
+.green-workbench .parameter-card-title code {background:none;padding:0;font-family:var(--font-code)}
+.green-workbench .parameter-card>.parameter-origin {margin-top:6px}
+.green-workbench .input-workspace fieldset {min-width:0;margin-inline:0}
+.green-workbench .input-mesh-fields,.green-workbench .simple-submit .submit-grid {
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));
+  gap:16px;align-items:end;
+}
+.green-workbench .input-mesh-fields label {margin:0;min-width:0;gap:6px;font-size:var(--ui-control)}
+.green-workbench .input-mesh-fields :is(input,select) {width:100%;min-width:0}
+.green-workbench .kmesh-suggest {padding:16px;border:0;border-radius:8px;background:var(--color-surface-raised)}
+.green-workbench .kmesh-suggest h4 {margin:0 0 4px}
+.green-workbench .kmesh-suggest details>summary {background:none}
+.green-workbench .kmesh-controls {align-items:end}
+.green-workbench .kmesh-controls .confirmation {align-items:center;min-height:var(--field-height);margin:0}
+.green-workbench .simple-submit {display:block}
+.green-workbench .simple-submit>.input-submit-card {
+  background:none;border:0;border-bottom:1px solid var(--ui-divider);
+  padding:24px 0;max-width:960px;
+}
+.green-workbench .simple-submit>.input-submit-card>label {max-width:640px;margin-block:12px}
+.green-workbench .simple-submit>.input-submit-card .submit-grid {max-width:800px}
+.green-workbench .simple-submit>h2 {margin:24px 0 0}
+.green-workbench .run-record-overview {max-width:960px;padding:0 0 16px;margin:0}
+.green-workbench .run-record-heading {display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,320px) auto;align-items:end;gap:12px}
+.green-workbench .run-record-heading h2 {line-height:1.35}
+.green-workbench .run-record-overview .workflow-evidence {padding:12px 16px;border-radius:8px}
+.green-workbench .result-mode {width:fit-content;max-width:100%}
+.green-workbench .appearance-panel>label {max-width:320px}
+.green-workbench .theme-card {padding:12px;gap:6px}
+.green-workbench .theme-card-name {font-size:var(--ui-body)}
+@media(max-width:1000px) {
+  .green-workbench {--page-inset:var(--space-4)}
+  .green-workbench .workflow-context {grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+  .green-workbench .workflow-context>.button {justify-self:start}
+}
+@media(max-width:600px) {
+  .green-workbench .run-record-heading {grid-template-columns:minmax(0,1fr) auto}
+  .green-workbench .run-record-heading>div {grid-column:1/-1}
+  .green-workbench .workflow-context .workflow-source {max-width:100%}
+  .green-workbench :is(.input-review-actions,.result-context) {flex-wrap:wrap}
+}
+.green-workbench .settings-search input {
+  height:var(--field-height);padding:4px 12px;border-radius:var(--field-radius);
+  font-size:var(--ui-control);line-height:1.5;
+}
+.green-workbench .settings-layout>nav button[aria-current=page] {
+  background:var(--color-accent-soft);color:var(--color-accent);font-weight:600;
+}
+@media(max-width:700px) {
+  .green-workbench .settings-layout>nav {
+    position:static;display:grid;grid-template-columns:minmax(0,1fr);
+    width:100%;min-width:0;max-height:36vh;gap:8px;
+  }
+  .green-workbench .settings-search {margin:0;grid-template-columns:auto minmax(0,1fr);align-items:center}
+  .green-workbench .settings-nav-group {display:flex;overflow-x:auto;gap:4px;min-width:0}
+  .green-workbench .settings-nav-group>button {flex:none;white-space:nowrap}
+}
+
+.green-workbench .workspace-tabs>[role=tablist] {position:relative}
+.green-workbench .workspace-tabs .tab.active {border-bottom-color:transparent}
+.workspace-tab-line {
+  position:absolute;left:0;bottom:0;height:2px;background:var(--color-accent);pointer-events:none;
+}
+.record-placeholder {
+  min-height:112px;display:grid;gap:12px;align-content:start;padding:16px 0;
+}
+.record-placeholder>span {
+  display:block;width:min(384px,85%);height:12px;border-radius:var(--radius);
+  background:var(--color-surface-raised);animation:record-placeholder-in 1ms 150ms backwards;
+}
+.record-placeholder>span:first-child {width:min(192px,60%)}
+.record-placeholder>span:last-child {width:min(256px,75%)}
+.node-results>.record-placeholder {min-height:288px}
+@keyframes record-placeholder-in {from {visibility:hidden} to {visibility:visible}}
+@media(prefers-reduced-motion:no-preference) {
+  .workspace-tab-line {transition:transform 160ms ease-out,width 160ms ease-out}
+  .node-results :is(.result-summary,.workspace-card,.extension-grid,.evidence-details),
+  .workflow-page>.workflow-context {animation:record-content-in 120ms ease-out}
+}
+@keyframes record-content-in {from {opacity:.72} to {opacity:1}}
+.result-feedback[data-initial-read]>.remote-progress {
+  animation:record-placeholder-in 1ms 150ms backwards;
+}
+.plot-space-reserve {border-radius:var(--radius);background:var(--color-surface-raised)}
+
+/* Parameter editing keeps the chosen layer and its resolved provenance distinct. */
+.parameter-view-options {display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin:12px 0;color:var(--ui-muted);font-size:var(--ui-control)}
+.green-workbench .parameter-view-options label {display:inline-flex;align-items:center;margin:0}
+.green-workbench .physical-parameter-table {border-collapse:collapse;width:100%;table-layout:fixed}
+.green-workbench .physical-parameter-table th,.green-workbench .physical-parameter-table td {text-align:left;vertical-align:middle;padding:8px;border:0;border-bottom:1px solid var(--ui-divider)}
+.physical-parameter-table thead th:first-child {width:38%}
+.physical-parameter-table thead th:nth-child(2) {width:31%}
+.physical-parameter-table thead th:nth-child(3) {width:11%}
+.green-workbench .physical-parameter-table tbody th {background:none}
+.green-workbench .parameter-detail-trigger {display:flex;align-items:center;gap:8px;flex-wrap:wrap;text-align:left;border:0;background:none;padding:4px 0;color:var(--ui-text)}
+.parameter-detail-trigger code {font-size:var(--ui-control);font-weight:600;color:var(--color-accent)}
+.parameter-detail-trigger span {font-weight:400}
+.parameter-chevron {width:7px;height:7px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg);color:var(--ui-muted)}
+[aria-expanded=true]>.parameter-chevron {transform:rotate(225deg)}
+.physical-parameter-table td :is(input,select) {width:100%;min-width:0}
+.physical-parameter-table td small {display:block}
+.override-label {color:var(--color-accent);font-weight:600}
+.physical-parameter-table td>.text-button {display:block}
+.physical-parameter-table .parameter-detail td {background:var(--color-surface-raised);padding:12px 16px}
+.physical-parameter-table .parameter-detail p {margin:4px 0}
+.green-workbench details.workbench-disclosure {padding:0;margin:12px 0;border:1px solid var(--ui-divider);border-radius:8px;background:var(--color-surface)}
+.green-workbench .workbench-disclosure>summary {display:flex;align-items:center;justify-content:space-between;gap:8px;list-style:none;min-height:48px;margin:0;padding:8px 14px;color:var(--ui-text);font-weight:600;background:none}
+.workbench-disclosure>summary::-webkit-details-marker {display:none}
+.green-workbench .workbench-disclosure[open]>summary,.green-workbench .workbench-disclosure>summary:hover {background:var(--color-surface-raised)}
+.disclosure-action {display:inline-flex;align-items:center;gap:6px;background:var(--color-accent-soft);color:var(--color-accent);font-size:var(--ui-caption);padding:4px 8px;border-radius:6px}
+.disclosure-action .when-open,.workbench-disclosure[open]>summary .when-closed {display:none}
+.workbench-disclosure[open]>summary .when-open {display:inline}
+.workbench-disclosure[open]>summary svg {transform:rotate(180deg)}
+.run-state {font-size:var(--ui-section);font-weight:600;margin:12px 0}
+.run-state span {color:var(--color-muted-text)}
+.green-workbench .simple-submit>.task-preparation {max-width:960px}
+.green-workbench .task-preparation>.input-submit-card {margin:0;padding:16px;border:0;border-top:1px solid var(--ui-divider);background:none}
+.disclosure-body {padding:12px 16px}
+@container(max-width:640px){
+ .green-workbench .physical-parameter-table :is(th,td) {padding:8px 4px}
+ .parameter-detail-trigger span:not(.parameter-chevron) {flex-basis:100%}
+ .physical-parameter-table .parameter-chevron {display:none}
+ .physical-parameter-table .criterion {display:grid;min-width:0}
+}
+.monitor-facts {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,145px),1fr));gap:12px;margin:16px 0;padding:12px 0;border-block:1px solid var(--ui-divider)}
+.monitor-facts dt,.monitor-events time {color:var(--ui-muted);font-size:var(--ui-caption)}
+.monitor-facts dd {margin:4px 0 0;font-weight:600;font-variant-numeric:tabular-nums}
+.monitor-events {list-style:none;padding:0;margin:12px 0}
+.monitor-events li {display:flex;align-items:baseline;gap:16px;padding-block:3px}
+.run-state[data-state=RUNNING] span {color:var(--color-accent)}
+.run-state[data-state=FAILED] span {color:var(--color-danger)}
+.workbench-disclosure .workflow-evidence {margin:0}
+
+/* Line up the identifier, translated name and disclosure across parameter rows. */
+.green-workbench .physical-parameter-table .parameter-detail-trigger {
+  display:grid;
+  width:100%;
+  grid-template-columns:minmax(0,36%) minmax(0,1fr) auto;
+  gap:8px;
+  overflow-wrap:anywhere;
+}
+.green-workbench .parameter-detail-trigger code {justify-self:start}
+.green-workbench .physical-parameter-table .criterion>label {min-width:0}
+@container (max-width:640px) {
+  .green-workbench .physical-parameter-table .parameter-detail-trigger {
+    grid-template-columns:minmax(0,1fr);
+    gap:4px;
+  }
+}
+
+/* Standalone settings use one label and control column; grouped fields keep their own grid. */
+.green-workbench .settings-content {container:settings / inline-size}
+.green-workbench .settings-workbench .settings-content :is(.appearance-panel>label,.settings-field-row,.input-submit-card>label,.input-submit-card>fieldset>label,#server-tools>fieldset>label):has(>select,>input:not([type]),>input[type=text]):not([hidden]) {
+  display:grid;
+  grid-template-columns:minmax(128px,192px) minmax(0,384px);
+  align-items:center;
+  gap:8px 16px;
+  max-width:none;
+}
+.green-workbench .settings-content .submit-grid {align-items:end}
+.green-workbench .settings-workbench .settings-content .submit-grid>label {margin:0}
+.green-workbench .settings-workbench .settings-content .submit-grid>[hidden] {display:none}
+@container settings (max-width:560px) {
+  .green-workbench .settings-workbench .settings-content :is(.appearance-panel>label,.settings-field-row,.input-submit-card>label,.input-submit-card>fieldset>label,#server-tools>fieldset>label):has(>select,>input:not([type]),>input[type=text]):not([hidden]) {
+    grid-template-columns:minmax(0,1fr);
+    gap:4px;
+  }
+}
+
+.green-workbench :is(.parameter-workspace,.settings-content) details.workbench-disclosure {padding:0}
+.green-workbench :is(.parameter-workspace,.settings-content) details.workbench-disclosure>summary {
+  padding:8px 16px;
+  min-height:48px;
+  color:var(--ui-text);
+  font-size:var(--ui-control);
+  cursor:pointer;
+}
+.green-workbench .disclosure-action {flex:none;white-space:nowrap}
+.green-workbench .settings-content .workbench-disclosure>:not(summary) {margin-inline:16px}
+.green-workbench .parameter-workspace .configuration-presets>:not(summary) {margin-inline:16px}

@@ -1,3 +1,8 @@
+import {readActionIssues} from './actionIssues';
+import type {ActionIssue} from './actionIssues';
+export class ApiError extends Error {
+ constructor(message:string,public status:number,public issues:ActionIssue[]=[]){super(message);this.name='ApiError';}
+}
 export async function readJson(response: Response): Promise<any> {
   const text = await response.text();
   let data: any = null;
@@ -11,7 +16,7 @@ export async function readJson(response: Response): Promise<any> {
   }
   if (!response.ok) {
     const detail = data?.detail;
-    throw new Error(typeof detail === 'string' && detail.trim() ? detail : `请求失败（HTTP ${response.status}）。请检查服务状态后重试。`);
+    throw new ApiError(typeof detail==='string'&&detail.trim()?detail:typeof detail?.message==='string'?detail.message:`请求失败（HTTP ${response.status}）。请检查服务状态后重试。`,response.status,readActionIssues(detail?.issues||data?.issues));
   }
   if (data === null) throw new Error('服务返回空响应。请确认本机 API 正在运行，然后重试。');
   return data;

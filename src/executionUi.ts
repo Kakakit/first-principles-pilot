@@ -17,6 +17,7 @@ export type RegisteredProfile = {
   scheduler: string;
   command_mode?: 'direct'|'opaque';
   direct_limit?: number;
+  resource_policy?: string;
   queue: string;
   variant: string;
   status: string;

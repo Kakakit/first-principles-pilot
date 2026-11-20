@@ -9,7 +9,9 @@ router=APIRouter(prefix='/api/extension-host')
 
 def call(function,*args,**kwargs):
     try:return function(*args,**kwargs)
-    except (ValueError,KeyError,TypeError,OSError,subprocess.TimeoutExpired,zipfile.BadZipFile) as exc:raise HTTPException(422,str(exc)) from exc
+    except (ValueError,KeyError,TypeError,OSError,subprocess.TimeoutExpired,zipfile.BadZipFile) as exc:
+        from .action_issues import error_detail
+        raise HTTPException(422,error_detail(exc)) from exc
 
 @router.get('/packages')
 def packages():return {'packages':call(p.catalog)}

@@ -18,6 +18,7 @@ from functools import lru_cache
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
+from . import batch_scheduler
 from .storage import ROOT
 from . import servers
 from . import remote_paths
@@ -828,54 +829,9 @@ def ssh_multiplex_options(alias):
     return ssh_options(alias)
 
 
-def pbs_history_command(job_id):
-    """A bounded, exact-job fallback after qstat has aged out the job."""
-    job = shlex.quote(job_id)
-    return (f'''if qstat -f {job} 2>/dev/null; then :; else
-  if command -v tracejob >/dev/null 2>&1; then
-    trace=$(tracejob -n 30 {job} 2>/dev/null || true)
-    if printf '%s\\n' "$trace" | grep -Fq 'Job: {job_id}'; then
-      printf 'FPILOT_PBS_TRACE_EXIT='
-      printf '%s\\n' "$trace" | sed -n -E 's/.*Exit_status=([0-9]+).*/\\1/p' | tail -1
-      printf 'FPILOT_PBS_TRACE_COMPLETE='
-      printf '%s\\n' "$trace" | grep -c 'dequeuing from .*state COMPLETE' || true
-    fi
-  fi
-fi
-''')
-
-
-def pbs_history_evidence(output):
-    exit_match = re.search(r'^FPILOT_PBS_TRACE_EXIT=(\d+)$', output, re.M)
-    complete_match = re.search(r'^FPILOT_PBS_TRACE_COMPLETE=([1-9]\d*)$', output, re.M)
-    return (int(exit_match.group(1)) if exit_match else None, bool(complete_match))
-
-
-def recovered_job_command(scheduler):
-    """Query the original receipt in the same read, with no shell evaluation."""
-    command="""if test -s .job-id; then
-  fpilot_job=$(head -c 256 .job-id | awk '/^[0-9]+([.][A-Za-z0-9_.-]+)?(;[A-Za-z0-9_.-]+)?$/ {sub(/;.*/, ""); print; exit}')
-  if test -n "$fpilot_job"; then
-    printf 'FPILOT_JOB_ID=%s\\n' "$fpilot_job"
-"""
-    if scheduler=='pbs':
-        command+='''    if qstat -f "$fpilot_job" 2>/dev/null; then :; else
-      if command -v tracejob >/dev/null 2>&1; then
-        trace=$(tracejob -n 30 "$fpilot_job" 2>/dev/null || true)
-        if printf '%s\\n' "$trace" | grep -Fq "Job: $fpilot_job"; then
-          printf 'FPILOT_PBS_TRACE_EXIT='
-          printf '%s\\n' "$trace" | sed -n -E 's/.*Exit_status=([0-9]+).*/\\1/p' | tail -1
-          printf 'FPILOT_PBS_TRACE_COMPLETE='
-          printf '%s\\n' "$trace" | grep -c 'dequeuing from .*state COMPLETE' || true
-        fi
-      fi
-    fi
-'''
-    else:
-        command+='''    squeue -h -j "$fpilot_job" -o 'FPILOT_SLURM_LIVE=%T' || true
-    sacct -n -P -j "$fpilot_job" --format=JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' -v job="$fpilot_job" '$1 == job {print "FPILOT_SLURM_ACCOUNT="$2"|"$3; exit}' || true
-'''
-    return command+'  fi\nfi\n'
+pbs_history_command=batch_scheduler.pbs_history_command
+pbs_history_evidence=batch_scheduler.pbs_history_evidence
+recovered_job_command=batch_scheduler.recovered_job_command
 
 
 def start_watcher(key):
@@ -988,22 +944,6 @@ def submit(key):
         stable_fields=('upstream_attempt_id','upstream_job_id','source_path','source_node_id','source_state','files')
         if any(fresh_dependency.get(field) != record['dependency_snapshot'].get(field) for field in stable_fields):
             raise ValueError('上游依赖文件或证据已变化；没有提交，请重新准备')
-    with closing(db()) as c:
-        c.execute('BEGIN IMMEDIATE')
-        current=c.execute('SELECT state FROM attempts WHERE id=?',(key,)).fetchone()
-        if not current or current[0]!='PREPARED':c.rollback();return get(key)
-        recycle.assert_available('attempts',key,record)
-        control.enforce_limits(c,record)
-        branch_bindings.reserve(c,record)
-        changed=c.execute('UPDATE attempts SET state=? WHERE id=? AND state=?',('DISPATCHING',key,'PREPARED')).rowcount
-        if not changed:c.rollback();return get(key)
-        fast_dispatch.clear_previous_dispatch(record)
-        dispatch_timeout=900 if any(item['mode']=='reflink-or-copy' for item in record.get('source_file_plan',{}).values()) else 180
-        record.update(state='DISPATCHING',dispatch_started_at=now(),final_probe_id=fresh['id'],dispatch_timeout_seconds=dispatch_timeout)
-        if direct:
-            record['command_run_id'] = key
-        control.journal(c,key,'DISPATCHING',{'node':record['node'],'cores':record['profile'].get('ppn',record['profile'].get('ntasks'))})
-        c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(record,ensure_ascii=False),key));c.commit()
     scheduler=scheduler_name(record)
     job_script=script_name(scheduler)
     files[job_script]=record['script'].encode()
@@ -1030,10 +970,11 @@ def submit(key):
     parent = shlex.quote(str(PurePosixPath(record['remote_path_absolute']).parent))
     expected = shlex.quote(record['remote_workspace_root_abs'])
     project_guard=project_directory_guard(record)
-    submit_command='sbatch --parsable '+job_script if scheduler=='slurm' else 'qsub '+job_script
     if scheduler=='custom':
         from .custom_commands import start_command
         submit_command=start_command(record,key,record['script'])
+    else:
+        submit_command=batch_scheduler.submit_command(scheduler,job_script)
     command=f'''set -e
 printf 'FPILOT_SUBMIT_PHASE=WORKSPACE\\n'
 root={root_expr}
@@ -1065,18 +1006,32 @@ cat .job-id
                  .replace('cat _fpilot/command-start.json','printf "FPILOT_DIRECT_START="\ncat _fpilot/command-start.json'))
     if fast:
         command=fast_dispatch.prefix(record)+command.replace('mkdir "$dest"','mkdir "$dest"\nfpilot_created=1').replace(submit_command+' > .job-id','fpilot_submitting=1\n'+submit_command+' > .job-id')
+    payload=stream.getvalue()
+    with closing(db()) as c:
+        c.execute('BEGIN IMMEDIATE')
+        current=c.execute('SELECT state FROM attempts WHERE id=?',(key,)).fetchone()
+        if not current or current[0]!='PREPARED':c.rollback();return get(key)
+        recycle.assert_available('attempts',key,record)
+        control.enforce_limits(c,record)
+        branch_bindings.reserve(c,record)
+        changed=c.execute('UPDATE attempts SET state=? WHERE id=? AND state=?',('DISPATCHING',key,'PREPARED')).rowcount
+        if not changed:c.rollback();return get(key)
+        fast_dispatch.clear_previous_dispatch(record)
+        dispatch_timeout=900 if any(item['mode']=='reflink-or-copy' for item in record.get('source_file_plan',{}).values()) else 180
+        record.update(state='DISPATCHING',dispatch_started_at=now(),final_probe_id=fresh['id'],dispatch_timeout_seconds=dispatch_timeout)
+        if direct:
+            record['command_run_id'] = key
+        control.journal(c,key,'DISPATCHING',{'node':record['node'],'cores':record['profile'].get('ppn',record['profile'].get('ntasks'))})
+        c.execute('UPDATE attempts SET body=? WHERE id=?',(json.dumps(record,ensure_ascii=False),key));c.commit()
     try:
-        receipt=ssh(record['config']['alias'],command,stream.getvalue(),timeout=dispatch_timeout)
+        receipt=ssh(record['config']['alias'],command,payload,timeout=dispatch_timeout)
         if (fast or direct or receipt.get('transport_state')=='NOT_SENT') and fast_dispatch.known_not_submitted(record,receipt):return get(key)
         if scheduler=='custom':
             from .custom_commands import dispatch_result
             return dispatch_result(record,receipt)
-        token_pattern=r'\d+(?:\.[A-Za-z0-9_.-]+)?' if scheduler=='pbs' else r'\d+(?:;[A-Za-z0-9_.-]+)?'
-        match=re.search(r'^FPILOT_JOB_ID=('+token_pattern+r')\s*$',receipt['stdout'],re.M)
-        job_id=match.group(1).split(';',1)[0] if match else None
-        record.update(dispatch_receipt=receipt,job_id=match.group(1) if match else None,
-                      state='SUBMITTED' if match and receipt['exit_code']==0 else 'UNKNOWN',updated_at=now())
-        record['job_id']=job_id
+        identity=batch_scheduler.job_identity(scheduler,receipt['stdout'])
+        record.update(dispatch_receipt=receipt,state='SUBMITTED' if identity and receipt['exit_code']==0 else 'UNKNOWN',updated_at=now())
+        record.update({'job_id':None,**identity})
         fast_dispatch.tracking_note(record)
         save(record)
         result=refresh(key) if record['job_id'] and not fast else record
@@ -1160,7 +1115,7 @@ def refresh(key, poll_receipt=None, automatic=False):
     if record['state'] == 'CANCELLED': return record
     if poll_receipt is not None and record['state'] in ('SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN'):
         from .remote_monitor import active_state
-        if poll_receipt.get('exit_code') is None:
+        if poll_receipt.get('exit_code') in (None,255):
             previous=record.get('updated_at')
             record.update(tracking_error=poll_receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),updated_at=now())
             return save(record,expected_updated_at=previous)
@@ -1178,9 +1133,9 @@ def refresh(key, poll_receipt=None, automatic=False):
         previous=record.get('updated_at');assert_recovery_target(record)
         path=remote_paths.shell_path(attempt_path(record)['shell'])
         receipt=ssh(record['config']['alias'],'cd '+path+' || exit 3\nif test -s .job-id; then head -c 256 .job-id; fi',timeout=15,mutating=False)
-        job=receipt.get('stdout','').strip().split(';')[0]
+        identity=batch_scheduler.job_identity(scheduler_name(record),'FPILOT_JOB_ID='+receipt.get('stdout','').strip())
         if receipt.get('exit_code') is None:record['automatic_audit_paused']=True
-        if re.fullmatch(r'\d+(?:_\d+)?(?:\.[A-Za-z0-9_.-]+)?',job):record['job_id']=job
+        if receipt.get('exit_code')==0:record.update(identity)
         record.update(tracking_checked_at=now(),updated_at=now(),
                       tracking_error=receipt.get('stderr') or ('' if record.get('job_id') else '尚未取得 job ID；保留 UNKNOWN，可手动核对原目录'))
         return save(record,expected_updated_at=previous)
@@ -1211,61 +1166,29 @@ if test -s .exit-status; then printf 'FPILOT_EXIT='; cat .exit-status; fi
     if automatic:
         command=file_status_command(record,path,command,['OUTCAR','OSZICAR','INCAR','vasp.out','.exit-status','.job-id'])
     scheduler=scheduler_name(record)
-    if record.get('job_id'):
-        if scheduler=='pbs':
-            command+=pbs_history_command(record['job_id'])
-        else:
-            job=shlex.quote(record['job_id'])
-            command+="squeue -h -j {} -o 'FPILOT_SLURM_LIVE=%T' || true\n".format(job)
-            command+="sacct -n -P -j {} --format=JobIDRaw,State,ExitCode 2>/dev/null | awk -F'|' '$1 == \"{}\" {{print \"FPILOT_SLURM_ACCOUNT=\"$2\"|\"$3; exit}}' || true\n".format(job,record['job_id'])
-    else:
-        command+=recovered_job_command(scheduler)
+    command+=batch_scheduler.query(scheduler,record)
     receipt=ssh(record['config']['alias'],command,timeout=30)
-    if receipt.get('exit_code') is None:
-        record.update(tracking_error=receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),status_receipt=receipt,updated_at=now(),automatic_audit_paused=True)
+    if receipt.get('exit_code') in (None,255):
+        record.update(tracking_error=receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),updated_at=now(),automatic_audit_paused=not bool(record.get('job_id')))
         return save(record,expected_updated_at=expected_updated_at)
     if 'FPILOT_FILES_CHANGED' in receipt.get('stdout',''):
         record.update(tracking_error='结果在核查期间变化；保留原状态与证据',tracking_checked_at=now(),updated_at=now())
         return save(record,expected_updated_at=expected_updated_at)
     if automatic:
         remember_file_status(record,receipt)
-    match=re.search(r'^FPILOT_JOB_ID=(\d+(?:\.[A-Za-z0-9_.-]+)?)\s*$',receipt['stdout'],re.M)
-    if match and not record.get('job_id'):record['job_id']=match.group(1)
+    if not record.get('job_id'):record.update(batch_scheduler.job_identity(scheduler,receipt['stdout']))
     out=receipt['stdout'];exit_match=re.search(r'^FPILOT_EXIT=(\d+)\s*$',out,re.M)
-    state_match=re.search(r'job_state\s*=\s*([A-Z])',out)
-    slurm_live=re.search(r'^FPILOT_SLURM_LIVE=([A-Z_+]+)',out,re.M)
-    slurm_account=re.search(r'^FPILOT_SLURM_ACCOUNT=([A-Z_+]+)\|([^\s]+)',out,re.M)
-    file_evidence = vasp_file_evidence(out)
-    timing, output_sanity = file_evidence['vasp_timing'], file_evidence['output_sanity']
-    trace_exit, trace_complete = pbs_history_evidence(out) if scheduler == 'pbs' else (None, False)
-    state='UNKNOWN'
-    if exit_match:
-        program_ok=exit_match.group(1)=='0' and timing and output_sanity
-        if not program_ok:
-            state='FAILED'
-        else:
-            scheduler_terminal=(slurm_account and slurm_account.group(1).split('+',1)[0]=='COMPLETED') if scheduler=='slurm' else ((state_match and state_match.group(1)=='C') or (trace_complete and trace_exit == 0))
-            state='COMPLETED' if scheduler_terminal else 'EXITING'
-    elif state_match:state={'Q':'QUEUED','R':'RUNNING','H':'HELD','E':'EXITING','C':'UNKNOWN'}.get(state_match.group(1),'UNKNOWN')
-    elif slurm_live:
-        state={'PENDING':'QUEUED','CONFIGURING':'QUEUED','RUNNING':'RUNNING','COMPLETING':'EXITING',
-               'SUSPENDED':'HELD'}.get(slurm_live.group(1),'UNKNOWN')
-    elif slurm_account:
-        terminal=slurm_account.group(1).split('+',1)[0]
-        if terminal == 'COMPLETED': state='UNKNOWN'
-        elif terminal in {'FAILED','CANCELLED','TIMEOUT','NODE_FAIL','OUT_OF_MEMORY','PREEMPTED','BOOT_FAIL'}: state='FAILED'
-    if not exit_match and timing and output_sanity:
-        scheduler_terminal = (slurm_account and slurm_account.group(1).split('+',1)[0]=='COMPLETED') if scheduler=='slurm' else ((state_match and state_match.group(1)=='C') or (trace_complete and trace_exit == 0))
-        if scheduler_terminal:
-            state='COMPLETED'
-    scheduler_state=(state_match.group(1) if state_match else 'C' if trace_complete and trace_exit == 0 else
-                     slurm_live.group(1) if slurm_live else
-                     slurm_account.group(1) if slurm_account else None)
+    state,terminal,scheduler_evidence=batch_scheduler.observation(scheduler,out)
+    file_evidence=vasp_file_evidence(out)
+    program_ok=file_evidence['vasp_timing'] and file_evidence['output_sanity']
+    if exit_match and (exit_match[1]!='0' or not program_ok):
+        state='FAILED'
+    elif state!='FAILED':
+        if terminal and program_ok:state='COMPLETED'
+        elif exit_match:state='EXITING'
     record.update(state=state,status_receipt=receipt,updated_at=now(),state_checked_at=now(),tracking_error='',
                   evidence={'wrapper_exit':int(exit_match.group(1)) if exit_match else None,**file_evidence,
-                            'scheduler':scheduler,'scheduler_state':scheduler_state,
-                            'scheduler_evidence_source':'tracejob' if trace_complete else 'qstat' if state_match else 'sacct' if slurm_account else None,
-                            'scheduler_exit_code':slurm_account.group(2) if slurm_account else None,
+                            **scheduler_evidence,
                             'scientific_validation':'NOT_PERFORMED'})
     from .fast_dispatch import tracking_note
     tracking_note(record)

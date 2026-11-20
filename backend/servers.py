@@ -156,6 +156,7 @@ def _registered_profile(alias, host, variant='vasp_std'):
     return {
         'alias': alias,
         'scheduler': host.get('scheduler', ''),
+        **({'resource_policy':host['resource_policy']} if host.get('resource_policy') and (is_pbs or is_slurm) else {}),
         **({'command_mode': command_mode(host), 'direct_limit': host.get('direct_limit', 1)}
            if command_mode(host) else {}),
         'queue': queue,
@@ -226,6 +227,7 @@ def select_profile(alias, variant='vasp_std'):
     }
     if host.get('runtime_source')=='script':
         config.update(runtime_source='script',program=variant,vasp_executable=variant)
+    if selected.get('resource_policy'):config['resource_policy']=selected['resource_policy']
     if selected.get('command_mode'):
         config['command_mode'] = selected['command_mode']
     if host.get('remote_workspace_root'):config['remote_workspace_root']=host['remote_workspace_root']

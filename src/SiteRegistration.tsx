@@ -2,7 +2,7 @@ import {useEffect,useState} from 'react';
 import {requestJson,errorMessage} from './apiClient';
 import type {ServerConfig,RegisteredProfile} from './executionUi';
 
-const initial={alias:'',scheduler:'pbs',command_mode:'opaque',queue:'',python:'',mpi_executable:'',vasp_executable:'',ncl_executable:'',environment_script:'',module:'',remote_workspace_root:'$HOME/fpilot',runtime_source:'script',pyw90_python:'',pyw90_package:''};
+const initial={alias:'',scheduler:'pbs',resource_policy:'scheduler_queue',command_mode:'opaque',queue:'',python:'',mpi_executable:'',vasp_executable:'',ncl_executable:'',environment_script:'',module:'',remote_workspace_root:'$HOME/fpilot',runtime_source:'script',pyw90_python:'',pyw90_package:''};
 type Connection={resolved:Record<string,string>;python?:{path:string;version:number[]};schedulers?:string[];note:string;connected?:boolean;workspace?:{ready:boolean;absolute_path?:string;existing_parent?:string;note?:string}};
 
 export default function SiteRegistration({onRegistered}:{onRegistered:(config:ServerConfig,profiles:RegisteredProfile[])=>void}){
@@ -57,6 +57,7 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
         const value=e.target.value;
         setForm(value==='direct'||value==='opaque'?{...form,scheduler:'custom',command_mode:value,runtime_source:'script'}:{...form,scheduler:value});
       }}><option value="pbs">PBS / Torque</option><option value="slurm">Slurm</option><option value="direct">无调度器 · 直接运行</option><option value="opaque">其它 · 自定义命令</option></select></label>
+        {form.scheduler!=='custom'&&<label>默认提交方式<select value={form.resource_policy} onChange={e=>field('resource_policy',e.target.value)}><option value="scheduler_queue">交给调度器排队</option><option value="wait_idle">等待节点空闲后提交</option></select></label>}
         {form.scheduler!=='custom'&&<label>运行方式<select value={form.runtime_source} onChange={e=>field('runtime_source',e.target.value)}><option value="script">导入可用任务脚本（推荐）</option><option value="registered">高级：填写程序和环境路径</option></select></label>}
         {form.scheduler!=='custom'&&<label>{form.scheduler==='pbs'?'队列':'分区'}{form.runtime_source==='script'?'（可由脚本填写）':''}<input value={form.queue} onChange={e=>field('queue',e.target.value)}/></label>}
         <label>旧项目兼容根目录<input value={form.remote_workspace_root} placeholder="例如 /scratch/my-projects" onChange={e=>field('remote_workspace_root',e.target.value)}/></label></div>

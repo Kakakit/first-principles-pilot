@@ -1896,7 +1896,8 @@ def preview_inputs(payload: InputRequest):
     try:
         return generate(payload.project, payload.node_id)
     except (ValueError, KeyError, TypeError, OSError) as exc:
-        raise HTTPException(422, str(exc)) from exc
+        from .action_issues import error_detail
+        raise HTTPException(422,error_detail(exc)) from exc
 
 
 @app.post('/api/inputs/freeze')
@@ -1904,7 +1905,8 @@ def freeze_inputs(payload: InputRequest):
     try:
         return freeze(payload.project, payload.node_id, payload.reason)
     except (ValueError, KeyError, TypeError, OSError) as exc:
-        raise HTTPException(422, str(exc)) from exc
+        from .action_issues import error_detail
+        raise HTTPException(422,error_detail(exc)) from exc
 
 
 @app.get('/api/inputs/{key}/download')
