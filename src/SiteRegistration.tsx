@@ -1,3 +1,4 @@
+import DisclosureLabel from './DisclosureLabel';
 import {useEffect,useState} from 'react';
 import {requestJson,errorMessage} from './apiClient';
 import type {ServerConfig,RegisteredProfile} from './executionUi';
@@ -37,12 +38,12 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
     <p>已有 SSH 别名和能在该服务器运行的任务脚本即可。环境脚本、MPI 和程序位置沿用导入脚本。</p>
     <fieldset disabled={busy}>
       <h4>1 · 连接服务器</h4>
-      <label>本机 SSH 别名<input list="fpilot-ssh-aliases" value={form.alias} onChange={e=>{field('alias',e.target.value);setConnection(null);}}/></label>
+      <label className="workbench-field-line"><span className="field-line-name">本机 SSH 别名</span><input list="fpilot-ssh-aliases" value={form.alias} onChange={e=>{field('alias',e.target.value);setConnection(null);}}/></label>
       <datalist id="fpilot-ssh-aliases">{aliases.map(a=><option key={a} value={a}/>)}</datalist>
       <div className="button-row"><button className="button" disabled={!form.alias} onClick={()=>void run('parse')}>读取 SSH 配置</button><button className="button" disabled={!form.alias} onClick={()=>void run('connect')}>测试免交互连接与服务器工具</button></div>
       {connection&&<p>{connection.connected?'软件连接已通过':'配置已解析，尚未连接'} · {connection.resolved.user}@{connection.resolved.hostname}:{connection.resolved.port}{connection.python&&` · Python ${connection.python.version.join('.')}：${connection.python.path}`}</p>}
       {connection?.workspace&&<p>{connection.workspace.ready?`工作区检查通过：${connection.workspace.absolute_path}；已有父目录 ${connection.workspace.existing_parent}。尚未创建目录。`:connection.workspace.note}</p>}
-      <details><summary>还没有 SSH 别名：配置与密钥操作指引</summary>
+      <details><DisclosureLabel>还没有 SSH 别名：配置与密钥操作指引</DisclosureLabel>
         <p>使用本机已有密钥时，可在下面配置中改为它的路径。首次连接需在终端核对服务器指纹；软件不保存密码或私钥。</p>
         <div className="submit-grid">{([['alias','SSH 别名'],['host','服务器地址'],['user','用户名'],['port','端口']] as const).map(([key,label])=><label key={key}>{label}<input value={newHost[key]} onChange={e=>setNewHost({...newHost,[key]:e.target.value})}/></label>)}</div>
         {validHost&&<><p>把以下片段追加到 {isWindows?'%USERPROFILE%\\.ssh\\config':'~/.ssh/config'}：</p><pre className="input-text">{snippet}</pre><button className="button" onClick={()=>void navigator.clipboard.writeText(snippet).then(()=>setMessage('SSH 配置片段已复制，请追加到本机 config，保留原有条目。'))}>复制配置片段</button>
@@ -62,10 +63,10 @@ export default function SiteRegistration({onRegistered}:{onRegistered:(config:Se
         {form.scheduler!=='custom'&&<label>{form.scheduler==='pbs'?'队列':'分区'}{form.runtime_source==='script'?'（可由脚本填写）':''}<input value={form.queue} onChange={e=>field('queue',e.target.value)}/></label>}
         <label>旧项目兼容根目录<input value={form.remote_workspace_root} placeholder="例如 /scratch/my-projects" onChange={e=>field('remote_workspace_root',e.target.value)}/></label></div>
       <p>填写你有读写权限的 Linux 绝对目录，不限制目录名。项目也可另外指定绝对目录；已有任务保持原路径。</p>
-      <details open={form.runtime_source==='registered'||Boolean(connection?.connected&&!connection.python)}><summary>高级路径与服务器 Python</summary>
+      <details open={form.runtime_source==='registered'||Boolean(connection?.connected&&!connection.python)}><DisclosureLabel>高级路径与服务器 Python</DisclosureLabel>
         <p>连接测试会发现服务器已有 Python 3.8+，供软件查询与传输使用；这与任务脚本中的计算环境分别配置。</p>
-        <label>服务器已有 Python 绝对路径<input value={form.python} onChange={e=>field('python',e.target.value)} placeholder="自动发现；找不到时填写"/></label>
-        {form.runtime_source==='registered'&&([['vasp_executable','VASP 常规程序绝对路径'],['ncl_executable','VASP SOC 程序绝对路径（可选）'],...(form.scheduler==='pbs'?[['mpi_executable','MPI 启动器绝对路径'],['environment_script','环境脚本绝对路径']]:[['module','module/version']])] as [keyof typeof initial,string][]).map(([key,label])=><label key={key}>{label}<input value={form[key]} onChange={e=>field(key,e.target.value)}/></label>)}
+        <label className="workbench-field-line"><span className="field-line-name">服务器已有 Python 绝对路径</span><input value={form.python} onChange={e=>field('python',e.target.value)} placeholder="自动发现；找不到时填写"/></label>
+        {form.runtime_source==='registered'&&([['vasp_executable','VASP 常规程序绝对路径'],['ncl_executable','VASP SOC 程序绝对路径（可选）'],...(form.scheduler==='pbs'?[['mpi_executable','MPI 启动器绝对路径'],['environment_script','环境脚本绝对路径']]:[['module','module/version']])] as [keyof typeof initial,string][]).map(([key,label])=><label className="workbench-field-line" key={key}><span className="field-line-name">{label}</span><input value={form[key]} onChange={e=>field(key,e.target.value)}/></label>)}
       </details>
       <p>保存连接后进入服务器详情，再导入任务脚本或保存自定义命令。连接测试不提交计算任务。</p>
       <button className="button primary" disabled={!form.alias} onClick={()=>void run('register')}>登记并使用</button>

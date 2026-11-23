@@ -1725,6 +1725,36 @@ def prepare_execution(payload: ExecutionPrepare):
         raise HTTPException(422,str(exc)) from exc
 
 
+@app.post('/api/program-tasks/prepare')
+def prepare_program(payload: dict):
+    from . import program_tasks
+    try:return program_tasks.prepare(payload['project'], payload['node_id'])
+    except (KeyError,TypeError,ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/program-tasks/source-runs')
+def program_source_runs(project_id:str,node_id:str,alias:str):
+    from .program_sources import candidates
+    return candidates(project_id,node_id,alias)
+
+
+@app.get('/api/program-tasks/{key}/text')
+def program_source_text(key:str,project_id:str,file:str):
+    from .program_sources import editable_text
+    try:return editable_text(key,project_id,file)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
+@app.get('/api/program-tasks/{key}/inputs')
+def program_inputs(key: str, project_id: str):
+    from . import program_tasks
+    try:
+        record = execution.get(key)
+        if record.get('project_id') != project_id:raise ValueError('任务不属于当前项目')
+        return program_tasks.frozen(record)
+    except (ValueError,OSError) as exc:raise HTTPException(422,str(exc)) from exc
+
+
 @app.post('/api/execution/{key}/submit')
 def submit_execution(key: str):
     try:

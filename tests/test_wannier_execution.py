@@ -41,6 +41,12 @@ class WannierExecutionTests(unittest.TestCase):
         self.assertEqual(w90.source_names('wannier90.2')[-1],'wannier90.2.eig')
         with self.assertRaises(ValueError):w90.source_names('../wannier90')
 
+    def test_real_space_plot_requires_unk_files(self):
+        source=fixture_win()
+        with self.assertRaisesRegex(ValueError,'UNK'):
+            w90._checked_win(source,source+'\nwannier_plot = true\n')
+        w90._checked_win(source,source+'\nwannier_plot = false\n')
+
     def test_common_tags_restart_enum_and_missing_checkpoint_gate(self):
         changes={'restart':'plot','num_cg_steps':'5','precond':'true','guiding_centres':'false','trial_step':'1.5','num_dump_cycles':'100','num_print_cycles':'1','write_tb':'true','write_u_matrices':'true','use_ws_distance':'true'}
         result=w90.edit_win(fixture_win(),changes)
@@ -110,18 +116,37 @@ class WannierExecutionTests(unittest.TestCase):
 
     def test_inspect_two_channel_seed_uses_safe_pull_only_for_small_win(self):
         from backend import safe_files,remote_cache
-        seed='wannier90.1';win=fixture_win();names=w90.source_names(seed)
+        seed='wannier90.1';win=fixture_win().replace('spinors = .true.', 'spinors = .false.');names=w90.source_names(seed)
         rows=''.join(f'FPILOT_W90_FILE={name}|{hashlib.sha256(win.encode()).hexdigest() if name.endswith(".win") else "-"}|{len(win.encode()) if name.endswith(".win") else 50_000_000}|stamp\n' for name in names)
         parent={'id':'p','job_id':'23.node01','config':{'alias':'jutai-1'}}
         def pull(alias,files,command):
             self.assertEqual(len(files),1);self.assertTrue(files[0]['remote_path'].endswith(seed+'.win'))
             Path(files[0]['destination']).write_text(win)
-            return {'companion_stdout':rows,'files':[]}
+            return {'companion_stdout':rows+'FPILOT_DIM_amn=4 8 4\nFPILOT_DIM_mmn=4 8 6\nFPILOT_DIM_eig=4 8\n','files':[]}
         with tempfile.TemporaryDirectory() as temp,patch.object(remote_cache,'ROOT',Path(temp)),patch.object(w90,'_parent',return_value=(parent,{})),patch.object(w90.ex,'attempt_path',return_value={'shell':'/home/user/230269265lht/source'}),patch.object(w90.ex,'ssh') as ssh,patch.object(safe_files,'pull_many',side_effect=pull) as transfer:
             result=w90.inspect({},'n','p','jutai-1',seed)
             self.assertEqual(result['seed'],seed);self.assertEqual(set(result['files']),set(names))
             ssh.assert_not_called();self.assertEqual(transfer.call_count,1)
             w90.inspect({},'n','p','jutai-1',seed);self.assertEqual(transfer.call_count,1)
+
+    def test_discovery_reports_exact_missing_channel_files(self):
+        import subprocess
+        from backend import remote_cache
+        def local_probe(alias, command, timeout):
+            result = subprocess.run(['sh', '-c', command], capture_output=True, text=True, timeout=timeout)
+            return {'exit_code':result.returncode, 'stdout':result.stdout}
+        with tempfile.TemporaryDirectory() as temp, patch.object(remote_cache,'ROOT',Path(temp)), \
+                patch.object(w90,'_parent',return_value=({'job_id':'test'},{})), \
+                patch.object(w90.ex,'attempt_path',return_value={'shell':temp}), patch.object(w90.ex,'ssh',local_probe):
+            for name in ('wannier90.win','wannier90.1.amn','wannier90.1.mmn'):
+                (Path(temp)/name).write_text('test')
+            with self.assertRaisesRegex(ValueError, 'wannier90.1.eig'):
+                w90.discover({},'n','p','test',force=True)
+            for ext in ('amn','mmn','eig'):
+                (Path(temp)/('wannier90.2.'+ext)).write_text('test')
+            report = w90.discover({},'n','p','test',force=True)
+            self.assertEqual(report['seeds'], ['wannier90.2'])
+            self.assertEqual(report['incomplete'], {'wannier90.1':['wannier90.1.eig']})
 
     def test_shared_win_is_detected_and_loaded_for_each_spin_channel(self):
         from backend import safe_files,remote_cache
@@ -138,7 +163,7 @@ class WannierExecutionTests(unittest.TestCase):
                 def pull(alias,files,command):
                     self.assertTrue(files[0]['fallback_path'].endswith('/wannier90.win'))
                     Path(files[0]['destination']).write_text(win)
-                    return {'companion_stdout':rows,'files':[]}
+                    return {'companion_stdout':rows+'FPILOT_DIM_amn=4 8 4\nFPILOT_DIM_mmn=4 8 6\nFPILOT_DIM_eig=4 8\n','files':[]}
                 with patch.object(safe_files,'pull_many',side_effect=pull) as transfer:
                     loaded=w90.inspect({},'n','p','jutai-1',seed)
                 self.assertEqual(loaded['win_source_name'],'wannier90.win');self.assertEqual(set(loaded['files']),set(names))

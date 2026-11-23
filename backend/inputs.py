@@ -249,7 +249,7 @@ def _generate(project, node_id, context=None):
             if values[name] != str(value): errors.append(name+' 手动文本与计算来源合同不一致；请选择对应文件来源或修改文本')
         else: values[name], origins[name] = str(value), '计算来源合同'
     if restart_required:
-        warnings.append('ICHARG=1 需要在计算配置中选择电子文件来源并重新冻结')
+        warnings.append('ICHARG=1 需要 CHGCAR；此草稿可先冻结，再在准备运行时选择兼容来源')
     if kind in ('scf', 'relax') and values.get('LCHARG') == 'false':
         for edge in project['edges']:
             if edge['source'] != node_id or calculation_kind(nodes[edge['target']], project) not in ('relax', 'scf', *source_contracts.FIXED):
@@ -268,6 +268,8 @@ def _generate(project, node_id, context=None):
             if number(values['EMIN']) >= number(values['EMAX']): errors.append('EMIN 必须小于 EMAX')
         except ValueError: pass
     options = node["data"].get("inputDraft", {})
+    native = kind in ('relax','scf') and options.get('sampling') == 'spacing'
+    sampling_note = ''
     kmesh_generation = None
     effective_potcar_id = options.get('potcar_id') or project.get('sharedPotcar', {}).get('id')
     effective_potcar_provenance = options.get('potcar_provenance_id') if options.get('potcar_id') else project.get('sharedPotcar', {}).get('provenance_id')
@@ -391,6 +393,13 @@ def _generate(project, node_id, context=None):
             files["KPOINTS"] = f"Explicit path\n{int(count)}\nLine-mode\nReciprocal\n" + "\n".join(rendered) + "\n"
             if values["ISMEAR"] == "-5":
                 errors.append("能带路径不支持四面体积分")
+        elif native:
+            if 'KSPACING' not in tags:
+                tags['KSPACING'] = options.get('kspacing','')
+            if 'KGAMMA' not in tags:
+                tags['KGAMMA'] = options.get('kgamma','.TRUE.')
+            spacing, gamma = incar_text.native_spacing(tags)
+            sampling_note = f'采用 INCAR 间距 {spacing:g} Å⁻¹，KGAMMA={".TRUE." if gamma else ".FALSE."}；VASP 按运行晶格生成网格。'
         else:
             grid = [number(x) for x in options.get("grid", "").split()]
             if len(grid) != 3 or any(not x.is_integer() or not 1 <= x <= 1000 for x in grid):
@@ -409,7 +418,7 @@ def _generate(project, node_id, context=None):
                 if min(grid) < 2:
                     errors.append("当前四面体模式要求三个方向至少各 2 个网格点")
     except ValueError as exc:
-        errors.add('input.kpoints',f'KPOINTS: {exc}','input.path' if kind=='bands' else 'input.grid')
+        errors.add('input.kpoints',str(exc) if native else f'KPOINTS: {exc}','input.path' if kind=='bands' else 'input.grid')
     potcar = None
     try:
         raw = potcar_bytes(effective_potcar_id)
@@ -440,6 +449,29 @@ def _generate(project, node_id, context=None):
     files["INCAR"] = incar_text.render(tags, manual_fragments)
     # Source checks and displayed metadata must describe the exact saved text.
     tags = incar_text.parse(files['INCAR'])[0]
+    external_issue = incar_text.external_update_issue(tags)
+    if external_issue:
+        errors.add('input.external-update', external_issue, 'parameter.incar', subpage='physics')
+    file_requirements = []
+    for name, trigger in incar_text.conditional_files(tags).items():
+        if name in source_plan['required_files']:
+            parent_id = source_plan['parent_id']
+            if parent_id:
+                origin = nodes[parent_id]['data'].get('label') or source_plan['parent_stage']
+            else:
+                origin = '本节点历史任务' if source_plan['mode'] == 'self' else '手动来源'
+            status = '待核对来源'
+        elif restart_required and name in ('CHGCAR', 'WAVECAR'):
+            origin, status = '运行准备时选择续算来源', '待选择'
+        else:
+            origin, status = '当前来源未提供', '缺少'
+            supported = name in ('CHGCAR', 'WAVECAR')
+            remedy = '请在计算来源中选择相应电子文件' if supported else '当前流程无法接入此文件，请核对 INCAR'
+            errors.add('input.required-file', f'{trigger} 需要 {name}；{remedy}',
+                       'input.source' if supported else 'parameter.incar', subpage='source' if supported else 'physics')
+        file_requirements.append(dict(file=name, trigger=trigger, source=origin, status=status))
+    if 'KPOINTS' in files and ('KSPACING' in tags or 'KGAMMA' in tags):
+        sampling_note = ('采用能带路径' if kind=='bands' else '采用显式网格 '+options.get('grid',''))+'；KPOINTS 优先，INCAR 的 KSPACING / KGAMMA 不决定本次采样。'
     for name in manual_tags:
         if name in tags:
             values[name] = incar_text.semantic(name,tags[name])
@@ -460,8 +492,8 @@ def _generate(project, node_id, context=None):
                                   'Hubbard 元素表' if tag in ('LDAUL','LDAUU','LDAUJ') else '工作台执行合同',
                         'validation': validation_levels.get(tag, 'generated-contract')}
                   for tag, value in tags.items()}
-    return {"errors": errors, "warnings": warnings, "dependencies": dependencies, "files": files,
-            "ready": not errors and not dependencies, "potcar": potcar, "species": species,
+    return {"file_requirements":file_requirements,"sampling_mode":"spacing" if native else "explicit","sampling_note":sampling_note, "errors": errors, "warnings": warnings, "dependencies": dependencies, "files": files,
+            "ready": not errors and not dependencies and not restart_required, "potcar": potcar, "species": species,
             "potcar_source": "节点覆盖" if options.get('potcar_id') else "项目共享",
             "geometry_sha256": geometry_hash(geometry), "source_sha256": source["source"]["sha256"],
             "parameters": {k: {"value": v, "source": origins[k], "validation": validation_levels.get(k, 'unset')} for k, v in values.items()},

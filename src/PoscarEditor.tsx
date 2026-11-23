@@ -29,7 +29,7 @@ export default function PoscarEditor({structure,onApply,onCancel}:{structure:Str
    <p>对同一组晶格向量，各向同性长度因子 s 对应体积因子 s³。例如 1.01 对应 1.030301。当前文本已包含此前的缩放，不会自动恢复原导入晶胞。</p>
    <p>默认按坐标行保留原子身份。若重排原子行，勾选“重新建立原子身份”并重新核对磁矩。</p>
   </details>
-  <label className="poscar-text-label">当前 POSCAR<textarea aria-label="POSCAR 完整文本" spellCheck={false} disabled={busy} value={text} onChange={e=>{setText(e.target.value);changed();}}/></label>
+  <label className="workbench-field-line poscar-text-label"><span className="field-line-name">当前 POSCAR</span><textarea aria-label="POSCAR 完整文本" spellCheck={false} disabled={busy} value={text} onChange={e=>{setText(e.target.value);changed();}}/></label>
   <label className="poscar-identity"><input type="checkbox" disabled={busy} checked={rebuild} onChange={e=>{setRebuild(e.target.checked);changed();}}/>重新建立原子身份（用于重排原子；元素或数量变化时自动重建）</label>
   {error&&<p role="alert" className="structure-error">{error} 当前结构未改变，编辑文本保留。</p>}
   {proposal&&<div className="poscar-preview" aria-label="POSCAR 变更预览">

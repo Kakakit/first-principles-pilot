@@ -157,19 +157,25 @@ def _bundle_cached(file_identity, key, allow_dependencies):
         bound = bool(manifest.get('source_contract', {}).get('schema') == 'fpilot.source-contract.v2' and manifest['source_contract']['mode'] != 'planned')
         if dependencies and not allow_dependencies and not bound:
             raise ValueError('该冻结包尚有未满足依赖，不能作为独立任务提交')
-        if not dependencies and not manifest.get('ready') and not bound:
+        if not dependencies and not manifest.get('ready') and not bound and not (allow_dependencies and manifest.get('restart_required')):
             raise ValueError('该冻结包未就绪，不能提交')
         allowed=('scf','relax') if not dependencies else ('relax','scf','dos','bands','vasp-wannier')
         if manifest.get('stage') not in allowed:
             raise ValueError('该节点尚不支持提交')
         poscar = 'POSCAR' if 'POSCAR' in manifest.get('files', {}) else 'POSCAR.reference'
-        names = ('INCAR', 'KPOINTS', 'POTCAR', poscar)
+        native = manifest.get('sampling_mode') == 'spacing'
+        if native and (manifest['stage'] not in ('relax','scf') or 'KPOINTS' in z.namelist() or 'KPOINTS' in manifest['files']):
+            raise ValueError('冻结输入的 k 点模式与文件不一致')
+        names = ('INCAR','POTCAR',poscar) if native else ('INCAR','KPOINTS','POTCAR',poscar)
         try:
             files={name:z.read(name) for name in names}
         except KeyError as exc:
             raise ValueError('冻结输入缺少必须文件') from exc
         for name,data in files.items():
             if hashlib.sha256(data).hexdigest()!=manifest['files'][name]['sha256']:raise ValueError('冻结输入文件校验失败')
+        if native:
+            from . import incar_text
+            incar_text.native_spacing(incar_text.parse(files['INCAR'].decode())[0])
     return manifest,files
 
 
@@ -217,13 +223,9 @@ def _incar_value(raw, tag):
 def _review_input_audit(audit, dependency=None, restart=None, stage=None):
     """Defer restart files supplied by a verified remote source; report real errors briefly."""
     errors = list(audit.get('errors') or [])
-    remote_source = bool(restart or dependency and stage in ('scf', 'dos', 'bands', 'vasp-wannier'))
-    if remote_source:
-        supplied = {'CHGCAR'} if dependency or restart else set()
-        if restart and restart.get('mode') in ('both', 'wave'):
-            supplied.add('WAVECAR')
-        if restart and restart.get('mode') == 'wave':
-            supplied.discard('CHGCAR')
+    snapshot = restart or dependency
+    if snapshot:
+        supplied = set(snapshot.get('files', {}))
         deferred = [item for item in errors if any(
             item == f'{name} required by INCAR restart settings' for name in supplied)]
         if deferred:
@@ -422,7 +424,8 @@ def restart_snapshot(bundle_id, manifest, files, source_id, alias, mode, reason)
             new = _incar_value(files['INCAR'], tag)
             if old != new:
                 warnings.append(f'{tag} 不同：来源={old or "未设置"}，本次={new or "未设置"}')
-        if mode == 'both' and old_files.get('KPOINTS') != files.get('KPOINTS'):
+        from .source_contracts import same_wave_sampling
+        if mode == 'both' and not same_wave_sampling(old_files,files):
             warnings.append('KPOINTS 与来源不同，WAVECAR 可能无法读取')
     required = ['CHGCAR'] + (['WAVECAR'] if mode == 'both' else [])
     source_path = attempt_path(source)['shell']
@@ -675,6 +678,10 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         raise ValueError('此冻结输入指定 ICHARG=1；请先选择同项目、同服务器的兼容 CHGCAR 来源')
     elif restart_mode or restart_reason:
         raise ValueError('续算参数缺少来源 attempt')
+    from . import incar_text
+    external_issue = incar_text.external_update_issue(incar_text.parse(files['INCAR'].decode())[0])
+    if external_issue:
+        raise ValueError(external_issue)
     if scheduler != 'custom':
         validate_parallel(files.get('INCAR', b'').decode('utf-8', errors='replace'),
                           rendered['profile'].get('mpi_ranks', rendered['profile'].get('ppn', rendered['profile'].get('ntasks'))),
@@ -707,7 +714,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
             (Path(temp)/target).write_bytes(data)
         audit=servers.pbs.audit_inputs(temp,profile='relax' if manifest['stage']=='relax' else 'static',executable=executable_name)
     audit=_review_input_audit(audit,dependency or (chain_source if chain_source_kind == 'dependency' else None),
-                              ({**role_source,'mode':'both' if 'WAVECAR' in role_source['files'] else 'charge'} if role_source else restart or (chain_source if chain_source and 'WAVECAR' in chain_source['files'] else None)),manifest['stage'])
+                              role_source or restart or (chain_source if chain_source_kind != 'dependency' else None),manifest['stage'])
     if rendered['profile'].get('resource_mode') == 'gpu' and _incar_value(files['INCAR'], 'NCORE') not in (None, '', '1'):
         audit.setdefault('warnings', []).append('GPU 模式按 VASP OpenACC 的 NCORE=1 检查 MPI/KPAR；原 INCAR 未修改，实际 GPU 程序能力仍需核对')
     storage_source = role_source or chain_source or restart or dependency
@@ -749,7 +756,7 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         'CONTCAR', 'OSZICAR', 'CHGCAR', 'WAVECAR', 'vasprun.xml',
         '.job-id', '.exit-status',
     )
-    artifact_paths = {name: absolute_path + '/' + name for name in artifact_names}
+    artifact_paths = {name: absolute_path + '/' + name for name in artifact_names if name!='KPOINTS' or name in files}
     script=with_exit_trap(rendered['script'],scheduler)
     stored_config = dict(config)
     stored_config['remote_workspace_root'] = root
@@ -865,6 +872,9 @@ def submit(key):
     from . import execution_control as control
     record=get(key)
     recycle.assert_available('attempts',key,record)
+    if record.get('kind') == 'program':
+        from . import program_tasks
+        return program_tasks.submit(record)
     if record.get('kind') == 'wannier90-plot':
         from . import wannier_plot_restart
         return wannier_plot_restart.submit(key)
@@ -963,6 +973,15 @@ def submit(key):
         raise ValueError('此任务按旧版复制策略准备；请重新准备，确认新的链接/写入策略后再提交')
     if expected_plan != record.get('source_file_plan', {}):
         raise ValueError('上游文件的链接/写入策略与准备时不同，没有提交')
+    from . import incar_text
+    final_tags = incar_text.parse(files['INCAR'].decode())[0]
+    external_issue = incar_text.external_update_issue(final_tags)
+    if external_issue:
+        raise ValueError(external_issue)
+    available = set(files) | {entry['target'] for entry in expected_plan.values()}
+    for name, trigger in incar_text.conditional_files(final_tags).items():
+        if name not in available:
+            raise ValueError(f'{trigger} 需要 {name}，当前提交文件缺少该项，请重新选择来源并准备运行')
     dependency_commands = source_file_commands(source_snapshot, expected_plan) if source_snapshot else ''
     paths = attempt_path(record)
     root_expr = remote_paths.shell_path(paths['root'])
@@ -1109,6 +1128,9 @@ def refresh(key, poll_receipt=None, automatic=False):
         from .execution_cancel import recover
         recover(record['project_id'], key)
         return get(key)
+    if record.get('kind')=='program' and scheduler_name(record)!='custom':
+        from .program_batch import refresh as refresh_program
+        return refresh_program(record,poll_receipt)
     if scheduler_name(record)=='custom':
         from .custom_commands import refresh as refresh_command
         return record if record['state']=='PREPARED' else refresh_command(key)

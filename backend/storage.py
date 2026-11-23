@@ -65,12 +65,12 @@ def validate_workspace(w):
             raise ValueError('节点或连接数量超过上限。')
         nodes = set()
         for n in p['nodes']:
-            if not n.get('id') or n['id'] in nodes or n['data']['kind'] not in ('structure','relax','scf','bands','dos','vasp-wannier','wannier90','scan'):
+            if not n.get('id') or n['id'] in nodes or n['data']['kind'] not in ('structure','relax','scf','bands','dos','vasp-wannier','wannier90','scan','program'):
                 raise ValueError('节点无效。')
             mode = n['data'].get('executionMode')
             sequence = n['data'].get('stageSequence')
             slug = n['data'].get('stageSlug')
-            if mode not in ('vasp', 'wannier90', 'scan') or (n['data']['kind'] == 'scan') != (mode == 'scan') or (n['data']['kind'] == 'wannier90') != (mode == 'wannier90'):
+            if (n['data']['kind']=='program') != (mode=='program') or mode not in ('vasp', 'wannier90', 'scan','program') or (n['data']['kind'] == 'scan') != (mode == 'scan') or (n['data']['kind'] == 'wannier90') != (mode == 'wannier90'):
                 raise ValueError('节点执行类型无效。')
             if type(sequence) is not int or not 1 <= sequence <= 999 or not isinstance(slug, str) or len(slug) > 48 or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?', slug):
                 raise ValueError('远程阶段标识无效。')
@@ -78,6 +78,16 @@ def validate_workspace(w):
                 from .node_editability import STAGE_SEQUENCES
                 if sequence != STAGE_SEQUENCES[n['data']['kind']]:
                     raise ValueError('新项目的阶段编号须与节点类型一致。')
+            if 'programDraft' in n['data']:
+                draft = n['data']['programDraft']
+                if (mode != 'program' or not isinstance(draft, dict)
+                        or not all(isinstance(draft.get(k), str) for k in ('command','alias'))
+                        or not isinstance(draft.get('files'), list)
+                        or not all(isinstance(f,dict) and all(isinstance(f.get(k),str) for k in ('name','text')) for f in draft['files'])
+                        or not isinstance(draft.get('sources',[]),list)
+                        or not all(isinstance(r,dict) and all(isinstance(r.get(k),str) for k in ('source_attempt_id','file','name','node_id')) for r in draft.get('sources',[]))
+                        or not isinstance(draft.get('outputs'),list) or not all(isinstance(o,str) for o in draft['outputs'])):
+                    raise ValueError('自定义程序草稿格式无效')
             if n['data'].get('scanSpec') is not None:
                 from .calculation_nodes import kind
                 if n['data']['kind'] != 'scan': raise ValueError('迭代设置只能属于迭代节点')

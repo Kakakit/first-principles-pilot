@@ -355,6 +355,36 @@ def _audit_kpoints(data):
     return errors, warnings
 
 
+def native_spacing(tags):
+    """Validate the explicit INCAR-driven sampling contract."""
+    raw = str(tags.get('KSPACING', '')).strip()
+    if not re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[EeDd][+-]?[0-9]+)?',raw):
+        raise ValueError('KSPACING 须为正的有限数值（Å⁻¹）')
+    spacing = float(raw.upper().replace('D','E'))
+    if not math.isfinite(spacing) or spacing <= 0:
+        raise ValueError('KSPACING 须为正的有限数值（Å⁻¹）')
+    gamma = str(tags.get('KGAMMA', '.TRUE.')).strip().upper()
+    if gamma not in ('T','TRUE','.TRUE.','F','FALSE','.FALSE.'):
+        raise ValueError('KGAMMA 须为 VASP 布尔值')
+    return spacing, gamma in ('T','TRUE','.TRUE.')
+
+
+def conditional_files(tags):
+    """Files needed to honor the requested initialization in a classic VASP run."""
+    result = {}
+    istart = _tag_int(tags, "ISTART")
+    icharg = _tag_int(tags, "ICHARG")
+    if istart in (1, 2, 3):
+        result["WAVECAR"] = "ISTART=" + str(istart)
+    if istart == 3:
+        result["TMPCAR"] = "ISTART=3"
+    if icharg in (1, 5, 11):
+        result["CHGCAR"] = "ICHARG=" + str(icharg)
+    if icharg in (4, 14):
+        result["POT"] = "ICHARG=" + str(icharg)
+    return result
+
+
 def _audit_incar(tags, duplicates, malformed, profile, executable):
     errors = []
     warnings = []
@@ -401,11 +431,7 @@ def _audit_incar(tags, duplicates, malformed, profile, executable):
         errors.append("INCAR ISTART must be one of 0, 1, 2, or 3")
     if "ICHARG" in tags and icharg not in {0, 1, 2, 4, 5, 10, 11, 12, 14}:
         errors.append("INCAR ICHARG has an unsupported value")
-    restart = {"ISTART": istart, "ICHARG": icharg, "required_files": []}
-    if istart is not None and istart >= 1:
-        restart["required_files"].append("WAVECAR")
-    if icharg in {1, 11, 12}:
-        restart["required_files"].append("CHGCAR")
+    restart = {"ISTART": istart, "ICHARG": icharg, "required_files": list(conditional_files(tags))}
     return errors, warnings, restart
 
 
@@ -461,6 +487,15 @@ def audit_inputs(calc_dir, profile="generic", executable="vasp_std"):
             incar_tags, duplicates, malformed = parse_incar(text)
         except UnicodeDecodeError:
             errors.append("INCAR is not UTF-8 text")
+    required_names = INPUT_NAMES
+    if not inputs["KPOINTS"]["exists"] and 'KSPACING' in incar_tags:
+        try:
+            native_spacing(incar_tags)
+        except ValueError as exc:
+            errors.append(str(exc))
+        else:
+            errors.remove("missing KPOINTS")
+            required_names = ("INCAR","POSCAR","POTCAR")
     if raw["INCAR"] and not incar_tags:
         errors.append("INCAR has no parseable assignments")
     incar_errors, incar_warnings, restart = _audit_incar(
@@ -517,7 +552,7 @@ def audit_inputs(calc_dir, profile="generic", executable="vasp_std"):
         "checks": {
             "required_inputs_nonempty": all(
                 inputs[name].get("exists") and isinstance(inputs[name].get("size_bytes"), int)
-                and inputs[name].get("size_bytes", 0) > 0 for name in INPUT_NAMES
+                and inputs[name].get("size_bytes", 0) > 0 for name in required_names
             ),
             "poscar_species_counts": bool(poscar.get("elements")) and len(poscar.get("elements", [])) == len(poscar.get("counts", [])),
             "potcar_titel_order": potcar_order_matches,

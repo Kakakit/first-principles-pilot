@@ -7,7 +7,7 @@ from .file_cache import identity, ByteCache
 
 VASP_KINDS = {'relax', 'scf', 'bands', 'dos', 'vasp-wannier'}
 STAGE_SEQUENCES = {kind: index for index, kind in enumerate(
-    ('structure', 'relax', 'scf', 'bands', 'dos', 'vasp-wannier', 'wannier90', 'scan'), 1)}
+    ('structure', 'relax', 'scf', 'bands', 'dos', 'vasp-wannier', 'wannier90', 'scan', 'program'), 1)}
 
 
 _contracts = ByteCache(8 * 1024 * 1024, max_entries=128)

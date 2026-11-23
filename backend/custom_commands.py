@@ -145,6 +145,12 @@ def direct_state(observed):
 
 def direct_file_evidence(record):
     from . import execution as ex
+    if record.get('kind') == 'program':
+        from .program_tasks import output_evidence
+        try:
+            return output_evidence(record)
+        except OSError:
+            return {}
     command = 'cd ' + shlex.quote(record['remote_path_absolute']) + ' || exit 3\n' + ex.vasp_file_evidence_command()
     try:
         receipt = ex.ssh(record['config']['alias'], command, timeout=30, stdout_limit=16000, mutating=False)

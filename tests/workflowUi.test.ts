@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {inputForReview,chainNodes} from '../src/workflowUi.ts';
-import {newProject,makeStep,kinds} from '../src/model.ts';
+import {newProject,makeStep,kinds,canConnect} from '../src/model.ts';
 
 const old={id:'old',node_id:'scf',stage:'scf',status:'ready-for-execution-review'};
 const current={...old,id:'current'};
@@ -34,4 +34,14 @@ test('chain selection keeps unsupported context visible but sends only selected 
   assert.equal(JSON.stringify(project),before);
   project.nodes=project.nodes.filter(node=>node.id!==supported[1].id);
   assert.deepEqual(chainNodes(project,selected).map(node=>node.id),[supported[3].id]);
+});
+
+test('program inputs accept calculated sources and reject cycles and incompatible scientific targets',()=>{
+  const nodes=(['scf','program','program','structure'] as const).map((kind,i)=>makeStep(kind,{x:i*220,y:0},i+1));
+  const [scf,analysis,consumer,structure]=nodes.map(n=>n.id);
+  assert.ok(canConnect(nodes,[],scf,analysis));
+  assert.ok(canConnect(nodes,[],analysis,consumer));
+  assert.equal(canConnect(nodes,[{id:'one',source:analysis,target:consumer}],consumer,analysis),false);
+  assert.equal(canConnect(nodes,[],analysis,scf),false);
+  assert.equal(canConnect(nodes,[],structure,analysis),false);
 });

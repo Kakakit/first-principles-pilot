@@ -16,7 +16,7 @@ export function inputForReview(inputs:FrozenInputChoice[],nodeId?:string|null,re
 }
 
 export function configurationNodes(project:Project) {
-  return project.nodes.filter(node=>['relax','scf','bands','dos','vasp-wannier','wannier90','scan'].includes(node.data.kind));
+  return project.nodes.filter(node=>['relax','scf','bands','dos','vasp-wannier','wannier90','scan','program'].includes(node.data.kind));
 }
 
 export function chainNodes(project:Project,selectedIds?:string[]) {

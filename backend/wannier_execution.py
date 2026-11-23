@@ -1,5 +1,5 @@
 from .calculation_nodes import kind as calculation_kind, owner as attempt_owner
-from . import batch_scheduler
+from . import batch_scheduler, wannier_dimensions
 """C2: one explicit Wannier90 attempt from a completed VASP interface attempt.
 
 Large matrices stay on the same host.  A PREPARED record freezes their hashes,
@@ -76,6 +76,11 @@ PARAMETER_HELP = {
     'dis_froz_min': '启用冻结窗但未设置下界时，使用外窗下界。',
     'trial_step': '与 fixed_step 互斥。', 'fixed_step': '与 trial_step 互斥。',
 }
+
+
+def require_plot_files(document):
+    if win_contract._truthy(win_contract._first_value(document,'wannier_plot')):
+        raise ValueError('wannier_plot=true 需要同一 k 网格和自旋通道的 UNK* 波函数文件；此流程仅准备接口矩阵。请关闭实空间绘图，插值能带可使用 bands_plot。')
 
 
 def require_fresh_interface_win(win):
@@ -277,15 +282,26 @@ def discover(project, node_id, parent_id, alias, force=False):
     if cached and not force:return cached
     command = ('set -e\ncd ' + remote_paths.shell_path(source) + '\n'
                'for seed in wannier90 wannier90.1 wannier90.2; do\n'
-               '  if { test -s "$seed.win" || test -s wannier90.win; } && test -s "$seed.amn" && test -s "$seed.mmn" && test -s "$seed.eig"; then printf "FPILOT_W90_SEED=%s\\n" "$seed"; fi\n'
+               '  missing=""; has_matrix=0\n'
+               '  if ! test -s "$seed.win" && ! test -s wannier90.win; then missing="$seed.win"; fi\n'
+               '  for ext in amn mmn eig; do\n'
+               '    if test -s "$seed.$ext"; then has_matrix=1; else missing="$missing $seed.$ext"; fi\n'
+               '  done\n'
+               '  if test -z "$missing"; then printf "FPILOT_W90_SEED=%s\\n" "$seed";\n'
+               '  elif test "$has_matrix" = 1 || { test "$seed" != wannier90 && test -s "$seed.win"; }; then printf "FPILOT_W90_MISSING=%s|%s\\n" "$seed" "$missing"; fi\n'
                'done\n')
     receipt = ex.ssh(alias, command, timeout=30)
     if receipt['exit_code'] != 0:
         raise ValueError('无法读取接口文件目录')
     seeds = re.findall(r'^FPILOT_W90_SEED=(wannier90(?:\.[12])?)$', receipt['stdout'], re.M)
+    incomplete = {seed: names.split() for seed, names in re.findall(
+        r'^FPILOT_W90_MISSING=(wannier90(?:\.[12])?)\|([^\n]+)$', receipt['stdout'], re.M)}
     if not seeds:
-        raise ValueError('未找到完整的 Wannier90 接口四文件组')
+        names = [name for group in incomplete.values() for name in group]
+        detail = '缺少或为空：' + '、'.join(names) if names else '需要同一通道的 .win、.amn、.mmn 和 .eig'
+        raise ValueError('上游 VASP-Wannier 任务未找到完整的 Wannier90 接口四文件组。' + detail)
     return remote_cache.write('wannier-discovery',identity,{'source_attempt_id':parent_id, 'source_path':source, 'seeds':seeds,
+            'incomplete':incomplete,
             'mode':'two-collinear-channels' if 'wannier90.1' in seeds and 'wannier90.2' in seeds else 'single',
             'remote_mutation':False})
 
@@ -298,7 +314,7 @@ def inspect(project, node_id, parent_id, alias, seed=SEED, verification_mode='li
     source = ex.attempt_path(parent)['shell']
     identity={'parent':parent_id,'alias':alias,'path':source,'seed':seed,'verification_mode':verification_mode}
     cached=remote_cache.read('wannier-source',identity,max_cache_age)
-    if cached and not force:return cached
+    if cached and cached.get('matrix_dimensions') and not force:return cached
     source_names(seed)
     matrix_names = source_names(seed)[1:]
     names = ' '.join(shlex.quote(name) for name in matrix_names)
@@ -306,7 +322,7 @@ def inspect(project, node_id, parent_id, alias, seed=SEED, verification_mode='li
                'win_name=' + shlex.quote(seed + '.win') + '\n'
                'if ! test -s "$win_name"; then win_name=wannier90.win; fi\n'
                'for file in "$win_name" ' + names + '; do\n'
-               '  test -f "$file" && test ! -L "$file" && test -s "$file"\n' +
+               '  if ! test -f "$file" || test -L "$file" || ! test -s "$file"; then echo "接口文件不可用: $file" >&2; exit 1; fi\n' +
                ("  case \"$file\" in *.win) hash=$(sha256sum \"$file\" | awk '{print $1}');; *) hash=-;; esac\n" if verification_mode == 'lightweight' else
                 "  hash=$(sha256sum \"$file\" | awk '{print $1}')\n") +
                '  size=$(wc -c < "$file")\n'
@@ -315,6 +331,7 @@ def inspect(project, node_id, parent_id, alias, seed=SEED, verification_mode='li
                'test $(wc -c < "$win_name") -le 262144\n')
     # The selected seed may use the common wannier90.win; resolve and pull it in
     # the same controlled request, rather than another stat and SCP session.
+    command += wannier_dimensions.probe(seed)
     energy=remote_cache.read('energy',remote_energy.identity(parent))
     command += 'set +e\n'+remote_energy.command(parent,energy)+'set -e\n'
     win_name=(cached or {}).get('win_source_name') or ('wannier90.win' if seed!='wannier90' else seed+'.win')
@@ -344,14 +361,43 @@ def inspect(project, node_id, parent_id, alias, seed=SEED, verification_mode='li
     errors = win_contract.validate_win(win)
     if errors:
         raise ValueError('VASP 生成的 .win 需要检查：' + json.dumps(errors, ensure_ascii=False)[:1000])
+    _check_parent_spin(parent, win)
+    dims = wannier_dimensions.receipt(receipt['stdout'], seed)
+    wannier_dimensions.validate(win_contract.parse_win(win), win_contract, dims, seed, final=False)
     energy=None
     try: energy=remote_energy.store(parent,receipt['stdout'])
     except ValueError: pass  # A valid .win remains editable without an OUTCAR reference.
     return remote_cache.write('wannier-source',identity,{'source_attempt_id': parent_id, 'source_path': source, 'source_job_id': parent.get('job_id'),
             'alias': alias, 'seed': seed, 'win_source_name': win_name, 'files': files, 'win': win,
-            'spinors': win_contract._first_value(win_contract.parse_win(win), 'spinors'),
+            'matrix_dimensions': dims, 'spinors': win_contract._first_value(win_contract.parse_win(win), 'spinors'),
             'parameters': parameter_values(win),'energy_reference':energy,
             'verification_mode': verification_mode, 'remote_mutation': False})
+
+
+def _check_parent_spin(parent, win):
+    raw = parent.get('final_incar')
+    if not raw:
+        return
+    from . import incar_text
+    tags = incar_text.parse(raw)[0]
+    flags = [incar_text.semantic(tag, tags.get(tag, '.FALSE.')) for tag in ('LSORBIT', 'LNONCOLLINEAR')]
+    if all(flag in ('true', 'false') for flag in flags):
+        actual = win_contract._truthy(win_contract._first_value(win_contract.parse_win(win), 'spinors'))
+        if actual != ('true' in flags):
+            raise ValueError('来源 VASP 的 LSORBIT / LNONCOLLINEAR 与 .win 的 spinors 不一致，请核对所选接口任务')
+
+
+def frozen_dimensions(bundle, alias):
+    dims = bundle.get('matrix_dimensions')
+    if dims:
+        return dims
+    seed = bundle['seed']
+    source_names(seed)
+    command = 'set -e\ncd ' + remote_paths.shell_path(bundle['source_path']) + '\n' + wannier_dimensions.probe(seed)
+    result = ex.ssh(alias, command, timeout=180)
+    if result['exit_code']:
+        raise ValueError('旧冻结包的接口维度读取失败，请核对来源后重试')
+    return wannier_dimensions.receipt(result['stdout'], seed)
 
 
 def _checked_win(source, edited):
@@ -361,6 +407,7 @@ def _checked_win(source, edited):
     if errors:
         raise ValueError('.win 审查未通过：' + json.dumps(errors, ensure_ascii=False)[:1500])
     before, after = win_contract.parse_win(source), win_contract.parse_win(edited)
+    require_plot_files(after)
     for name in win_contract.PROTECTED_SCALARS:
         if win_contract._first_value(before, name) != win_contract._first_value(after, name):
             raise ValueError('VASP 生成字段不可改：' + name)
@@ -400,6 +447,8 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
     else:
         from .source_files import snapshot as file_snapshot
         checkpoint=frozen['checkpoint']
+        if checkpoint['name'] != seed + '.chk':
+            raise ValueError('重启检查点必须属于当前通道：' + seed + '.chk')
         recycle.assert_available('attempts',checkpoint['source_attempt_id'])
         checked=file_snapshot(config['alias'],checkpoint['source_path'],[checkpoint['name']],ex.ssh,'lightweight')
         if checked[checkpoint['name']]!=checkpoint['metadata']:raise ValueError('检查点文件已变化，请重新预览')
@@ -420,10 +469,12 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
         from .source_files import snapshot as file_snapshot
         current=file_snapshot(config['alias'],frozen['source_path'],frozen['source_files'],ex.ssh,mode=frozen.get('verification_mode','full'))
         if current!=frozen['source_files']:raise ValueError('冻结矩阵来源发生变化，请重新审查')
-        source={'files':current,'source_path':frozen['source_path'],'win_source_name':frozen['source_win_name'],'win':frozen['win'],'spinors':frozen['spinors'],'verification_mode':frozen.get('verification_mode','full')}
+        source={'matrix_dimensions':frozen_dimensions(frozen,config['alias']), 'files':current,'source_path':frozen['source_path'],'win_source_name':frozen['source_win_name'],'win':frozen['win'],'spinors':frozen['spinors'],'verification_mode':frozen.get('verification_mode','full')}
     else:
         source = inspect(project, node_id, parent_id, config['alias'], seed)
     _checked_win(source['win'], win)
+    wannier_dimensions.validate(win_contract.parse_win(win), win_contract, source['matrix_dimensions'], seed)
+    _check_parent_spin(parent, win)
     if frozen and source['files']!=frozen['source_files']:raise ValueError('冻结矩阵来源发生变化，请重新审查')
     if band_path:
         from . import wannier_bands
@@ -459,7 +510,7 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
     absolute = remote_paths.absolute_attempt_path(snapshot['absolute_path'], relative)
     bundle = {'schema': 'fpilot.wannier90-frozen-bundle.v1', 'project_id': project['id'],
               'node_id': node_id, 'parent_attempt_id': parent_id, 'source_path': source['source_path'],
-              'source_files': source['files'], 'source_win_name': source['win_source_name'],
+              'matrix_dimensions': source['matrix_dimensions'], 'source_files': source['files'], 'source_win_name': source['win_source_name'],
               'verification_mode': source.get('verification_mode', 'full'),
               'source_win_sha256': source['files'][source['win_source_name']]['sha256'],
               'win': win, 'win_sha256': _sha(win.encode()), 'spinors': source['spinors'],
@@ -496,7 +547,7 @@ def prepare(project, node_id, parent_id, config, probe_id, node, cores=None, res
               'live_energy_reference': actual_reference,
               'source_file_plan': {name: {'target': name, 'mode': 'hardlink', **source['files'][name]}
                                    for name in source_names(seed)[1:]},
-              'input_audit': {'status': 'PASS', 'source_files': source['files'], 'win_sha256': bundle['win_sha256']},
+              'input_audit': {'status': 'PASS', 'matrix_dimensions':source['matrix_dimensions'], 'source_files': source['files'], 'win_sha256': bundle['win_sha256']},
               'job_id': None, 'note': 'Wannier90 矩阵将以同服务器硬链接复用；.win 为本次独立文件，尚未提交。'}
     if bundle.get('checkpoint'):
         checkpoint=bundle['checkpoint']
@@ -595,6 +646,28 @@ def submit(key):
             current = dict(re.findall(r'^FPILOT_W90_FILE=([^|\n]+)\|([a-f0-9]{64})$', receipt['stdout'], re.M))
             if current != {name: info['sha256'] for name, info in bundle['source_files'].items()}:
                 raise ValueError('来源接口文件内容已变化，没有提交')
+    document = win_contract.parse_win(bundle['win'])
+    dimensions = record.get('input_audit', {}).get('matrix_dimensions') or frozen_dimensions(bundle, record['config']['alias'])
+    wannier_dimensions.validate(document, win_contract, dimensions, bundle['seed'])
+    require_plot_files(document)
+    if not bundle.get('checkpoint'):
+        require_fresh_interface_win(bundle['win'])
+    link_names = [name for name in selected_names if name != bundle.get('source_win_name', bundle['seed'] + '.win')]
+    expected_links = {name: {'target': name, 'mode': 'hardlink', **bundle['source_files'][name]} for name in link_names}
+    if bundle.get('checkpoint'):
+        checkpoint=bundle['checkpoint']
+        recycle.assert_available('attempts',checkpoint['source_attempt_id'])
+        from .source_files import snapshot as checkpoint_snapshot
+        if checkpoint['name'] != bundle['seed'] + '.chk':
+            raise ValueError('重启检查点与提交的 seed 不一致')
+        actual=checkpoint_snapshot(record['config']['alias'],checkpoint['source_path'],[checkpoint['name']],ex.ssh,'lightweight')
+        if actual[checkpoint['name']]!=checkpoint['metadata']:raise ValueError('检查点文件已变化，没有提交')
+        expected_links[checkpoint['name']]={**checkpoint['metadata'],'source_path':checkpoint['source_path'],'target':checkpoint['name'],'mode':'reflink-or-copy'}
+    if 'source_file_plan' not in record:
+        raise ValueError('此 Wannier90 任务按旧版复制策略准备；请重新准备以确认硬链接策略')
+    if expected_links != record['source_file_plan']:
+        raise ValueError('Wannier90 矩阵链接策略与准备时不同，没有提交')
+    links = ex.source_file_commands({'source_path': bundle['source_path']}, expected_links)
     with closing(ex.db()) as c:
         c.execute('BEGIN IMMEDIATE')
         row = c.execute('SELECT state FROM attempts WHERE id=?', (key,)).fetchone()
@@ -624,20 +697,6 @@ def submit(key):
             archive.addfile(item, io.BytesIO(data))
     destination = remote_paths.shell_path(record['remote_path_absolute'])
     parent_dir = shlex.quote(str(PurePosixPath(record['remote_path_absolute']).parent))
-    link_names = [name for name in selected_names if name != bundle.get('source_win_name', bundle['seed'] + '.win')]
-    expected_links = {name: {'target': name, 'mode': 'hardlink', **bundle['source_files'][name]} for name in link_names}
-    if bundle.get('checkpoint'):
-        checkpoint=bundle['checkpoint']
-        recycle.assert_available('attempts',checkpoint['source_attempt_id'])
-        from .source_files import snapshot as checkpoint_snapshot
-        actual=checkpoint_snapshot(record['config']['alias'],checkpoint['source_path'],[checkpoint['name']],ex.ssh,'lightweight')
-        if actual[checkpoint['name']]!=checkpoint['metadata']:raise ValueError('检查点文件已变化，没有提交')
-        expected_links[checkpoint['name']]={**checkpoint['metadata'],'source_path':checkpoint['source_path'],'target':checkpoint['name'],'mode':'reflink-or-copy'}
-    if 'source_file_plan' not in record:
-        raise ValueError('此 Wannier90 任务按旧版复制策略准备；请重新准备以确认硬链接策略')
-    if expected_links != record['source_file_plan']:
-        raise ValueError('Wannier90 矩阵链接策略与准备时不同，没有提交')
-    links = ex.source_file_commands({'source_path': bundle['source_path']}, expected_links)
     submit_command = None if scheduler=='custom' else batch_scheduler.submit_command(scheduler,script_name,bundle['seed'])
     if scheduler=='custom':
         from .custom_commands import start_command
@@ -759,6 +818,7 @@ def configuration_draft(project,node_id,parent_id,alias,input_reason,win,seed=SE
     branch_bindings.check(project,node_id,alias)
     source = inspect(project, node_id, parent_id, alias, seed, max_cache_age=60)
     _checked_win(source['win'], win)
+    wannier_dimensions.validate(win_contract.parse_win(win), win_contract, source['matrix_dimensions'], seed)
     if band_path:
         from . import wannier_bands
         if (band_path.get('project_id'), band_path.get('parent_attempt_id'), band_path.get('alias')) != (project['id'], parent_id, alias):
@@ -774,7 +834,7 @@ def configuration_draft(project,node_id,parent_id,alias,input_reason,win,seed=SE
     actual_values = parameter_values(win)
     bundle={'schema':'fpilot.wannier90-frozen-bundle.v1','project_id':project['id'],'node_id':node_id,'project':project,'alias':alias,
             'parent_attempt_id':parent_id,'source_path':source['source_path'],'source_files':source['files'],
-            'source_win_name':source['win_source_name'],'source_win_sha256':source['files'][source['win_source_name']]['sha256'],
+            'matrix_dimensions':source['matrix_dimensions'],'source_win_name':source['win_source_name'],'source_win_sha256':source['files'][source['win_source_name']]['sha256'],
             'verification_mode':source.get('verification_mode','full'),'win':win,'win_sha256':_sha(win.encode()),
             'spinors':source['spinors'],'seed':seed,'input_reason':input_reason.strip(),'energy_reference':actual_reference,
             'relative_windows':relative_windows,'absolute_windows':{tag:actual_values[tag] for tag in WINDOW_TAGS if actual_values[tag]},

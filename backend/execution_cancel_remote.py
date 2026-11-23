@@ -58,7 +58,7 @@ def inspect(payload):
             found = re.search(r'^Job Id:\s*(\S+)', raw, re.M)
             state = re.search(r'job_state\s*=\s*([A-Z])', raw)
             owner = re.search(r'Job_Owner\s*=\s*([^@\s]+)', raw)
-            exit_status = re.search(r'Exit_status\s*=\s*(-?\d+)', raw)
+            exit_status = re.search(r'Exit_status\s*=\s*(-?\d+)', raw, re.I)
             if not found or found[1] != job or not state or not owner or owner[1] != user:
                 raise ValueError('调度器未返回匹配的作业身份、所有者或状态')
             return {'scheduler_state': state[1], 'terminal': state[1] in ('C', 'F'),

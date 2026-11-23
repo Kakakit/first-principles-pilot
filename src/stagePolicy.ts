@@ -1,6 +1,6 @@
 import type {Kind,Project,StepData} from './model';
 
-export const STAGE_SEQUENCES:Record<Kind,number>={structure:1,relax:2,scf:3,bands:4,dos:5,'vasp-wannier':6,wannier90:7,scan:8};
+export const STAGE_SEQUENCES:Record<Kind,number>={structure:1,relax:2,scf:3,bands:4,dos:5,'vasp-wannier':6,wannier90:7,scan:8,program:9};
 export const VASP_KINDS=['relax','scf','bands','dos','vasp-wannier'] as const;
 export function nextStageSequence(project:Project,kind:Kind){
   return project.stagePolicy==='kind-fixed-v1'?STAGE_SEQUENCES[kind]:Math.max(0,...project.nodes.map(n=>n.data.stageSequence||0))+1;

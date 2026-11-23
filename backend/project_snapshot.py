@@ -26,7 +26,7 @@ TABLES = {
 }
 DIRS = ('analyses', 'analyses-v2', 'plots', 'plot-datasets', 'wannier-comparisons', 'analysis-datasets')
 SIDE = ('failure-notes', 'failure-snapshots', 'result-summaries', 'window-summaries')
-ALLOWED = set(DIRS + SIDE + ('inputs', 'wannier-bundles', 'job-templates', 'recycle', 'artifact-deletions', 'task-recovery'))
+ALLOWED = set(DIRS + SIDE + ('inputs', 'program-bundles', 'wannier-bundles', 'job-templates', 'recycle', 'artifact-deletions', 'task-recovery'))
 MAX_FILE = 256 * 1024 * 1024
 MAX_TOTAL = 2 * 1024 * 1024 * 1024
 
@@ -62,7 +62,7 @@ def mappable(relative):
     parts = PurePosixPath(relative).parts
     # Raw evidence, frozen bundles and published output files keep their bytes
     # and hashes. Only operational local metadata contains migrated paths.
-    return relative.endswith('.json') and parts[0] != 'wannier-bundles' and not set(parts[2:-1]).intersection({'files', 'outputs', 'package'})
+    return relative.endswith('.json') and parts[0] not in ('program-bundles', 'wannier-bundles') and not set(parts[2:-1]).intersection({'files', 'outputs', 'package'})
 
 
 def read_tables(root, filename):
@@ -147,6 +147,12 @@ def capture(root, project_id):
     for path in sorted((root / 'wannier-bundles').glob('*.json')):
         if json.loads(path.read_bytes()).get('project_id') == project_id:
             add(path)
+    for row in selected.get('attempts', []):
+        record = json.loads(row['body'])
+        if record.get('kind') == 'program':
+            if not re.fullmatch('[a-f0-9]{64}', record.get('bundle_id') or ''):
+                raise ValueError('程序记录中的冻结输入标识无效')
+            add(root / 'program-bundles' / (record['bundle_id'] + '.json'))
     analyses = 0
     for folder in DIRS:
         for directory in sorted((root / folder).glob('*')):

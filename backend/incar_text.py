@@ -6,6 +6,8 @@ _path = Path(__file__).resolve().parents[1] / 'resources/skills/calc-review/scri
 _spec = importlib.util.spec_from_file_location('fpilot_incar_text', _path)
 _parser = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_parser)
+native_spacing = _parser.native_spacing
+conditional_files = _parser.conditional_files
 parse = _parser.parse_incar
 statements = _parser.incar_statements
 remove = _parser.remove_incar_tags
@@ -13,6 +15,11 @@ merge = _parser.merge_incar_text
 MAX_BYTES = 262144
 BOOLS = {'LDAU','LWAVE','LCHARG','LASPH','LSORBIT','LNONCOLLINEAR','GGA_COMPAT','LORBMOM',
          'LCALCPOL','LWANNIER90','LWANNIER90_RUN','LWRITE_MMN_AMN'}
+
+
+def external_update_issue(tags):
+    if _parser._tag_int(tags, 'ICHARG') == 5:
+        return 'ICHARG=5 需要外部程序逐步提供 GAMMA 或 vaspgamma.h5 并通过 vasp.lock 同步；当前提交方式未接入该程序'
 
 
 def semantic(tag, value):

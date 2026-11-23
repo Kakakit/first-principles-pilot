@@ -83,7 +83,7 @@ def _layer(value, path, issues):
 
 
 def _input(value, path, issues):
-    if not _closed(value, {"grid", "center", "path", "line_points", "potcar_id", "potcar_provenance_id", "reason"}, path, issues): return
+    if not _closed(value, {"grid", "center", "sampling", "kspacing", "kgamma", "path", "line_points", "potcar_id", "potcar_provenance_id", "reason"}, path, issues): return
     for key, raw in value.items(): _text(raw, f"{path}.{key}", issues, required=False, maximum=20000)
 
 
@@ -275,7 +275,7 @@ def schema_document():
         "label": {"type": "string", "minLength": 1, "maxLength": 200}, "description": text,
         "depends_on": {"type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": True, "items": {"type": "string"}},
         "parameters": layer,
-        "input": {"type": "object", "additionalProperties": False, "properties": {key: {"type": "string", "maxLength": 20000} for key in ("grid", "center", "path", "line_points", "potcar_id", "potcar_provenance_id", "reason")}},
+        "input": {"type": "object", "additionalProperties": False, "properties": {key: {"type": "string", "maxLength": 20000} for key in ("grid", "center", "sampling", "kspacing", "kgamma", "path", "line_points", "potcar_id", "potcar_provenance_id", "reason")}},
         "potcar": {"type": "object", "additionalProperties": False, "required": ["functional", "variants"], "properties": {"functional": {"type": "string", "minLength": 1}, "variants": {"type": "object", "minProperties": 1, "propertyNames": {"pattern": "^[A-Z][a-z]?$"}, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 120}}}}}}
     return {"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "https://local.fpilot/recipe/v1.schema.json",
             "title": "First Principles Pilot recipe v1", "type": "object", "additionalProperties": False,

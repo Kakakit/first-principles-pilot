@@ -86,16 +86,18 @@ def _case(request, batch, selection):
     extra = '\n'.join(tag + ' = ' + value for tag, value in old_tags.items()
                       if tag not in parameter_catalog.DEFINITIONS and tag not in omitted)
     node['data']['parameters']['manualIncarText'] = extra + '\n' + node['data']['parameters']['manualIncarText']
-    kpoints = files['KPOINTS'].decode().splitlines()
+    kpoints = files.get('KPOINTS',b'').decode().splitlines()
     if options['grid']:
-        grid, center = options['grid'], options['center']
+        sampling = {'grid':options['grid'],'center':options['center']}
     elif len(kpoints) >= 5 and kpoints[1].strip() == '0' and kpoints[2].strip() in ('Gamma', 'Monkhorst-Pack'):
-        grid, center = kpoints[3].strip(), kpoints[2].strip()
+        sampling = {'grid':kpoints[3].strip(),'center':kpoints[2].strip()}
+    elif not kpoints and 'KSPACING' in old_tags:
+        sampling = {'sampling':'spacing','kspacing':old_tags['KSPACING'],'kgamma':old_tags.get('KGAMMA','.TRUE.')}
     else:
         raise ValueError('来源没有可继承的规则 k 网格，请明确填写后续网格')
     potcar_id = inputs.digest(files['POTCAR'])
     inputs.put_file(inputs.ROOT / 'potcars' / potcar_id, files['POTCAR'])
-    node['data']['inputDraft'] = {'grid': grid, 'center': center, 'potcar_id': potcar_id}
+    node['data']['inputDraft'] = {**sampling, 'potcar_id': potcar_id}
     node['data']['sourceDraft'] = {'mode': 'upstream', 'purpose': 'charge', 'files': options['files'],
                                   'read_charge': options['files'] != 'structure',
                                   'attempt_id': record['id'], 'scan_batch_id': batch['id'], 'scan_case_id': case['id'],
@@ -121,7 +123,7 @@ def _case(request, batch, selection):
     row = {'case_id': case['id'], 'attempt_id': record['id'], 'index': case['index'],
            'alias': record['config']['alias'], 'source': mapping, 'fingerprint': fingerprint,
            'input_hashes': hashes, 'input_diff': differences, 'warnings': report['warnings'] + contract['warnings'], 'errors': [],
-           'structure_source': report['structure_source'], 'input_files': {k: report['files'][k] for k in ('INCAR', 'KPOINTS')}}
+           'structure_source': report['structure_source'], 'input_files': {k: report['files'][k] for k in ('INCAR', 'KPOINTS') if k in report['files']}}
     return project, report, contract, row, record
 
 

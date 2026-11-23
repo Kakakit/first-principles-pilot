@@ -1,4 +1,5 @@
 import {useEffect,useState,useRef} from 'react';
+import DisclosureLabel from './DisclosureLabel';
 type Entry={id:string;element:string;variant:string;family:string;titel:string;enmax:number};
 export default function PotcarLibrary({species,functional,onApply,maintenance=false}:{maintenance?:boolean;species:string[];functional:string|null;onApply:(id:string,receiptId:string)=>void}){
  const [entries,setEntries]=useState<Entry[]>([]),[path,setPath]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[chosen,setChosen]=useState<Record<string,string>>({}),[status,setStatus]=useState('');

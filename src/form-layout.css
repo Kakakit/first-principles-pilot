@@ -252,3 +252,102 @@
 .green-workbench .disclosure-action {flex:none;white-space:nowrap}
 .green-workbench .settings-content .workbench-disclosure>:not(summary) {margin-inline:16px}
 .green-workbench .parameter-workspace .configuration-presets>:not(summary) {margin-inline:16px}
+
+/* A two-column field row wraps within its own available width, including dialogs. */
+.green-workbench label.workbench-field-line:not([hidden]) {
+  display:flex;flex-direction:row;flex-wrap:wrap;align-items:baseline;
+  gap:4px 16px;width:100%;max-width:720px;min-width:0;
+  margin:8px 0;font-size:var(--ui-control);line-height:1.5;
+}
+.green-workbench .workbench-field-line>.field-line-name {
+  flex:0 1 192px;color:var(--ui-text);font-weight:500;
+}
+.green-workbench label.workbench-field-line>:is(input,select,textarea) {
+  flex:1 1 256px;width:0;min-width:min(100%,256px);max-width:100%;
+  box-sizing:border-box;padding:8px 12px;border-radius:var(--field-radius);
+  font-size:var(--ui-control);line-height:1.5;
+}
+.green-workbench label.workbench-field-line>:is(input,select) {height:var(--field-height)}
+.green-workbench label.workbench-field-line>textarea {min-height:96px;resize:vertical}
+.green-workbench :is(.project-properties,.problem-notebook,.structure-workspace,.chain-panel,.window-scan-panel,.scan-panel) {
+  padding-inline:var(--page-inset);min-width:0;
+}
+.green-workbench .project-properties {max-width:none;margin:0}
+.green-workbench .project-properties>.input-submit-card {
+  max-width:960px;padding:16px 0;border:0;border-top:1px solid var(--ui-divider);background:transparent;
+}
+.green-workbench .project-properties .project-path-preview {padding-inline:0;background:transparent}
+.green-workbench .project-properties .project-path-preview label.workbench-field-line {max-width:720px}
+.green-workbench details>summary.disclosure-heading {
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:48px;padding:8px 12px;box-sizing:border-box;list-style:none;
+  cursor:pointer;background:var(--color-surface);color:var(--ui-text);
+  border-radius:var(--field-radius);font-size:var(--ui-control);font-weight:600;
+}
+.disclosure-heading::-webkit-details-marker {display:none}
+.green-workbench .disclosure-heading>span:first-child {min-width:0;overflow-wrap:anywhere}
+.green-workbench details>summary.disclosure-heading:hover,
+.green-workbench details[open]>summary.disclosure-heading {background:var(--color-surface-raised)}
+.green-workbench details[open]>summary.disclosure-heading .when-open {display:inline}
+.green-workbench details[open]>summary.disclosure-heading .when-closed {display:none}
+.green-workbench details[open]>summary.disclosure-heading .disclosure-action svg {transform:rotate(180deg)}
+
+.green-workbench :is(.result-catalog,.problem-notebook,.compare-results,.analysis-datasets:not(.embedded))>.filter-bar {
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));
+  gap:8px 16px;align-items:end;margin:16px 0;padding:12px 0;
+  border-block:1px solid var(--ui-divider);
+}
+.green-workbench :is(.result-catalog,.problem-notebook,.compare-results,.analysis-datasets) .filter-bar>label {
+  min-width:0;margin:0;gap:4px;color:var(--ui-muted);font-size:var(--ui-control);
+}
+.green-workbench :is(.problem-notebook,.node-results,.structure-controls) :is(.filter-bar>label,label)>:is(input:not([type]),select) {
+  min-width:0;max-width:100%;box-sizing:border-box;height:var(--field-height);
+}
+.green-workbench .result-catalog>.filter-bar>span {align-self:end;font-variant-numeric:tabular-nums}
+.green-workbench :is(.problem-layout,.analysis-dataset-layout) {gap:var(--space-6)}
+.green-workbench .structure-controls {
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));align-items:end;
+}
+.green-workbench .structure-controls>div {grid-column:1/-1;min-width:0}
+.green-workbench .structure-controls>label {width:100%;min-width:0;max-width:none}
+.green-workbench .structure-controls>.button {min-height:var(--field-height);justify-self:start}
+.green-workbench .structure-controls>input[hidden] {display:none}
+.green-workbench .wannier-parameter-list {max-width:960px}
+.green-workbench .wannier-parameter-list>.field {
+  display:grid;grid-template-columns:minmax(0,192px) minmax(0,384px);align-items:start;
+  gap:4px 16px;margin:0;padding:12px 0;border-bottom:1px solid var(--ui-divider);
+}
+.wannier-parameter-name {display:grid;gap:4px}
+.wannier-parameter-name code {font-size:var(--ui-caption);color:var(--ui-muted);overflow-wrap:anywhere}
+.green-workbench .wannier-parameter-list .field>:is(select,input) {width:100%;min-width:0}
+.green-workbench .wannier-parameter-list .field>small {grid-column:2;color:var(--ui-muted)}
+@media(max-width:700px) {
+  .green-workbench .wannier-parameter-list>.field {grid-template-columns:minmax(0,1fr)}
+  .green-workbench .wannier-parameter-list .field>small {grid-column:1}
+  .green-workbench .problem-notebook .filter-bar label:first-child {min-width:0}
+}
+
+.green-workbench .project-properties .project-directory-settings>details {
+  padding-inline:0;background:transparent;
+}
+.green-workbench .configuration-section .source-config {
+  margin:0;padding:var(--space-6) var(--page-inset);border:0;
+}
+.green-workbench .source-config .workbench-field-line select {margin:0}
+.green-workbench .workbench-field-line:has(>textarea.input-text,>textarea[spellcheck=false]) {
+  display:grid;grid-template-columns:minmax(0,1fr);max-width:960px;gap:8px;
+}
+.green-workbench .workbench-field-line:has(>textarea.input-text,>textarea[spellcheck=false])>textarea {width:100%;min-width:0}
+.green-workbench .problem-notebook>.result-mode {width:fit-content;max-width:100%}
+.green-workbench .problem-notebook>.result-mode>.button[aria-pressed=true] {opacity:1}
+.green-workbench .filter-bar label :is(input,select) {font-weight:400}
+.green-workbench .program-files {display:grid;grid-template-columns:minmax(120px,192px) minmax(0,1fr);gap:16px}
+.program-files nav {display:flex;align-items:stretch;flex-direction:column;gap:4px}
+.program-files nav .button {justify-content:start;text-align:left;overflow-wrap:anywhere}
+.program-files nav [aria-pressed=true] {background:var(--color-accent-soft);color:var(--color-accent)}
+.program-files textarea {width:100%;box-sizing:border-box;font-family:var(--font-code)}
+.program-editor .action-row {display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.program-editor .action-row label.button {display:inline-flex;position:relative;overflow:hidden;cursor:pointer}
+.program-editor .action-row input[type=file] {position:absolute;inset:0;width:100%;opacity:0;cursor:pointer}
+.program-files .program-file-picker {display:none}
+@media(max-width:700px){.green-workbench .program-files {grid-template-columns:minmax(0,1fr)}.program-files nav {display:none}.program-files .program-file-picker {display:block;width:100%}}

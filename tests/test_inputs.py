@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 from backend import inputs, execution
@@ -41,6 +42,51 @@ class InputTests(unittest.TestCase):
         self.assertNotIn('XC_FUNCTIONAL', result['files']['INCAR'])
         self.assertEqual(result['files']['KPOINTS'], 'Regular mesh\n0\nGamma\n4 4 4\n0 0 0\n')
         self.assertNotEqual(result['files']['POSCAR'], 'not a POSCAR')
+
+    def test_native_spacing_frozen_bundle_and_dispatch_payload(self):
+        import tarfile
+        from backend import source_contracts
+        node=self.project['nodes'][1]['data']
+        draft=node['inputDraft']
+        draft.update(sampling='spacing',kspacing='0.25',kgamma='.FALSE.',grid='unused')
+        report=inputs.generate(self.project,'c')
+        self.assertTrue(report['ready'],report['errors'])
+        self.assertNotIn('KPOINTS',report['files'])
+        self.assertIn('KGAMMA = .FALSE.',report['files']['INCAR'])
+        with patch.object(execution,'ROOT',inputs.ROOT):
+            frozen=inputs.freeze(self.project,'c','合成输入')
+            _,files=execution.bundle(frozen['id'])
+            self.assertNotIn('KPOINTS',files)
+            config={'alias':'jutai-5','vasp_executable':'/opt/vasp_std','remote_workspace_root':'$HOME/project-fixture'}
+            rendered={'resource_ready':True,'profile':{'node':'node02','ppn':4},'script':'#!/bin/bash\ntrue\n'}
+            root={'exit_code':0,'stdout':'FPILOT_ROOT_ABS=/home/user/project-fixture\nFPILOT_ROOT_SNAPSHOT=1:2:3:4\n','stderr':''}
+            with patch.object(execution.servers,'preview',return_value=rendered),patch.object(execution,'ssh',return_value=root):
+                prepared=execution.prepare.__wrapped__(frozen['id'],config,'probe','node02',cores=4)
+            self.assertTrue(prepared['input_audit']['checks']['required_inputs_nonempty'])
+            with patch.object(execution.servers,'capacity_probe',return_value={'id':'test'}),patch.object(execution.servers,'preview',return_value=rendered),patch.object(execution,'ssh',return_value={'exit_code':0,'stdout':'FPILOT_JOB_ID=12.site\n','stderr':''}) as remote:
+                execution.submit(prepared['id'])
+            with tarfile.open(fileobj=io.BytesIO(remote.call_args_list[0].args[2])) as tar:
+                self.assertNotIn('KPOINTS',tar.getnames())
+                self.assertEqual(tar.extractfile('INCAR').read(),files['INCAR'])
+        self.assertTrue(source_contracts.same_wave_sampling(files,report['files']))
+        draft.update(sampling='explicit',grid='4 4 4')
+        fixed=inputs.generate(self.project,'c')['files']['KPOINTS']
+        lattice=self.project['nodes'][0]['data']['structure']['lattice']
+        self.project['nodes'][0]['data']['structure']['lattice']=[[2*v for v in row] for row in lattice]
+        self.assertEqual(inputs.generate(self.project,'c')['files']['KPOINTS'],fixed)
+        draft['sampling']='spacing'
+        bigger=inputs.generate(self.project,'c')
+        self.assertFalse(source_contracts.same_wave_sampling(files,bigger['files']))
+
+    def test_sampling_precedence_and_invalid_native_spacing(self):
+        data=self.project['nodes'][1]['data']
+        data['parameters']['manualIncarText']='KSPACING=0.2\n'
+        self.assertIn('KPOINTS 优先',inputs.generate(self.project,'c')['sampling_note'])
+        data['inputDraft'].update(sampling='spacing',kspacing='0.5')
+        self.assertEqual(inputs.incar_text.parse(inputs.generate(self.project,'c')['files']['INCAR'])[0]['KSPACING'],'0.2')
+        for text in ('KSPACING=0','KSPACING=nan','KSPACING=0.2\nKGAMMA=maybe'):
+            data['parameters']['manualIncarText']=text
+            self.assertFalse(inputs.generate(self.project,'c')['ready'])
 
     def test_manual_incar_override_delete_and_exact_frozen_text(self):
         from backend import incar_text
@@ -142,6 +188,24 @@ class InputTests(unittest.TestCase):
             layer['values'][key]='0' if key=='ISTART' else '2' if key=='ICHARG' else '7'
         layer['values']['EMAX']='-6'
         self.assertTrue(inputs.generate(self.project,'c')['errors'])
+
+    def test_conditional_files_follow_final_incar(self):
+        data = self.project['nodes'][1]['data']
+        layer = data['parameters']
+        for text, expected in [('ICHARG=12', []), ('ICHARG=11', ['CHGCAR']),
+                               ('ISTART=3; ICHARG=2', ['WAVECAR', 'TMPCAR']),
+                               ('ICHARG=14', ['POT'])]:
+            with self.subTest(text=text):
+                layer['manualIncarText'] = text
+                report = inputs.generate(self.project, 'c')
+                self.assertEqual([row['file'] for row in report['file_requirements']], expected)
+                self.assertEqual(any(issue['code']=='input.required-file' for issue in report['issues']), bool(expected), report['issues'])
+        layer['manualIncarText'] = 'ICHARG=1'
+        report = inputs.generate(self.project, 'c')
+        self.assertEqual(report['errors'], [])
+        self.assertEqual(report['file_requirements'][0]['status'], '待选择')
+        layer['manualIncarText'] = 'ICHARG=5'
+        self.assertTrue(any('vasp.lock' in msg for msg in inputs.generate(self.project, 'c')['errors']))
 
     def test_parallel_parameters_match_selected_mpi_ranks(self):
         execution.validate_parallel('ENCUT = 400\nKPAR = 3\nNCORE = 2\n',12)

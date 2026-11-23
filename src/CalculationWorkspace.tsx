@@ -1,3 +1,4 @@
+import ProgramPanel from './ProgramPanel';
 import IndependentScanWorkspace from './IndependentScanWorkspace';
 import type {WindowDraft,WindowAdoption} from './windowScan';
 import SourcePanel from './SourcePanel';
@@ -24,6 +25,7 @@ type Props={
   onSharedPotcar:NonNullable<Parameters<typeof InputPanel>[0]['onSharedPotcar']>;
   onNumWann:(nodeId:string,value:string)=>void;
   onProjections:(nodeId:string,value:string)=>void;
+  onProgramDraft:Parameters<typeof ProgramPanel>[0]['onChange'];
   onWannierDraft:(nodeId:string,key:string,value:import('./wannierDraft').WannierDraft)=>void;
   onWindowChange:(value:WindowDraft)=>void;onWindowAdopt:(value:WindowAdoption)=>void;
   onScanDraft:NonNullable<Parameters<typeof ScanPanel>[0]['onDraft']>;
@@ -37,6 +39,7 @@ export default function CalculationWorkspace(props:Props) {
   const [localPart,setLocalPart]=useSubmissionDraft<Part>('config:'+project.id+':'+nodeId+':part','physics');
   const part=props.configPart||localPart;
   const setPart=props.onConfigPart||setLocalPart;
+  if(node.data.kind==='program')return <ProgramPanel key={node.id} project={project} node={node} view={view} initialId={props.initialAttemptId||props.bundleId} onSelect={id=>props.onAttemptChange?.(id,'user')} onResults={id=>props.onResults(nodeId,id)} onChange={props.onProgramDraft} onPrepared={props.onReview}/>;
   if(node.data.continuationBatchId)return <ScanPanel project={project} scanNode={node} view={view} onDraft={props.onScanDraft} onReview={()=>onReview()} onConfigure={onConfigure} onContinuationCreated={props.onContinuationCreated}/>;
   if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   if(node.data.kind==='scan')return <IndependentScanWorkspace {...props}/>;

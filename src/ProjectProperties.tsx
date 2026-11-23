@@ -12,7 +12,7 @@ export default function ProjectProperties({project,canEdit,slugLocked,defaultRoo
   <section className="input-submit-card">
    <h3>基本信息</h3>
    <form onSubmit={event=>{event.preventDefault();if(canEdit&&name.trim()){onSave({name:name.trim()});setDraft(null);}}}>
-    <label>项目名称<input disabled={!canEdit} value={name} maxLength={120} onChange={e=>setDraft(e.target.value===project.name?null:e.target.value)}/></label>
+    <label className="workbench-field-line"><span className="field-line-name">项目名称</span><input disabled={!canEdit} value={name} maxLength={120} onChange={e=>setDraft(e.target.value===project.name?null:e.target.value)}/></label>
     <div className="action-row"><button className="button primary" disabled={!canEdit||name===project.name||!name.trim()}>保存基本信息</button>
     {name!==project.name&&<><button type="button" className="button" onClick={()=>setDraft(null)}>放弃修改</button><span role="status">有未保存修改</span></>}</div>
    </form>

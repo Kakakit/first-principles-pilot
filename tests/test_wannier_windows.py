@@ -58,6 +58,7 @@ class WindowTests(unittest.TestCase):
         self.reference={'fermi_eV':0.0,'outcar_sha256':'b'*64}
         self.bundle={'schema':'fpilot.wannier90-frozen-bundle.v1','project_id':'project','node_id':'w','project':self.project,
                      'alias':'jutai-1','parent_attempt_id':'c'*32,'seed':'wannier90','win':WIN,'win_sha256':w90._sha(WIN.encode()),
+                     'matrix_dimensions':{'amn':[3,2,2],'mmn':[3,2,1],'eig':[3,2]},
                      'source_path':str(self.root),'source_files':self.source,'source_win_name':'wannier90.win','verification_mode':'lightweight',
                      'created_at':ex.now(),'spinors':'.true.','energy_reference':self.reference,'band_path':None,'relative_windows':{},'input_reason':'baseline'}
         (self.root/'wannier-bundles').mkdir()

@@ -1,4 +1,5 @@
 import ConnectionStatus from './ConnectionStatus';
+import DisclosureLabel from './DisclosureLabel';
 import CustomCommandControls from './CustomCommandControls';
 import GpuNodeDetails from './GpuNodeDetails';
 import {nodeCapacityLabel} from './nodeCapacityLabel';

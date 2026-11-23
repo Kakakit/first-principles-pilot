@@ -221,7 +221,7 @@ def _input_differences(report, manifest, files):
         old_name = 'POSCAR.reference' if name == 'POSCAR' and 'POSCAR.reference' in files else name
         new_name = 'POSCAR.reference' if name == 'POSCAR' and 'POSCAR.reference' in current else name
         before = manifest.get('files', {}).get(old_name, {}).get('sha256')
-        after = (report.get('potcar') or {}).get('sha256') if name == 'POTCAR' else hashlib.sha256(current.get(new_name, '').encode()).hexdigest()
+        after = (report.get('potcar') or {}).get('sha256') if name == 'POTCAR' else hashlib.sha256(current[new_name].encode()).hexdigest() if new_name in current else None
         if before != after:
             differences.append({'field': name, 'before': before, 'after': after})
     return differences
@@ -368,7 +368,7 @@ def _preview(project, node_ids, source_alias=None, reuse_sources=None, verificat
             continue
         if policy and a.get('files', {}).get('INCAR') and b.get('files', {}).get('INCAR'):
             review = source_contracts.review_inputs(policy, {'INCAR': a['files']['INCAR'].encode(),
-                                                        'KPOINTS': a['files'].get('KPOINTS', '').encode(),
+                                                        **{k:v.encode() for k,v in a['files'].items() if k in ('KPOINTS','POSCAR')},
                                                         'POTCAR': inputs.potcar_bytes(a['potcar']['sha256'])}, b)
             b['errors'].extend(review['blockers'])
         old, new = a.get('files', {}).get('INCAR', '').encode(), b.get('files', {}).get('INCAR', '').encode()

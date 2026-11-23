@@ -44,7 +44,8 @@ def _pending_children(attempt_id):
     return [row['id'] for row in rows if row['id'] != attempt_id and row.get('state') not in ('COMPLETED', 'FAILED', 'CANCELLED')
             and (row.get('parent_attempt_id') == attempt_id or
                  (row.get('dependency_snapshot') or {}).get('upstream_attempt_id') == attempt_id or
-                 (row.get('restart_snapshot') or {}).get('source_attempt_id') == attempt_id)]
+                 (row.get('restart_snapshot') or {}).get('source_attempt_id') == attempt_id or
+                 any(ref['source_attempt_id']==attempt_id for ref in row.get('program_sources',[])))]
 
 
 def _script(record, expected_marker=None, delete=False, force=False, list_files=True):

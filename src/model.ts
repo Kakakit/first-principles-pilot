@@ -9,7 +9,7 @@ import type { Edge, Node } from '@xyflow/react';
 import {STAGE_SEQUENCES,staticDefaults,clearExecutionBindings} from './stagePolicy';
 
 export const STORAGE_KEY = 'dft-workbench.workspace';
-export const kinds = ['structure', 'relax', 'scf', 'bands', 'dos', 'vasp-wannier', 'wannier90', 'scan'] as const;
+export const kinds = ['structure', 'relax', 'scf', 'bands', 'dos', 'vasp-wannier', 'wannier90', 'scan', 'program'] as const;
 export type Kind = typeof kinds[number];
 export const catalog: Record<Kind, {label: string; en: string; description: string; color: string}> = {
   structure: { label: '输入结构', en: 'STRUCTURE', description: '定义计算的初始晶体结构', color: '#63758a' },
@@ -19,9 +19,10 @@ export const catalog: Record<Kind, {label: string; en: string; description: stri
   dos: { label: '态密度', en: 'DENSITY OF STATES', description: '分析电子态随能量的分布', color: '#bf8142' },
   'vasp-wannier': { label: 'VASP→Wannier 接口', en: 'VASP WANNIER', description: '读取 SCF 电荷并生成 Wannier 接口矩阵', color: '#a05d8d' },
   wannier90: { label: 'Wannier90 局域化', en: 'WANNIER90', description: '读取接口矩阵并运行 Wannier90', color: '#81518e' },
+  program: {label:'自定义程序',en:'CUSTOM PROGRAM',description:'编辑文本输入，在服务器直接运行命令',color:'#39758a'},
   scan: { label: '参数迭代', en: 'PARAMETER SCAN', description: '迭代 VASP 参数或逐个测试 Wannier90 窗口边界', color: '#7058a1' },
 };
-export type StepData = { kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
+export type StepData = { kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'|'program'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
 export type Step = Node<StepData, 'step'>;
 export type Project = { remoteWorkspaceRoot?:string; remotePathPolicy?:'project-directory-v2'; remoteDirectories?:Record<string,string>; stagePolicy?:'kind-fixed-v1'; parameters?:ParameterProject; sharedPotcar?:{id:string;provenance_id?:string}; recipeRuntime?:unknown; id: string; name: string; remoteSlug?:string; nodes: Step[]; edges: Edge[]; updatedAt: string };
 export type Workspace = { activeId: string; projects: Project[] };
@@ -31,7 +32,7 @@ export function slugify(value:string):string {
   return value.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,64);
 }
 export function makeStep(kind: Kind, position = { x: 80, y: 80 }, stageSequence=STAGE_SEQUENCES[kind]): Step {
-  return { id: uid(), type: 'step', position, data: { kind, label: catalog[kind].label, note: '', executionMode:kind==='scan'?'scan':kind==='wannier90'?'wannier90':'vasp', stageSequence, stageSlug:kind, ...(kind==='scan'?{scanSpec:{calculationKind:'scf'},parameters:{values:staticDefaults('scf')}}:{}), ...(Object.keys(staticDefaults(kind)).length?{parameters:{values:staticDefaults(kind)}}:{}), params: kind === 'structure' ? { material: '未指定' } : { functional: 'PBE', encut: '', kmesh: '', spin: '未设置' } } };
+  return { id: uid(), type: 'step', position, data: { kind, label: catalog[kind].label, note: '', executionMode:kind==='program'?'program':kind==='scan'?'scan':kind==='wannier90'?'wannier90':'vasp', stageSequence, stageSlug:kind, ...(kind==='scan'?{scanSpec:{calculationKind:'scf'},parameters:{values:staticDefaults('scf')}}:{}), ...(Object.keys(staticDefaults(kind)).length?{parameters:{values:staticDefaults(kind)}}:{}), params: kind==='program'?{}:kind === 'structure' ? { material: '未指定' } : { functional: 'PBE', encut: '', kmesh: '', spin: '未设置' } } };
 }
 export function newProject(name: string, demo = false): Project {
   const nodes = demo ? [makeStep('structure', {x: 40, y: 190},1), makeStep('relax', {x: 310, y: 190},2), makeStep('scf', {x: 580, y: 190},3), makeStep('bands', {x: 850, y: 85},4), makeStep('dos', {x: 850, y: 295},5)] : [makeStep('structure',undefined,1)];
@@ -65,14 +66,21 @@ export function parseWorkspace(raw: string): Workspace {
     const nodeIds = new Set();
     for (const n of p.nodes) {
       if (!n || !nonempty(n.id) || nodeIds.has(n.id) || n.type !== 'step' || !n.position || !Number.isFinite(n.position.x) || !Number.isFinite(n.position.y) || Math.abs(n.position.x)>1e6 || Math.abs(n.position.y)>1e6 || !n.data || !kinds.includes(n.data.kind) || !nonempty(n.data.label) || !text(n.data.note) || !n.data.params || typeof n.data.params !== 'object' || Array.isArray(n.data.params) || Object.keys(n.data.params).length > 30 || !Object.values(n.data.params).every(v=>text(v,200))) throw new Error('流程节点格式无效。');
-      if(!Number.isInteger(n.data.stageSequence)||n.data.stageSequence<1||n.data.stageSequence>999||!text(n.data.stageSlug,48)||!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(n.data.stageSlug)||!['vasp','wannier90','scan'].includes(n.data.executionMode)||((n.data.kind==='scan')!==(n.data.executionMode==='scan'))||((n.data.kind==='wannier90')!==(n.data.executionMode==='wannier90')))throw new Error('节点执行类型或远程阶段标识无效。');
+      if(!Number.isInteger(n.data.stageSequence)||n.data.stageSequence<1||n.data.stageSequence>999||!text(n.data.stageSlug,48)||!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(n.data.stageSlug)||((n.data.kind==='program')!==(n.data.executionMode==='program'))||!['vasp','wannier90','scan','program'].includes(n.data.executionMode)||((n.data.kind==='scan')!==(n.data.executionMode==='scan'))||((n.data.kind==='wannier90')!==(n.data.executionMode==='wannier90')))throw new Error('节点执行类型或远程阶段标识无效。');
       if(p.stagePolicy==='kind-fixed-v1'&&n.data.stageSequence!==STAGE_SEQUENCES[n.data.kind as Kind])throw new Error('新项目阶段编号须与节点类型一致。');
+      if(n.data.programDraft!==undefined){
+        const draft=n.data.programDraft;
+        if(n.data.kind!=='program'||!draft||typeof draft.alias!=='string'||typeof draft.command!=='string'||
+          !Array.isArray(draft.files)||!draft.files.every((file:{name?:unknown;text?:unknown}|null)=>file&&typeof file.name==='string'&&typeof file.text==='string')||
+          (draft.sources!==undefined&&(!Array.isArray(draft.sources)||!draft.sources.every((r:Record<string,unknown>)=>r&&['source_attempt_id','file','name','node_id'].every(k=>typeof r[k]==='string'))))||
+          !Array.isArray(draft.outputs)||!draft.outputs.every((name:unknown)=>typeof name==='string'))throw new Error('自定义程序草稿格式无效。');
+      }
       if(n.data.scanSpec!==undefined&&(n.data.kind!=='scan'||!calculationKinds.includes(n.data.scanSpec.calculationKind)))throw new Error('迭代计算类型无效。');
       if(n.data.structure!==undefined) {if(n.data.kind!=='structure')throw new Error('结构只能绑定输入结构节点。');validateStructure(n.data.structure);}
       if(n.data.structureOrigin!==undefined){if(n.data.kind!=='structure')throw new Error('来源记录只属于结构节点');validateStructureOrigin(n.data.structureOrigin,n.data.structure);}
       if(n.data.structureOriginNodeId!==undefined&&(!n.data.structureOrigin||!nonempty(n.data.structureOriginNodeId)))throw new Error('结构来源连线引用无效');
       if(n.data.parameters!==undefined)validateLayer(n.data.parameters);
-      if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
+      if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info','sampling','kspacing','kgamma'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
       nodeIds.add(n.id);
     }
     const edgeIds = new Set();
@@ -87,9 +95,10 @@ export function parseWorkspace(raw: string): Workspace {
 export function canConnect(nodes: Step[], edges: Edge[], source: string, target: string): boolean {
   if (source === target || !nodes.some(n=>n.id===source) || !nodes.some(n=>n.id===target) || nodes.find(n=>n.id===target)?.data.kind === 'structure' || edges.some(e=>e.source===source && e.target===target)) return false;
   const a=nodes.find(n=>n.id===source)!,b=nodes.find(n=>n.id===target)!,p={nodes,edges} as Project;
+  if(a.data.kind==='program'&&b.data.kind!=='program'||b.data.kind==='program'&&a.data.kind==='structure')return false;
   const from=calculationKind(a,p),to=calculationKind(b,p);
   if(b.data.kind==='scan'&&!independentScan(b)&&!['relax','scf','wannier90'].includes(a.data.kind))return false;
-  if((a.data.kind==='scan'||independentScan(b))&&(['relax','scf'].includes(to||'')?!['structure','relax','scf'].includes(from||''):['bands','dos','vasp-wannier'].includes(to||'')?from!=='scf':to==='wannier90'?from!=='vasp-wannier':true))return false;
+  if(b.data.kind!=='program'&&(a.data.kind==='scan'||independentScan(b))&&(['relax','scf'].includes(to||'')?!['structure','relax','scf'].includes(from||''):['bands','dos','vasp-wannier'].includes(to||'')?from!=='scf':to==='wannier90'?from!=='vasp-wannier':true))return false;
   if(to==='wannier90'&&from!=='vasp-wannier')return false;
   const seen = new Set<string>();
   const visit = (id: string): boolean => { if(id === source) return true; if(seen.has(id)) return false; seen.add(id); return edges.filter(e=>e.source===id).some(e=>visit(e.target)); };
@@ -98,10 +107,10 @@ export function canConnect(nodes: Step[], edges: Edge[], source: string, target:
 export function inspectFlow(p: Project): Issue[] {
   const out: Issue[] = [];
   if (!p.nodes.length) out.push({level:'error',message:'流程为空，请添加输入结构和计算节点。'});
-  if (!p.nodes.some(n=>n.data.kind === 'structure')) out.push({level:'error',message:'缺少输入结构节点。'});
+  if (p.nodes.some(n=>n.data.kind !== 'program')&&!p.nodes.some(n=>n.data.kind === 'structure')) out.push({level:'error',message:'缺少输入结构节点。'});
   for (const n of p.nodes) {
     const parents = p.edges.filter(e=>e.target===n.id).map(e=>p.nodes.find(x=>x.id===e.source)).filter(Boolean) as Step[];
-    if (n.data.kind !== 'structure' && !parents.length) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」尚未连接上游节点。`});
+    if (n.data.kind !== 'structure' && n.data.kind !== 'program' && !parents.length) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」尚未连接上游节点。`});
     if (['bands','dos','vasp-wannier'].includes(calculationKind(n,p)||'') && !parents.some(x=>calculationKind(x,p)==='scf')) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要连接静态自洽节点。`});
     if (calculationKind(n,p)==='wannier90' && (parents.length!==1 || calculationKind(parents[0],p)!=='vasp-wannier')) out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要直接连接一个 VASP→Wannier 接口节点。`});
     if(n.data.kind==='scan'&&!independentScan(n)&&(parents.length!==1||!['relax','scf','wannier90'].includes(parents[0].data.kind)))out.push({level:'error',nodeId:n.id,message:`「${n.data.label}」需要直接连接一个 relax、SCF 或 Wannier90 节点。`});

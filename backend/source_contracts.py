@@ -192,6 +192,24 @@ def compatibility(source_plan, record, report):
     return review_inputs(source_plan, old, report)
 
 
+def same_wave_sampling(old, new):
+    """Compare explicit inputs, or native meshes derived from the two run lattices."""
+    def text(value):
+        return value.decode() if isinstance(value, bytes) else value
+    if old.get('KPOINTS') or new.get('KPOINTS'):
+        return text(old.get('KPOINTS')) == text(new.get('KPOINTS'))
+    from . import incar_text
+    from pymatgen.io.vasp.inputs import Poscar
+    def mesh(files):
+        spacing, gamma = incar_text.native_spacing(incar_text.parse(text(files['INCAR']))[0])
+        lattice = Poscar.from_str(text(files['POSCAR'])).structure.lattice
+        return gamma, tuple(max(1, math.ceil(n / spacing)) for n in lattice.reciprocal_lattice.abc)
+    try:
+        return mesh(old) == mesh(new)
+    except (KeyError, ValueError, TypeError, IndexError):
+        return False
+
+
 def review_inputs(source_plan, old, report):
     if source_plan['electronic_usage'] == 'none' and 'WAVECAR' not in source_plan['required_files']:
         return {'blockers': [], 'differences': [], 'warnings': []}
@@ -207,8 +225,8 @@ def review_inputs(source_plan, old, report):
         message = f'{name}：来源 {a or "未设置"} → 本次 {b or "未设置"}'
         (blockers if fixed and name in ('GGA', 'METAGGA', 'LHFCALC', 'AEXX', 'HFSCREEN', 'LDAU', 'LDAUTYPE', 'LDAUL', 'LDAUU', 'LDAUJ') else differences).append(message)
     if 'WAVECAR' in source_plan['required_files']:
-        if old.get('KPOINTS') != report['files']['KPOINTS'].encode():
-            blockers.append('WAVECAR 的 k 点与本次不同；请选择仅 CHGCAR 或新计算')
+        if not same_wave_sampling(old,report['files']):
+            blockers.append('WAVECAR 的 k 点与本次不同或实际晶格尚不能核对；请选择仅 CHGCAR 或新计算')
         a, b = tag(old['INCAR'], 'NBANDS'), tag(new, 'NBANDS')
         if a is not None and (b is None or int(a) != int(b)):
             blockers.append('WAVECAR 的 NBANDS 设置不同；请选择仅 CHGCAR 或新计算')
@@ -458,7 +476,7 @@ def draft_differences(project, node_id, bundle_id):
         differences.append({'field': '来源与初始化', 'frozen': frozen_policy, 'draft': report.get('source_plan')})
     for name in ('KPOINTS', 'POTCAR'):
         before = manifest['files'].get(name, {}).get('sha256')
-        after = report.get('potcar', {}).get('sha256') if name == 'POTCAR' else hashlib.sha256(report.get('files', {}).get(name, '').encode()).hexdigest()
+        after = report.get('potcar', {}).get('sha256') if name == 'POTCAR' else hashlib.sha256(report['files'][name].encode()).hexdigest() if name in report.get('files',{}) else None
         if before != after:
             differences.append({'field': name, 'frozen': '冻结文件', 'draft': '当前文件已改变'})
     return {'bundle_id': bundle_id, 'differences': differences, 'errors': report['errors']}

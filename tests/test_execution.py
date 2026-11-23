@@ -13,7 +13,9 @@ class ExecutionTests(unittest.TestCase):
     def test_remote_restart_files_are_deferred_without_hiding_other_audit_errors(self):
         missing='CHGCAR required by INCAR restart settings'
         bad='invalid INCAR tag'
-        source={'mode':'charge','source_attempt_id':'source'}
+        source={'mode':'charge','source_attempt_id':'source', 'files':{'CHGCAR':{}}}
+        with self.assertRaisesRegex(ValueError, 'CHGCAR'):
+            ex._review_input_audit({'status':'FAIL','errors':[missing]}, restart={**source,'files':{'POSCAR':{}}}, stage='scf')
         reviewed=ex._review_input_audit({'status':'FAIL','errors':[missing]},restart=source,stage='scf')
         self.assertEqual(reviewed['status'],'PASS_WITH_REMOTE_DEPENDENCY')
         self.assertEqual(reviewed['deferred_errors'],[missing])

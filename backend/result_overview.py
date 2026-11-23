@@ -51,7 +51,8 @@ def frozen_input(record):
                     if '=' in part:
                         tag,value=part.split('=',1);tags[tag.strip().upper()]=' '.join(value.split())
             result['parameters']=tags;result['parameter_origin']='实际准备 INCAR' if record.get('final_incar') else '冻结 INCAR'
-            if archive.getinfo('KPOINTS').file_size<=256*1024:result['kpoints']=archive.read('KPOINTS').decode()[:1000]
+            if manifest.get('sampling_mode')=='spacing':result['kpoints']=manifest.get('sampling_note','INCAR KSPACING')
+            elif archive.getinfo('KPOINTS').file_size<=256*1024:result['kpoints']=archive.read('KPOINTS').decode()[:1000]
     except (OSError,ValueError,KeyError,TypeError,AttributeError,zipfile.BadZipFile,UnicodeError) as exc:result['warning']='冻结输入暂不可读：'+str(exc)[:200]
     return result
 

@@ -104,7 +104,7 @@ def observation(scheduler, output):
             state, source = live[1], 'qstat'
         elif complete:
             state, source = 'C', 'tracejob'
-        reported = re.search(r'^\s*Exit_status\s*=\s*(-?\d+)\s*$', output, re.M)
+        reported = re.search(r'^\s*Exit_status\s*=\s*(-?\d+)\s*$', output, re.M | re.I)
         status = int(reported[1]) if live and reported else trace_exit if complete else None
         finished = state == 'C' and status in (None, 0) and (live is not None or trace_exit == 0)
         if state == 'F':finished = status == 0

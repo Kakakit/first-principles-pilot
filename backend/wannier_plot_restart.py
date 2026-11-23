@@ -157,6 +157,7 @@ def submit(key):
     source_path, hashes = _checked_source(source, w90._bundle(source), frozen.get('verification_mode', 'full'))
     if source_path != frozen['source_path'] or hashes != frozen.get('source_files', frozen['source_hashes']):
         raise ValueError('原 Wannier90 文件已变化；没有提交')
+    w90.require_plot_files(w90.win_contract.parse_win(frozen['win']))
     fresh = servers.capacity_probe(record['config'], purpose='wannier90')
     resource = servers.preview(record['config'], fresh['id'], record['node'], record['cores'], record['reason'], purpose='wannier90')
     if not resource['resource_ready'] or resource['profile'] != record['profile']:

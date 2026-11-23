@@ -283,7 +283,7 @@ class SubmissionContracts(unittest.TestCase):
         project=copy.deepcopy(self.project)
         project['nodes'].append({'id':'w','data':{'kind':'wannier90','stageSlug':'wannier','stageSequence':4}})
         project['edges'].append({'source':'c','target':'w'})
-        source={'win':win,'seed':'wannier90','spinors':'.true.','source_path':'/home/user/source','win_source_name':'wannier90.win',
+        source={'matrix_dimensions':{'amn':[4,8,4],'mmn':[4,8,6],'eig':[4,8]},'win':win,'seed':'wannier90','spinors':'.true.','source_path':'/home/user/source','win_source_name':'wannier90.win',
                 'files':{n:{'sha256':hashlib.sha256(win.encode()).hexdigest(),'size_bytes':len(win)} for n in w90.SOURCE_NAMES},'verification_mode':'lightweight'}
         reference={'outcar_sha256':'a'*64,'fermi_eV':6.0}
         root={'exit_code':0,'stdout':'FPILOT_ROOT_ABS=/home/user/230269265lht\nFPILOT_ROOT_SNAPSHOT=1:2:3:4\n','stderr':''}

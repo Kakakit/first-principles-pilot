@@ -1,3 +1,4 @@
+import DisclosureLabel from './DisclosureLabel';
 import Feedback from './Feedback';
 import {useEffect,useState} from 'react';
 import {requestJson,errorMessage} from './apiClient';
@@ -48,7 +49,7 @@ export default function ExecutionControl(){
    <p>上限留空时不额外限制。已授权的计算链和迭代按依赖与额度推进。</p>
    <div className="action-row"><button className="button primary" disabled={!dirty} onClick={()=>void save()}>保存监控设置</button>{dirty&&<><button className="button" onClick={()=>setDraft({})}>放弃修改</button><span role="status">有未保存修改</span></>}</div>
   </fieldset>}
-  <details><summary>监控诊断</summary><p>进程 {worker?.pid||'—'} · 心跳距今 {worker?.heartbeat_age_seconds??'—'} 秒</p><button className="button" onClick={()=>void load()}>刷新监控状态</button></details>
+  <details><DisclosureLabel>监控诊断</DisclosureLabel><p>进程 {worker?.pid||'—'} · 心跳距今 {worker?.heartbeat_age_seconds??'—'} 秒</p><button className="button" onClick={()=>void load()}>刷新监控状态</button></details>
   <Feedback message={message} error={error} busy={busy} label="正在保存监控设置…"/>
  </section>;
 }

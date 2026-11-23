@@ -9,6 +9,7 @@ export const nodePalette:Record<Kind,Record<'light'|'dark',{fill:string;ink:stri
 "dos":{light:{fill:'hsl(30.0,80.0%,94.1%)',ink:'hsl(31.2,60.0%,33.3%)',border:'hsl(30.0,80.0%,94.1%)'},dark:{fill:'hsl(28.9,26.7%,19.8%)',ink:'hsl(30.5,56.4%,80.2%)',border:'hsl(28.9,26.7%,19.8%)'}},
 "vasp-wannier":{light:{fill:'hsl(263.1,56.5%,95.5%)',ink:'hsl(266.3,23.1%,40.8%)',border:'hsl(263.1,56.5%,95.5%)'},dark:{fill:'hsl(264.4,24.3%,21.8%)',ink:'hsl(265.9,46.8%,84.5%)',border:'hsl(264.4,24.3%,21.8%)'}},
 "wannier90":{light:{fill:'hsl(325.0,50.0%,95.3%)',ink:'hsl(331.3,21.9%,41.2%)',border:'hsl(325.0,50.0%,95.3%)'},dark:{fill:'hsl(318.0,19.2%,20.4%)',ink:'hsl(325.3,41.3%,82.0%)',border:'hsl(318.0,19.2%,20.4%)'}},
+"program":{light:{fill:'hsl(197,40%,94%)',ink:'hsl(197,40%,32%)',border:'hsl(197,40%,94%)'},dark:{fill:'hsl(197,30%,22%)',ink:'hsl(197,45%,80%)',border:'hsl(197,30%,22%)'}},
 "scan":{light:{fill:'hsl(50.5,57.6%,93.5%)',ink:'hsl(48.8,58.1%,29.0%)',border:'hsl(50.5,57.6%,93.5%)'},dark:{fill:'hsl(51.8,23.9%,18.0%)',ink:'hsl(51.3,47.8%,77.5%)',border:'hsl(51.8,23.9%,18.0%)'}},
 };
 const drawings:Record<Kind,React.ReactNode>={
@@ -19,6 +20,7 @@ const drawings:Record<Kind,React.ReactNode>={
  dos:<><path d="M4 3v18h17M5 19h3c1 0 1-4 3-4s1 3 3 3 1-6 4-6 2 5 3 5M5 6h3c2 0 2 5 4 5s1-7 3-7 1 4 3 4h3"/></>,
  'vasp-wannier':<><path d="M3 4h11v15H3zM7 4v15m3-15v15M3 9h11M3 14h11M16 12h6m-3-3 3 3-3 3"/></>,
  wannier90:<><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(45 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-45 12 12)"/><circle cx="12" cy="12" r="1.5"/></>,
+ program:<path d="M3 4h18v16H3zM6 9l3 3-3 3m5 0h6"/>,
  scan:<><path d="M3 6h18M3 12h18M3 18h18"/><path d="M7 3v6m10 0v6M10 15v6"/></>,
 };
 export function NodeIcon({kind,size=24,...props}:SVGProps<SVGSVGElement>&{kind:Kind;size?:number}){return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{drawings[kind]}</svg>;}

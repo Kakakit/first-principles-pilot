@@ -1,3 +1,4 @@
+import DisclosureLabel from './DisclosureLabel';
 import Feedback from './Feedback';
 import {useEffect,useState} from 'react';
 import {requestJson,errorMessage} from './apiClient';
@@ -46,7 +47,7 @@ export default function LocalSetup({group='data'}:{group?:'data'|'worker'}){
     {info.saved.workspace&&info.saved.workspace!==info.current.workspace&&<p>已保存，待重启 · <code>{info.saved.workspace}</code></p>}
     <p>原有数据仍在原目录。可通过工作区备份和导入恢复项目。</p>
     <p>POTCAR 库 · <code>{info.current.potcar_library||'尚未设置'}</code> <button className="text-button" onClick={()=>openSettings('config')}>管理 POTCAR 库</button></p>
-    <details data-visit-detail="local-runtime" id="local-runtime"><summary>高级运行环境</summary>
+    <details data-visit-detail="local-runtime" id="local-runtime"><DisclosureLabel>高级运行环境</DisclosureLabel>
      <p>当前 Python <code>{info.python}</code> · {info.python_version}</p>
      <label>网页端口<input type="number" min={1024} max={65535} value={form.port??''} onChange={e=>update({port:Number(e.target.value)})}/></label>
      <p>当前端口 {info.current.port}{info.saved.port&&info.saved.port!==info.current.port?' · 已保存 '+info.saved.port+'，待重启':''}</p>

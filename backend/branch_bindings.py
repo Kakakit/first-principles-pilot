@@ -18,7 +18,8 @@ def scopes(project, node_id):
     links = []
     for edge in project.get('edges',[]):
         a, b = nodes.get(edge['source']), nodes.get(edge['target'])
-        if not a or not b or a['data']['kind'] == 'structure':
+        # Program edges offer files for selection; only frozen references require co-location.
+        if not a or not b or a['data']['kind'] == 'structure' or b['data']['kind'] == 'program':
             continue
         draft = b['data'].get('sourceDraft') or {}
         if draft.get('mode') == 'self' or draft.get('mode') == 'manual':
