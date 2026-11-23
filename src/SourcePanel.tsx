@@ -16,8 +16,15 @@ export default function SourcePanel({project,nodeId,onChange,advanced=true,scope
  const value=(node.data.sourceDraft||{mode:remoteParent?'upstream':'new',purpose:'charge',files:'charge',read_charge:calculationKind(parent,project)==='scf'}) as SourceDraft;
  const [resolved,setResolved]=useState<Resolved|null>(null),[error,setError]=useState(''),[refreshing,setRefreshing]=useState(false);
  const epoch=useRef(0);
- const signature=JSON.stringify({nodes:project.nodes.map(n=>({id:n.id,data:n.data})),edges:project.edges});
- useEffect(()=>{const token=++epoch.current;setResolved(null);setError('');void requestJson('/api/calculation-sources/resolve',{project,node_id:nodeId,execution_scope:scopeId}).then(result=>{if(token===epoch.current)setResolved(result);}).catch(e=>{if(token===epoch.current)setError(errorMessage(e));});return()=>{epoch.current++;};},[signature,nodeId,scopeId]);
+ const signature=JSON.stringify({parameters:project.parameters,sharedPotcar:project.sharedPotcar,nodes:project.nodes.map(n=>({id:n.id,data:n.data})),edges:project.edges});
+ useEffect(()=>{
+  const token=++epoch.current,controller=new AbortController();
+  setResolved(null);setError('');
+  const timer=setTimeout(()=>{void requestJson('/api/calculation-sources/resolve',{project,node_id:nodeId,execution_scope:scopeId},'POST',{signal:controller.signal})
+   .then(result=>{if(token===epoch.current)setResolved(result);})
+   .catch(e=>{if(token===epoch.current)setError(errorMessage(e));});},180);
+  return()=>{clearTimeout(timer);controller.abort();epoch.current++;};
+ },[signature,nodeId,scopeId]);
  useEffect(()=>{if(!node.data.sourceDraft)onChange(value);},[nodeId]);
  const change=(next:Partial<SourceDraft>)=>onChange({...value,...next,acknowledge_differences:false,acknowledge_unverified:false});
  const chosen=resolved?.candidates.find(c=>c.id===(value.attempt_id||resolved.selected_attempt_id));

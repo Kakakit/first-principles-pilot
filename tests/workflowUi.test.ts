@@ -45,3 +45,19 @@ test('program inputs accept calculated sources and reject cycles and incompatibl
   assert.equal(canConnect(nodes,[],analysis,scf),false);
   assert.equal(canConnect(nodes,[],structure,analysis),false);
 });
+
+test('only omitted immediate calculation parents need a historical source',async()=>{
+ const {chainUpstreamCandidates}=await import('../src/workflowUi.ts');
+ const p=newProject('Si',true);
+ const [,relax,scf,bands,dos]=p.nodes;
+ assert.deepEqual([...chainUpstreamCandidates(p,[bands.id,dos.id])],[scf.id]);
+ assert.deepEqual([...chainUpstreamCandidates(p,[scf.id,bands.id])],[relax.id]);
+ assert.deepEqual([...chainUpstreamCandidates(p,[relax.id])],[]);
+});
+
+test('freeze receipt and run history identify separately frozen versions with the same reason',async()=>{
+ const {inputVersionLabel}=await import('../src/humanLabels.ts');
+ assert.equal(inputVersionLabel('0123456789',' 复核\nU 值 '),'复核 U 值 · 01234567');
+ assert.notEqual(inputVersionLabel('0123456789','SCF'),inputVersionLabel('abcd56789','SCF'));
+ assert.equal(inputVersionLabel('0123456789',null),'冻结输入 · 01234567');
+});

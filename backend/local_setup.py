@@ -11,9 +11,8 @@ CONFIG=Path(os.environ.get('FPILOT_CONFIG',Path(__file__).resolve().parents[1]/'
 def read():
     value=json.loads(CONFIG.read_text(encoding='utf-8-sig')) if CONFIG.exists() else {}
     if not isinstance(value,dict):raise ValueError('本机配置应为 JSON 对象，请修正 '+str(CONFIG))
-    potcar=os.environ.get('FPILOT_POTCAR_LIBRARY','')
-    if not potcar and (ROOT/'potcar-library.json').is_file():
-        potcar=json.loads((ROOT/'potcar-library.json').read_text(encoding='utf-8')).get('path','')
+    from .potcar_library import configured_path
+    potcar=configured_path(ROOT)
     from .site_registration import ssh_aliases
     return {'saved':value,'current':{'workspace':str(ROOT),'research_root':os.environ.get('FPILOT_RESEARCH_ROOT',''),
             'potcar_library':potcar,'port':int(os.environ.get('FPILOT_PORT','5173'))},

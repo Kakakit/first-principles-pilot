@@ -33,6 +33,24 @@ class InputTests(unittest.TestCase):
         inputs.ROOT = self.old
         self.temp.cleanup()
 
+    def test_shared_impact_compares_actual_incar_and_keeps_invalid_nodes_visible(self):
+        previous = copy.deepcopy(self.project['parameters']['shared'])
+        self.project['parameters']['shared']['values']['ENCUT'] = '520'
+        for key in ('override','incomplete'):
+            node = copy.deepcopy(self.project['nodes'][1])
+            node['id'] = key
+            node['data']['stageSequence'] = len(self.project['nodes'])+1
+            node['data']['parameters']['values'] = {'ENCUT':'400'}
+            self.project['nodes'].append(node)
+            if key == 'override':
+                self.project['edges'].append({'source':'s','target':key})
+        rows = {r['node_id']:r for r in inputs.shared_parameter_impact(self.project, previous)['nodes']}
+        self.assertEqual(rows['c']['tags'], ['ENCUT'])
+        self.assertTrue(rows['c']['changed'])
+        self.assertFalse(rows['override']['changed'])
+        self.assertTrue(rows['incomplete']['issues'])
+        self.assertEqual(previous['values']['ENCUT'], '400')
+
     def test_known_static_and_regenerated_geometry(self):
         self.project['nodes'][0]['data']['structure']['poscar'] = 'not a POSCAR'
         result = inputs.generate(self.project, 'c')
@@ -118,7 +136,9 @@ class InputTests(unittest.TestCase):
         self.assertEqual(report['incar_tags']['LDAUU']['value'],'3')
         self.assertIn('MAGMOM=1 \\\n -1',report['files']['INCAR'])
         local['manualIncarText']='ICHARG=11\n'
-        self.assertTrue(any('来源合同不一致' in s for s in inputs.generate(self.project,'c')['errors']))
+        report=inputs.generate(self.project,'c')
+        self.assertIn('ICHARG=11\n', report['files']['INCAR'])
+        self.assertTrue(any('ICHARG=11 需要 CHGCAR' in s for s in report['errors']))
         from backend import source_contracts
         local['manualIncarText']='LSORBIT=1\nISPIN=1\nMAGMOM=0 0 1 0 0 -1\n'
         frozen=inputs.freeze(self.project,'c','manual SOC runtime')
@@ -160,6 +180,25 @@ class InputTests(unittest.TestCase):
         updated=inputs.generate(self.project,'c');self.assertNotIn('kmesh_generation',updated)
         self.assertIn('8 8 8',updated['files']['KPOINTS'])
         self.assertEqual((inputs.ROOT/'inputs'/(frozen['id']+'.zip')).read_bytes(),original)
+
+    def test_wiki_enum_values_survive_incar_generation(self):
+        layer = self.project['nodes'][1]['data']['parameters']
+        layer['values'].update(ICHARG='12', ALGO='Exact', PREC='SingleN',
+                               ISMEAR='4', LORBIT='14', LDAU='true',
+                               LDAUTYPE='3', LMAXMIX='4')
+        layer['hubbard'] = {'Si': {'l':'1', 'u':'-0.2', 'j':'0.1'}}
+        report = inputs.generate(self.project, 'c')
+        self.assertEqual(report['errors'], [])
+        for tag, value in layer['values'].items():
+            self.assertEqual(report['parameters'][tag]['validation'], 'typed')
+            if tag != 'LDAU':
+                self.assertIn(f'{tag} = {value}\n', report['files']['INCAR'])
+        self.assertIn('LDAUU = -0.2\n', report['files']['INCAR'])
+        self.assertIn('LDAUJ = 0.1\n', report['files']['INCAR'])
+        frozen = inputs.freeze(self.project, 'c', 'test alternate charge')['manifest']
+        self.assertEqual(frozen['source_contract']['initialization']['ICHARG'], 12)
+        self.assertEqual(execution._restart_policy(
+            frozen, {'INCAR': report['files']['INCAR'].encode()})['ICHARG'], 12)
 
     def test_catalog_typed_passthrough_custom_and_restart_contract(self):
         layer=self.project['nodes'][1]['data']['parameters']

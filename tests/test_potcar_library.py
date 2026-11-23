@@ -1,7 +1,9 @@
 import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from backend import potcar_library as lib
 
 class LibraryTests(unittest.TestCase):
@@ -25,6 +27,27 @@ class LibraryTests(unittest.TestCase):
     def test_reject_wrong_family_element_and_missing(self):
         for selections, family in [({'Fe':'Fe/POTCAR'},'LDA'), ({'Fe':'O/POTCAR'},'PBE'), ({},'PBE')]:
             with self.assertRaises(ValueError): lib.assemble(['Fe'], selections, family)
+
+    def test_saved_directory_overrides_launcher_for_index_and_assembly(self):
+        from backend import local_setup
+        (lib.ROOT / 'potcar-library.json').unlink()
+        new = Path(self.temp.name) / '新 PAW 库'
+        dataset = new / 'Fe' / 'POTCAR'
+        dataset.parent.mkdir(parents=True)
+        dataset.write_bytes((self.root/'Fe'/'POTCAR').read_bytes().replace(b'payload', b'new'))
+        with patch.dict(os.environ, FPILOT_POTCAR_LIBRARY=str(self.root)):
+            self.assertEqual(lib.catalog()['path'], str(self.root.resolve()))
+            saved = lib.configure(str(new))
+            self.assertEqual(saved['path'], str(new.resolve()))
+            self.assertEqual([entry['element'] for entry in saved['entries']], ['Fe'])
+            for invalid in ('', str(new/'missing')):
+                with self.assertRaises(ValueError):
+                    lib.configure(invalid)
+            self.assertEqual(lib.catalog(), saved)
+            with patch.object(local_setup, 'ROOT', lib.ROOT):
+                self.assertEqual(local_setup.read()['current']['potcar_library'], saved['path'])
+            assembled = lib.assemble(['Fe'], {'Fe':'Fe/POTCAR'}, 'PBE')
+            self.assertEqual(assembled['id'], hashlib.sha256(dataset.read_bytes()).hexdigest())
     def test_same_bytes_distinct_choice_receipts(self):
         a=lib.assemble(['Fe'],{'Fe':'Fe/POTCAR'},'PBE')
         b=lib.assemble(['Fe'],{'Fe':'Fe/POTCAR'},'PBEsol')

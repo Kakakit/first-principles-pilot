@@ -49,6 +49,8 @@ test('electronic source governs displayed restart parameters and legacy values d
  n.data.parameters={values:{ISTART:'0',ICHARG:'2'}};n.data.sourceDraft={mode:'self',files:'both'};
  assert.equal(effectiveParameters(p,n).ISTART.value,'1');assert.equal(effectiveParameters(p,n).ICHARG.value,'1');
  assert.equal(checkParameters(p,n).some(i=>/ISTART|ICHARG/.test(i.message)),false);
+ n.data.parameters.explicitCharge=true;
+ assert.equal(effectiveParameters(p,n).ICHARG.value,'2');
  n.data.sourceDraft={mode:'new',files:'charge'};assert.equal(effectiveParameters(p,n).ISTART.value,'0');assert.equal(effectiveParameters(p,n).ICHARG.value,'2');
 });
 

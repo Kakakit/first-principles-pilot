@@ -212,6 +212,54 @@ class SourceContractV2Tests(unittest.TestCase):
         frozen = inputs.freeze(self.project, 'r', 'same actual INCAR')
         self.assertEqual(sources.draft_differences(self.project, 'r', frozen['id'])['differences'], [])
 
+    def test_reviewed_freeze_accepts_canvas_changes_and_rejects_stale_mesh(self):
+        from backend.app import InputRequest, preview_inputs, freeze_inputs, HTTPException
+        request = InputRequest(project=self.project, node_id='r', reason='review')
+        preview = preview_inputs(request)
+        request.expected_definition_hash = preview['definition_hash']
+        node = request.project['nodes'][1]
+        node['position'] = {'x': 52, 'y': 82}
+        node['data']['note'] = 'canvas annotation'
+        frozen = freeze_inputs(request)
+        node['data']['inputDraft']['grid'] = '7 8 9'
+        before = list((self.fixture.root / 'inputs').glob('*.zip'))
+        with self.assertRaises(HTTPException) as stale:
+            freeze_inputs(request)
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertEqual(before, list((self.fixture.root / 'inputs').glob('*.zip')))
+        rows = sources.draft_differences(request.project, 'r', frozen['id'])['differences']
+        mesh = next(row for row in rows if row['field'] == 'KPOINTS')
+        self.assertIn('4 4 4', mesh['frozen'])
+        self.assertIn('7 8 9', mesh['draft'])
+
+    def test_new_automatic_source_requires_a_new_review(self):
+        from backend.app import InputRequest, preview_inputs, freeze_inputs, HTTPException
+        self.project['nodes'][2]['data']['sourceDraft'] = {'mode':'new', 'purpose':'charge', 'files':'charge'}
+        request = InputRequest(project=self.project, node_id='c', reason='automatic upstream')
+        preview = preview_inputs(request)
+        self.assertIn('relax.node01', preview['reviewed_source'])
+        request.expected_definition_hash = preview['definition_hash']
+        frozen = freeze_inputs(request)
+        rows = sources.draft_differences(request.project, 'c', frozen['id'])['differences']
+        self.assertFalse(any(r['field'].startswith('POSCAR') for r in rows))
+        self.make_source('relax-new', 'r')
+        rows = sources.draft_differences(request.project, 'c', frozen['id'])['differences']
+        self.assertIn('上游结构来源', [r['field'] for r in rows])
+        with self.assertRaises(HTTPException) as stale:
+            freeze_inputs(request)
+        self.assertEqual(stale.exception.status_code, 409)
+
+    def test_differences_show_dataset_and_changed_fractional_position(self):
+        frozen = inputs.freeze(self.project, 'r', 'before')
+        node = self.project['nodes'][1]['data']
+        raw = inputs.potcar_bytes(node['inputDraft']['potcar_id']).replace(b'Si 05Jan2001', b'Si_GW 01Jan2020')
+        node['inputDraft']['potcar_id'] = inputs.upload_potcar(base64.b64encode(raw).decode())['id']
+        doc = self.project['nodes'][0]['data']['structure']
+        doc['atoms'][0]['fractional'][0] += 0.05
+        rows = sources.draft_differences(self.project, 'r', frozen['id'])['differences']
+        self.assertTrue(any(row['field']=='POTCAR' and 'Si_GW' in row['draft'] for row in rows))
+        self.assertTrue(any('分数坐标' in row['field'] for row in rows))
+
     def test_refresh_uses_final_ionic_iteration_and_numeric_electronic_step(self):
         root = self.roots['relax']
         (root / 'INCAR').write_text('EDIFF = 1e-6\n')

@@ -25,7 +25,7 @@ const api=requestJson;
 const scalarMetrics=[['energy','总能 / eV/cell'],['energy_per_atom','每原子能 / eV/atom'],['magnetization','晶胞磁矩 / μB/cell'],['elapsed','运行时间 / s']] as const;
 const metrics=[...scalarMetrics,...latticeMetrics.map(([key,name,unit])=>[key,name+' / '+unit] as const)];
 
-export default function CompareResults({project}:{project:Project}){
+export default function CompareResults({project,initialAttemptId}:{project:Project;initialAttemptId?:string}){
  const [cursor,setCursor]=useState<string|null>(null);
  const [attempts,setAttempts]=useState<Attempt[]>([]),[batches,setBatches]=useState<Batch[]>([]),[selected,setSelected]=useState<string[]>([]),[rows,setRows]=useState<Row[]>([]);
  const [metric,setMetric]=useState<(typeof metrics)[number][0]>('energy_per_atom'),[reference,setReference]=useState(''),[analyses,setAnalyses]=useState<Analysis[]>([]);
@@ -33,9 +33,15 @@ export default function CompareResults({project}:{project:Project}){
  const identity=JSON.stringify([project.id,selected]),current=useRef(identity),live=useRef(true),reading=useRef(false),projectCurrent=useRef(project.id);current.current=identity;projectCurrent.current=project.id;
  const [retry,setRetry]=useState<(()=>void)|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
- const load=async()=>{const projectId=project.id;const [a,b,c]=await Promise.all([api(`/api/execution?project_id=${encodeURIComponent(project.id)}&view=summary&limit=50`),api(`/api/scans?project_id=${encodeURIComponent(project.id)}&view=summary`),api(`/api/local-analyses?project_id=${encodeURIComponent(project.id)}`)]);if(!live.current||projectId!==projectCurrent.current)return;setAttempts(a.items.filter((item:Attempt)=>item.node_id));setCursor(a.next_cursor);setBatches(b.batches);setAnalyses(c.analyses);};
+ const load=async()=>{const projectId=project.id;const [a,b,c]=await Promise.all([api(`/api/execution?project_id=${encodeURIComponent(project.id)}&view=summary&limit=50`),api(`/api/scans?project_id=${encodeURIComponent(project.id)}&view=summary`),api(`/api/local-analyses?project_id=${encodeURIComponent(project.id)}`)]);if(!live.current||projectId!==projectCurrent.current)return;const items:Attempt[]=a.items.filter((item:Attempt)=>item.node_id);
+ if(initialAttemptId&&!items.some(item=>item.id===initialAttemptId)){
+  const row=await api('/api/execution/'+encodeURIComponent(initialAttemptId)+'?project_id='+encodeURIComponent(projectId));
+  if(!live.current||projectId!==projectCurrent.current)return;
+  items.unshift(row);
+ }
+ setAttempts(items);setCursor(a.next_cursor);setBatches(b.batches);setAnalyses(c.analyses);};
  const refresh=()=>{const projectId=project.id;void load().catch(e=>{if(live.current&&projectId===projectCurrent.current){setError(errorMessage(e));setRetry(()=>refresh);}});};
- useEffect(()=>{live.current=true;setSelected([]);setAttempts([]);setBatches([]);setAnalyses([]);setReference('');refresh();return()=>{live.current=false;};},[project.id]);
+ useEffect(()=>{live.current=true;setSelected(initialAttemptId?[initialAttemptId]:[]);setAttempts([]);setBatches([]);setAnalyses([]);setReference('');refresh();return()=>{live.current=false;};},[project.id,initialAttemptId]);
  useEffect(()=>{setRows([]);setRowsFor('');setError('');setRetry(null);},[identity]);
  const toggle=(id:string)=>setSelected(old=>old.includes(id)?old.filter(x=>x!==id):old.length>=64?old:[...old,id]);
  const compare=async()=>{if(reading.current)return;reading.current=true;const signature=identity;setBusy(true);setError('');setRetry(null);try{const data=await api('/api/results/compare',{project_id:project.id,attempt_ids:selected});if(live.current&&signature===current.current){setRows(data.rows);setRowsFor(signature);}}catch(e){if(live.current&&signature===current.current){setError(errorMessage(e));setRetry(()=>()=>void compare());}}finally{reading.current=false;if(live.current)setBusy(false);}};

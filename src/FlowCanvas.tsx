@@ -30,7 +30,7 @@ function StepCard({data, selected}: NodeProps<Step>) {
     </div>
     {data.kind==='structure'&&<p>{data.params.material||'未指定结构'}</p>}
     {data.kind!=='structure'&&data.kind!=='wannier90'&&inheritance&&<div className="node-inheritance" title={inheritance.title}><span>{inheritance.text}</span></div>}
-    {chainSelection?<div className="step-foot chain-selection-foot"><span>{chainSelection==='execute'?'本次执行':chainSelection==='reuse'?'复用历史结果':chainSelection==='context'?'流程上下文':'本次不执行'}</span></div>:
+    {chainSelection?<div className="step-foot chain-selection-foot"><span>{chainSelection==='execute'?'本次执行':chainSelection==='reuse'?'复用历史结果':chainSelection==='pending'?'历史来源待核对':chainSelection==='context'?'流程上下文':'本次不执行'}</span></div>:
       <div className="step-foot"><span>{data.kind==='structure'?(data.structure?'已导入':'待导入'):data.kind==='scan'?'批次容器':resultState?'运行记录':'配置草稿'}</span>{data.kind!=='structure'&&(resultState&&openResults?<button className="node-result-button" onClick={event=>{event.stopPropagation();openResults();}}>结果 · {statusLabel(resultState)}</button>:<span>{data.kind==='scan'?'按批次执行':attemptStatus==='error'?'状态暂不可读':attemptStatus==='loading'?'正在读取状态':'未提交'}</span>)}</div>}
     {data.kind==='scan'&&Boolean(data.resultHint)&&<div className="node-inheritance" title={String(data.resultHint)}><span>{String(data.resultHint)}</span></div>}
     {data.kind==='structure'&&typeof data.openStructure==='function'&&<button className="node-result-button nodrag nopan" onClick={event=>{event.stopPropagation();(data.openStructure as ()=>void)();}}>打开结构详情</button>}

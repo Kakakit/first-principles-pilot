@@ -36,6 +36,13 @@ class ResultOverviewTests(unittest.TestCase):
         self.assertEqual(data['input']['parameters']['ENCUT'],'400')
         self.assertEqual(data['evidence']['scientific_validation'],'NOT_PERFORMED')
 
+    def test_dos_shortcut_needs_final_electronic_evidence(self):
+        self.assertTrue(overview.summary('p', self.record['id'])['dos_source_candidate'])
+        self.record['evidence']['ediff_source'] = 'OUTCAR_MARKER'
+        self.assertFalse(overview.summary('p', self.record['id'])['dos_source_candidate'])
+        self.record['evidence'].update(last_delta_e=1e-5, last_delta_eps=0., ediff_value=1e-6)
+        self.assertFalse(overview.summary('p', self.record['id'])['dos_source_candidate'])
+
     def test_actual_prepared_input_and_exact_historical_parent(self):
         self.record['final_incar']='GGA = PE\nENCUT = 500\nSAXIS = 1 1 0\n'
         self.record['chain_source_snapshot']={'source_attempt_id':'older-attempt','source_path':'old/path',

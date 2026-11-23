@@ -23,3 +23,10 @@ export function chainNodes(project:Project,selectedIds?:string[]) {
   return project.nodes.filter(node=>['relax','scf','bands','dos','vasp-wannier'].includes(node.data.kind)&&
     (selectedIds===undefined||selectedIds.includes(node.id)));
 }
+
+// The preview resolves actual source files. Before it exists, the graph can identify
+// direct upstream calculations for which historical results may be needed.
+export function chainUpstreamCandidates(project:Project,executionIds:string[]){
+ const selected=new Set(executionIds),eligible=new Set(chainNodes(project).map(n=>n.id));
+ return new Set(project.edges.filter(e=>selected.has(e.target)&&!selected.has(e.source)&&eligible.has(e.source)).map(e=>e.source));
+}

@@ -1,4 +1,5 @@
 import {useEffect,useState} from 'react';
+import {usePanelTransition} from './usePanelTransition';
 import type {Project,Step} from './model';
 import {requestJson,errorMessage} from './apiClient';
 import {statusLabel} from './statusLabels';
@@ -83,9 +84,11 @@ export function ProgramRuns({projectId,nodeId,initialId='',results=false,onSelec
  </section>;
 }
 
+
 export default function ProgramPanel({project,node,view,initialId,onChange,onPrepared,onSelect,onResults}:{onSelect?:(id:string)=>void;onResults?:(id:string)=>void;project:Project;node:Step;view:'run'|'config';initialId?:string;onChange:(d:Draft)=>void;onPrepared:(key:string)=>void}){
  const draft=(node.data.programDraft as Draft|undefined)||blank;
  const [hosts,setHosts]=useState<Host[]>([]),[idx,setIdx]=useState(0),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const fileBody=usePanelTransition<HTMLDivElement>(idx);
  const [comparison,setComparison]=useState(''),[comparing,setComparing]=useState(false);
  const prior=useInputs(comparing?comparison:'',project.id);
  useEffect(()=>{let active=true;
@@ -137,7 +140,7 @@ export default function ProgramPanel({project,node,view,initialId,onChange,onPre
   <div className="action-row"><h3>输入文件</h3><button className="button" onClick={add}>新建文件</button><label className="button">导入文本<input type="file" multiple onChange={e=>{void importFiles(Array.from(e.target.files||[]));e.target.value=''}}/></label></div>
   {draft.files.length>0&&<div className="program-files"><nav aria-label="输入文件">{draft.files.map((f,i)=><button type="button" className="button" aria-pressed={idx===i} key={i} onClick={()=>setIdx(i)}>{f.name||'未命名'}</button>)}</nav>
   <select className="program-file-picker" aria-label="切换输入文件" value={idx} onChange={e=>setIdx(Number(e.target.value))}>{draft.files.map((f,i)=><option key={i} value={i}>{f.name||'未命名'}</option>)}</select>
-  {file&&<div><label>文件名<input value={file.name} onChange={e=>updateFile({name:e.target.value})}/></label>
+  {file&&<div ref={fileBody}><label>文件名<input value={file.name} onChange={e=>updateFile({name:e.target.value})}/></label>
    <label>文件内容<textarea spellCheck={false} rows={14} className="input-text" value={file.text} onChange={e=>updateFile({text:e.target.value})}/></label>
    <button className="text-button" onClick={()=>{change({files:draft.files.filter((_,i)=>i!==idx)});setIdx(Math.max(0,idx-1))}}>移除此输入</button></div>}</div>}
   <ProgramSources key={node.id+draft.alias} project={project} nodeId={node.id} alias={draft.alias} sources={draft.sources||[]} occupied={[...draft.files.map(f=>f.name),...draft.outputs]} onChange={sources=>change({sources})} onCopy={(name,text)=>{if([...draft.files,...(draft.sources||[])].some(f=>f.name===name)||draft.outputs.includes(name))throw Error('已有同名文件，请先改名');if(draft.files.length+(draft.sources||[]).length>=64||draft.files.reduce((size,f)=>size+new Blob([f.text]).size,new Blob([text]).size)>2*1024*1024)throw Error('文本输入合计最多 2 MiB，输入文件最多 64 个');change({files:[...draft.files,{name,text}]});setIdx(draft.files.length)}}/>

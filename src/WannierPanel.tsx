@@ -2,7 +2,7 @@ import DisclosureLabel from './DisclosureLabel';
 import CommandOutput from './CommandOutput';
 import {calculationKind} from './scanNodes';
 import CancelTask from './CancelTask';
-import {windowTags,relativeValues,parameterChanges,preserveParameterEdits,bandSettings,type WannierDraft as ChannelDraft} from './wannierDraft';
+import {normalizedParameterValue,windowTags,relativeValues,parameterChanges,preserveParameterEdits,bandSettings,type WannierDraft as ChannelDraft} from './wannierDraft';
 import {attemptLabel} from './humanLabels';
 import {scfSourceId,type LineageAttempt} from './wannierLineage';
 import {useSubmissionDraft} from './useSubmissionDraft';
@@ -211,7 +211,27 @@ export default function WannierPanel({project,initialNodeId,embedded=false,view,
     const relative=relativeValues(adoption.parameters,reference.fermi_eV);setConfig(runtime);setParentId(adoption.parent_id);setSeeds([adoption.seed]);setSeed(adoption.seed);setSource(checked);setEnergyReference(reference);setWin(adoption.win);setRawDirty(false);setParameterDraft(relative);setAppliedParameters(relative);setInputReason(adoption.input_reason);
     const path=adoption.band_path as BandPath|null;setBandPath(path);setBandId(path?.band_attempt_id||'');setBandEnabled(!!path);setBandLines(path?.path_lines.join('\n')||'');setBandPoints(path?String(path.bands_num_points):'');setBandDirty(false);setPrepared(null);setMessage('扫描窗口已载入新草稿；请核对并重新冻结，历史输入未修改。');
   }catch(e){setError(errorMessage(e));}finally{setBusy(false);setBusyStep('');}};
-  const renderParameters=(items:WinParameter[])=><div className="wannier-parameter-list">{items.map(item=><label className="field" key={item.tag}><span className="wannier-parameter-name"><strong>{item.label}</strong><code>{item.tag}{item.unit?' / '+item.unit:''}{windowTags.has(item.tag)?'（相对 E_F）':''}</code></span>{item.choices?<select disabled={busy||rawDirty} value={parameterDraft[item.tag]||''} onChange={e=>{setParameterDraft(old=>({...old,[item.tag]:e.target.value}));setPrepared(null);}}><option value="">删除／使用程序默认</option>{item.choices.map(value=><option key={value} value={value}>{value}</option>)}</select>:item.type==='boolean'?<select disabled={busy||rawDirty} value={parameterDraft[item.tag]||''} onChange={e=>{setParameterDraft(old=>({...old,[item.tag]:e.target.value}));setPrepared(null);}}><option value="">删除／使用程序默认</option><option value=".true.">true</option><option value=".false.">false</option></select>:<input disabled={busy||rawDirty} value={parameterDraft[item.tag]||''} onChange={e=>setParameterDraft(old=>({...old,[item.tag]:e.target.value}))} placeholder="未设置 / 程序默认"/>}{item.help&&<small>{item.help}</small>}{windowTags.has(item.tag)&&parameterDraft[item.tag]?.trim()&&energyReference&&Number.isFinite(Number(parameterDraft[item.tag]))&&<small>将写入 .win：{(Number(parameterDraft[item.tag])+energyReference.fermi_eV).toFixed(6)} eV</small>}</label>)}</div>;
+  const renderParameters=(items:WinParameter[])=><div className="wannier-parameter-list">{items.map(item=>{
+    const value=parameterDraft[item.tag]||'';
+    const disabled=busy||rawDirty;
+    const change=(next:string)=>{
+      setParameterDraft(old=>({...old,[item.tag]:next}));
+      setPrepared(null);
+    };
+    const isBoolean=item.type==='boolean';
+    const Field=isBoolean?'div':'label';
+    return <Field className="field" key={item.tag}>
+      <span className="wannier-parameter-name"><strong>{item.label}</strong><code>{item.tag}{item.unit?' / '+item.unit:''}{windowTags.has(item.tag)?'（相对 E_F）':''}</code></span>
+      {isBoolean?<div className="boolean-parameter" role="group" aria-label={item.tag}>
+        {[['.true.', '开启'],['.false.', '关闭'],['', '程序默认']].map(([next,label])=>
+          <button type="button" key={label} disabled={disabled} aria-pressed={normalizedParameterValue(value)===normalizedParameterValue(next)} onClick={()=>change(next)}>{label}</button>)}
+      </div>:item.choices?<select disabled={disabled} value={value} onChange={e=>change(e.target.value)}>
+        <option value="">删除／使用程序默认</option>{item.choices.map(choice=><option key={choice} value={choice}>{choice}</option>)}
+      </select>:<input disabled={disabled} value={value} onChange={e=>setParameterDraft(old=>({...old,[item.tag]:e.target.value}))} placeholder="未设置 / 程序默认"/>}
+      {item.help&&<small>{item.help}</small>}
+      {windowTags.has(item.tag)&&value.trim()&&energyReference&&Number.isFinite(Number(value))&&<small>将写入 .win：{(Number(value)+energyReference.fermi_eV).toFixed(6)} eV</small>}
+    </Field>;
+  })}</div>;
   return <section className="input-workspace"><h2>Wannier90 局域化 · {project.name}</h2><p>直接使用已完成 VASP-Wannier attempt 的一组 .win/.amn/.mmn/.eig。矩阵留在同一服务器，按来源合同核验。先核对来源和 .win，再进入运行审阅。</p>
     {view!=='run'&&adoption&&<section className="input-submit-card"><h3>已采用的能窗草稿</h3><p>{adoption.alias} · {adoption.seed} · 来源为你选择的迭代结果。</p><button className="button primary" disabled={busy||!config} onClick={()=>void loadAdoption()}>载入扫描窗口并重新审查</button></section>}
     {!parameterCatalog.length&&<p className="handoff-warning">参数目录尚未载入。<button className="button" onClick={()=>void load()}>重新载入参数目录</button></p>}

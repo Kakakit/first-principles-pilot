@@ -159,7 +159,8 @@ def _generate(project, node_id, context=None):
     required = ["XC_FUNCTIONAL", "ENCUT", "EDIFF", "ISPIN", "ISMEAR", "NSW", "IBRION", "LDAU"]
     if kind == "relax":
         required += ["ISIF", "EDIFFG"]
-    if values.get("ISMEAR") != "-5":
+    tetrahedron = values.get("ISMEAR") in ("-4", "-5", "-14", "-15")
+    if values.get("ISMEAR") not in ("-2", "-3", "-4", "-5"):
         required.append("SIGMA")
     for tag in required:
         if values.get(tag) is None:
@@ -240,9 +241,15 @@ def _generate(project, node_id, context=None):
     if not source_draft and not restart_required:
         if values.get('ISTART') not in (None, str(source_plan['initialization']['ISTART'])):
             errors.append('ISTART 非零需要已核对的 WAVECAR 重启合同')
-        if kind not in source_contracts.FIXED and values.get('ICHARG') not in (None, expected_icharg):
-            errors.append('ICHARG 当前节点锁定为 '+expected_icharg+'；其他值需要已核对的 CHGCAR 合同')
+    local_charge = local.get('values', {}).get('ICHARG')
+    explicit_charge = ('ICHARG' in manual_tags
+                       or local_charge is not None and local.get('explicitCharge') is True
+                       or not source_draft and kind not in source_contracts.FIXED and values.get('ICHARG') is not None)
     for name, value in source_plan['initialization'].items():
+        if name == 'ICHARG' and explicit_charge:
+            if values.get(name) is not None and values[name] != expected_icharg:
+                warnings.append('ICHARG 与来源建议 '+expected_icharg+' 不同，按实际 INCAR 核对条件文件')
+            continue
         if restart_required and name == 'ICHARG':
             continue
         if name in manual_tags:
@@ -355,8 +362,8 @@ def _generate(project, node_id, context=None):
         except ValueError:
             errors.append("请按原子 ID 填写全部初始 MAGMOM")
     hubbard = dict(shared.get("hubbard", {}), **(inherited["hubbard"] if inherited else {}), **local.get("hubbard", {}))
-    if values["LDAU"] == "true" and not all(k in manual_tags for k in ('LDAUL','LDAUU','LDAUJ')):
-        if values.get("LDAUTYPE") not in ("1", "2"):
+    if values.get("LDAU") == "true" and not all(k in manual_tags for k in ('LDAUL','LDAUU','LDAUJ')):
+        if not values.get("LDAUTYPE"):
             errors.append("请明确 LDAUTYPE")
         ls, us, js = [], [], []
         for element in species:
@@ -366,7 +373,7 @@ def _generate(project, node_id, context=None):
                 if l not in ("-1", "0", "1", "2", "3"):
                     raise ValueError()
                 u, j = (0, 0) if l == "-1" else (number(row.get("u")), number(row.get("j")))
-                if min(u, j) < 0:
+                if values.get("LDAUTYPE") != "3" and min(u, j) < 0:
                     raise ValueError()
                 ls.append(l); us.append(str(u)); js.append(str(j))
             except ValueError:
@@ -391,7 +398,7 @@ def _generate(project, node_id, context=None):
                 if i % 2:
                     rendered.append("")
             files["KPOINTS"] = f"Explicit path\n{int(count)}\nLine-mode\nReciprocal\n" + "\n".join(rendered) + "\n"
-            if values["ISMEAR"] == "-5":
+            if tetrahedron:
                 errors.append("能带路径不支持四面体积分")
         elif native:
             if 'KSPACING' not in tags:
@@ -413,7 +420,7 @@ def _generate(project, node_id, context=None):
             if options.get('kmesh_info'):
                 from . import kpoints
                 kmesh_generation=kpoints.generation_info(options['kmesh_info'],[int(x) for x in grid],center)
-            if values["ISMEAR"] == "-5":
+            if tetrahedron:
                 warnings.append("四面体积分仍需实际 VASP 网格和适用性验证；网格尺寸检查不证明四面体可用")
                 if min(grid) < 2:
                     errors.append("当前四面体模式要求三个方向至少各 2 个网格点")
@@ -449,6 +456,11 @@ def _generate(project, node_id, context=None):
     files["INCAR"] = incar_text.render(tags, manual_fragments)
     # Source checks and displayed metadata must describe the exact saved text.
     tags = incar_text.parse(files['INCAR'])[0]
+    if explicit_charge and not restart_required:
+        try:
+            source_plan['initialization']['ICHARG'] = int(incar_text.semantic('ICHARG', tags['ICHARG']))
+        except (KeyError, TypeError, ValueError):
+            errors.add('input.icharg', 'ICHARG 须为整数', 'parameter.ICHARG', subpage='physics')
     external_issue = incar_text.external_update_issue(tags)
     if external_issue:
         errors.add('input.external-update', external_issue, 'parameter.incar', subpage='physics')
@@ -509,7 +521,20 @@ def _generate(project, node_id, context=None):
             **({'kmesh_generation':kmesh_generation} if kmesh_generation else {})}
 
 
-def freeze(project, node_id, reason, *, context=None, report=None, verification_mode='lightweight', defer_sources=False, execution_scope=None, prepared_source=None):
+def reviewed_definition(project, node_id, report):
+    from . import source_contracts
+    node = next(n for n in project['nodes'] if n['id'] == node_id)
+    selection = None
+    policy = report.get('source_plan') or {}
+    if (not report['errors'] and policy.get('required_files') and not report.get('restart_required')
+            and (node['data'].get('sourceDraft') or not policy.get('parent_id'))):
+        selection = source_contracts.resolve(project, node_id, report=report)
+    selected = selection and selection['selected_attempt_id']
+    payload = [project['id'], node_id, report, selected]
+    return digest(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()), selection
+
+
+def freeze(project, node_id, reason, *, context=None, report=None, verification_mode='lightweight', defer_sources=False, execution_scope=None, prepared_source=None, reviewed_selection=None):
     from . import recycle
     recycle.assert_available('projects',project['id'])
     if not isinstance(reason,str) or len(reason)>2000:raise ValueError('备注最多 2000 字')
@@ -539,7 +564,7 @@ def freeze(project, node_id, reason, *, context=None, report=None, verification_
     elif report['restart_required']:
         source_contract = None  # read-only legacy submission-page adapter
     else:
-        source_contract = source_contracts.freeze(project, node_id, report, verification_mode, execution_scope)
+        source_contract = source_contracts.freeze(project, node_id, report, verification_mode, execution_scope, selection=reviewed_selection)
     from . import branch_bindings
     if source_contract and report.get("parameter_source"): source_contract["parameter_source"] = report["parameter_source"]
     branch_bindings.check(project,node_id,source_contract=source_contract,scope=execution_scope)
@@ -603,3 +628,36 @@ def history(project_id=None):
             if len(result) >= 100:
                 break
     return result
+
+
+def shared_parameter_impact(project, previous_shared):
+    """Compare generated drafts with only the shared parameter layer replaced."""
+    previous = {**project, 'parameters': {**project.get('parameters', {}), 'shared': previous_shared}}
+    contexts = [GenerationContext(p) for p in (previous, project)]
+    rows = []
+    for node in project['nodes']:
+        if calculation_kind(node, project) not in ('relax', 'scf', 'bands', 'dos', 'vasp-wannier'):
+            continue
+        row = {'node_id': node['id'], 'label': node['data'].get('label') or node['id']}
+        try:
+            old, new = [generate(ctx.project, node['id'], ctx) for ctx in contexts]
+            files = [r.get('files', {}) for r in (old, new)]
+            tags = [incar_text.parse(f.get('INCAR', ''))[0] for f in files]
+            row['tags'] = sorted(t for t in tags[0].keys() | tags[1].keys() if tags[0].get(t) != tags[1].get(t))
+            row['files'] = sorted(k for k in files[0].keys() | files[1].keys() if files[0].get(k) != files[1].get(k))
+            row['changed'] = bool(row['files'] or old.get('dependencies') != new.get('dependencies') or old.get('source_plan') != new.get('source_plan'))
+            layer = node['data'].get('parameters') or {}
+            shared = project.get('parameters', {}).get('shared', {})
+            names = previous_shared.get('values', {}).keys() | shared.get('values', {}).keys()
+            row['overrides'] = sorted(t for t in names if t in layer.get('values', {})
+                                      and previous_shared.get('values', {}).get(t) != shared.get('values', {}).get(t))
+            for table, label in [('hubbard', 'DFT+U'), ('moments', 'MAGMOM')]:
+                before, after = previous_shared.get(table) or {}, shared.get(table) or {}
+                for key in sorted(before.keys() | after.keys()):
+                    if before.get(key) != after.get(key) and key in (layer.get(table) or {}):
+                        row['overrides'].append(f'{label} · {key}')
+            row['issues'] = list(dict.fromkeys([*old['errors'], *new['errors']]))
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            row.update(changed=False, tags=[], files=[], issues=[str(exc)])
+        rows.append(row)
+    return {'nodes': rows}

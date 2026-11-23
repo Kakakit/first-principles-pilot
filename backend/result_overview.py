@@ -88,7 +88,13 @@ def summary(project_id,key):
         item=attempts.get(source.get('attempt_id')) or {}
         node=next((n for n in project.get('nodes',[]) if n['id']==item.get('node_id')),{})
         source['display_name']=' · '.join(filter(None,[node.get('data',{}).get('label') or item.get('kind') or item.get('stage_slug') or '历史计算来源',item.get('job_id') or item.get('created_at','')[:19].replace('T',' ')]))
-    return {'attempt_id':key,'state':record['state'],'evidence':record.get('evidence') or {},'input':frozen_input(record),
+    from .source_contracts import electronic
+    frozen = frozen_input(record)
+    evidence = record.get('evidence') or {}
+    candidate = (frozen.get('stage') == 'scf' and record['state'] == 'COMPLETED'
+                 and evidence.get('vasp_timing') and evidence.get('wrapper_exit') in (None, 0)
+                 and evidence.get('output_sanity', True) and electronic(evidence))
+    return {'attempt_id':key,'state':record['state'],'evidence':evidence,'input':frozen,'dos_source_candidate':bool(candidate),
             'sources':source_rows,'metrics':cached['row'].get('metrics') if cached else None,
             'metrics_error':cached['row'].get('error') if cached else None,'metrics_checked_at':cached['checked_at'] if cached else None,
             'remote_checked':False,'cache_status':'available' if cached else 'not-read'}

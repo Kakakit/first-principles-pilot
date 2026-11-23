@@ -28,7 +28,8 @@ def validate_value(tag, value, confirmed_custom=False):
     if definition:
         kind = definition['type']
         if kind == 'enum' and value not in {choice[0] for choice in definition['choices']}:
-            raise ValueError('不在当前强类型支持范围')
+            if not (definition.get('allow_positive_integer') and re.fullmatch(r'[1-9][0-9]*', value)):
+                raise ValueError('不在当前强类型支持范围')
         if kind in ('number', 'integer', 'ediffg'):
             from .inputs import number
             n = number(value)

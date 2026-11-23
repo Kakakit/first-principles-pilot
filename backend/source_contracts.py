@@ -241,9 +241,9 @@ def review_inputs(source_plan, old, report):
     return {'blockers': blockers, 'differences': differences, 'warnings': warnings}
 
 
-def resolve(project, node_id, execution_scope=None):
+def resolve(project, node_id, execution_scope=None, *, report=None):
     from . import execution as ex, branch_bindings, inputs, artifacts
-    report = inputs.generate(project, node_id)
+    report = inputs.generate(project, node_id) if report is None else report
     policy = report.get('source_plan') or plan(project, node_id)
     value, parent = draft(project, node_id)
     binding = branch_bindings.inspect(project['id'], branch_bindings.scopes(project, execution_scope or node_id))
@@ -402,7 +402,7 @@ def bind(policy, record, report, verification_mode):
             **({'poscar_scan': report['poscar_scan']} if report.get('poscar_scan') else {})}
 
 
-def freeze(project, node_id, report, verification_mode, execution_scope=None):
+def freeze(project, node_id, report, verification_mode, execution_scope=None, *, selection=None):
     from . import execution as ex, branch_bindings
     policy = report['source_plan']
     if not policy['required_files']:
@@ -410,7 +410,8 @@ def freeze(project, node_id, report, verification_mode, execution_scope=None):
                     'files': policy['files'], 'structure': 'configured', 'verification_mode': verification_mode,
                     'roles': {}, 'source_plan': policy, 'initialization': policy['initialization']}
     else:
-        selection = resolve(project, node_id, execution_scope)
+        if selection is None:
+            selection = resolve(project, node_id, execution_scope, report=report)
         if selection['blockers']:
             raise ValueError('来源不可用：'+'；'.join(selection['blockers']))
         record = ex.get(selection['selected_attempt_id'])
@@ -452,7 +453,8 @@ def materialize(contract, alias):
 def draft_differences(project, node_id, bundle_id):
     from . import execution as ex, inputs
     manifest, files = ex.bundle(bundle_id, allow_dependencies=True)
-    if manifest['node_id'] != node_id or ex.frozen_project(bundle_id)['id'] != project['id']:
+    baseline = ex.frozen_project(bundle_id)
+    if manifest['node_id'] != node_id or baseline['id'] != project['id']:
         raise ValueError('冻结输入不属于当前项目节点')
     report = inputs.generate(project, node_id)
     current = report.get('incar_tags', {})
@@ -471,14 +473,102 @@ def draft_differences(project, node_id, bundle_id):
             differences.append({'field': name, 'frozen': before, 'draft': after})
     frozen_policy = manifest.get('source_plan') or manifest.get('source_contract') or manifest.get('source_draft')
     def signature(policy):
-        return {k: policy.get(k) for k in ('mode', 'purpose', 'parent_id', 'structure_file', 'required_files', 'electronic_usage', 'initialization')} if policy else {}
+        return {k: policy.get(k) for k in ('mode', 'purpose', 'parent_id', 'structure_file', 'required_files', 'electronic_usage', 'initialization', 'draft')} if policy else {}
     if signature(frozen_policy) != signature(report.get('source_plan')):
-        differences.append({'field': '来源与初始化', 'frozen': frozen_policy, 'draft': report.get('source_plan')})
-    for name in ('KPOINTS', 'POTCAR'):
-        before = manifest['files'].get(name, {}).get('sha256')
-        after = report.get('potcar', {}).get('sha256') if name == 'POTCAR' else hashlib.sha256(report['files'][name].encode()).hexdigest() if name in report.get('files',{}) else None
-        if before != after:
-            differences.append({'field': name, 'frozen': '冻结文件', 'draft': '当前文件已改变'})
+        def describe(policy):
+            if not policy:
+                return '未设置'
+            draft = policy.get('draft') or {}
+            files = '、'.join(policy.get('required_files') or []) or '配置的输入文件'
+            source = draft.get('attempt_id') or policy.get('parent_id') or policy.get('mode', '')
+            init = ' '.join(f'{k}={v}' for k,v in (policy.get('initialization') or {}).items())
+            return ' · '.join(filter(None, [source, policy.get('purpose'), files, init]))
+        before, after = describe(frozen_policy), describe(report.get('source_plan'))
+        if before == after:
+            before = json.dumps(signature(frozen_policy), ensure_ascii=False, sort_keys=True)
+            after = json.dumps(signature(report.get('source_plan')), ensure_ascii=False, sort_keys=True)
+        differences.append({'field':'来源与初始化', 'frozen':before, 'draft':after})
+    generated = report.get('files') or {}
+    def changed(field, old, new):
+        differences.append({'field': field, 'frozen': old, 'draft': new})
+    def mesh(raw, incar):
+        if not raw:
+            spacing = tag(incar, 'KSPACING') if incar else None
+            return 'KSPACING = '+spacing+' Å⁻¹' if spacing else '尚未生成'
+        lines = raw.splitlines()
+        if len(lines) >= 4 and lines[1].strip() == '0':
+            return ' · '.join(lines[2:5])
+        return ' · '.join(lines[1:4])+f' · {len([line for line in lines[4:] if line.strip()])} 个端点'
+    old_source = manifest.get('structure_source') or {}
+    policy = report.get('source_plan') or {}
+    if old_source.get('attempt_id') and policy.get('structure_file') and not report['errors']:
+        selected = (policy.get('draft') or {}).get('attempt_id')
+        if not selected:
+            selected = resolve(project, node_id, report=report)['selected_attempt_id']
+        if selected != old_source['attempt_id']:
+            changed('上游结构来源', old_source.get('job_id') or old_source['attempt_id'], selected or '待选择')
+    old_mesh = files.get('KPOINTS', b'').decode()
+    new_mesh = generated.get('KPOINTS', '')
+    if old_mesh != new_mesh:
+        old, new = mesh(old_mesh, files['INCAR']), mesh(new_mesh, generated.get('INCAR'))
+        if old == new:
+            import itertools
+            for i, (left, right) in enumerate(itertools.zip_longest(old_mesh.splitlines(), new_mesh.splitlines()), 1):
+                if left != right:
+                    old, new = f'{old} · 第 {i} 行 {left or "（空）"}', f'{new} · 第 {i} 行 {right or "（空）"}'
+                    break
+        changed('KPOINTS', old, new)
+    old_pot = manifest.get('potcar') or {}
+    new_pot = report.get('potcar') or {}
+    old_hash = manifest['files']['POTCAR']['sha256']
+    if old_hash != new_pot.get('sha256'):
+        def datasets(pot, sha):
+            titles = ' / '.join(r.get('titel') or r.get('element', '?') for r in pot.get('records', []))
+            return f'{titles or "数据集"} · {sha[:12]}' if sha else '尚未生成'
+        changed('POTCAR', datasets(old_pot, old_hash), datasets(new_pot, new_pot.get('sha256')))
+    old_name = 'POSCAR' if 'POSCAR' in files else 'POSCAR.reference'
+    new_name = 'POSCAR' if 'POSCAR' in generated else 'POSCAR.reference'
+    old_raw = files[old_name]
+    new_text = generated.get(new_name)
+    if manifest.get('structure_source') and new_name == 'POSCAR.reference':
+        # Compare the two configured references. The frozen actual geometry belongs to its upstream attempt.
+        nodes = {n['id']: n for n in baseline['nodes']}
+        pending, visited = [node_id], set()
+        while pending:
+            parent = pending.pop()
+            if parent in visited:
+                continue
+            visited.add(parent)
+            data = nodes[parent]['data']
+            if data['kind'] == 'structure':
+                old_raw = inputs.input_geometry(data['structure'])['poscar'].encode()
+                old_name = 'POSCAR.reference'
+                break
+            pending.extend(e['source'] for e in baseline['edges'] if e['target'] == parent)
+    if new_text is None:
+        changed('POSCAR', old_name, '尚未生成')
+    elif old_raw != new_text.encode():
+        old = structure_geometry(old_raw)
+        new = structure_geometry(new_text.encode())
+        def composition(geometry):
+            from itertools import groupby
+            return ' '.join(f'{el}×{sum(1 for _ in group)}' for el,group in groupby(a['element'] for a in geometry['atoms']))
+        start = len(differences)
+        if composition(old) != composition(new):
+            changed('POSCAR 元素与原子数', composition(old), composition(new))
+        for axis,left,right in zip('abc',old['lattice'],new['lattice']):
+            if left != right:
+                changed('POSCAR 晶格 '+axis+'（Å）', str(left), str(right))
+        moved = [(i,x,y) for i,(x,y) in enumerate(zip(old['atoms'],new['atoms']),1) if x['fractional'] != y['fractional']]
+        if moved:
+            i,x,y = moved[0]
+            changed(f'POSCAR 分数坐标（{len(moved)} 个位置变化）', f"#{i} {x['element']} {x['fractional']}", f"#{i} {y['element']} {y['fractional']}")
+        constraints = [(i,x['selective'],y['selective']) for i,(x,y) in enumerate(zip(old['atoms'],new['atoms']),1) if x['selective'] != y['selective']]
+        if constraints:
+            i,x,y = constraints[0]
+            changed(f'POSCAR 选择性弛豫（{len(constraints)} 个位置变化）', f'#{i} {x}', f'#{i} {y}')
+        if start == len(differences):
+            changed('POSCAR 文件内容',old_name+' · '+hashlib.sha256(old_raw).hexdigest()[:12], new_name+' · '+hashlib.sha256(new_text.encode()).hexdigest()[:12])
     return {'bundle_id': bundle_id, 'differences': differences, 'errors': report['errors']}
 
 

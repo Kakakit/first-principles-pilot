@@ -4,11 +4,11 @@ import type {StructureDocument} from './structure';
 import catalog from '../resources/vasp-parameter-catalog.json';
 export type ParameterValue=string|null;
 export type HubbardRow={l:string;u:string;j:string};
-export type ParameterLayer={values:Record<string,ParameterValue>;preset?:'none'|'basic';moments?:Record<string,ParameterValue>;hubbard?:Record<string,HubbardRow>;confirmed_custom_tags?:string[];manualIncarText?:string};
+export type ParameterLayer={values:Record<string,ParameterValue>;preset?:'none'|'basic';moments?:Record<string,ParameterValue>;hubbard?:Record<string,HubbardRow>;confirmed_custom_tags?:string[];manualIncarText?:string;explicitCharge?:boolean};
 export type ParameterProject={version:1;shared:ParameterLayer;templates?:{name:string;layer:ParameterLayer}[]};
-export type Definition={tag:string;label:string;unit?:string;type:'number'|'integer'|'enum'|'ediffg'|'vector3';choices?:[string,string][];positive?:boolean;min?:number;help:string;url:string;applies_to?:string[]};
+export type Definition={tag:string;label:string;unit?:string;type:'number'|'integer'|'enum'|'ediffg'|'vector3';choices?:[string,string][];allow_positive_integer?:boolean;positive?:boolean;min?:number;help:string;url:string;applies_to?:string[]};
 export const definitions:Definition[]=catalog.definitions as Definition[];
-export const catalogRevision=String(catalog.schema)+' · '+String(catalog.retrieved);
+export const catalogRevision=String(catalog.schema)+' · '+String(catalog.retrieved)+' · 枚举复核 '+catalog.enum_reviewed;
 export const targetVaspVersion=String(catalog.target_vasp_version);
 export const knownTags=new Set<string>(catalog.known_tags);
 export const managedTags=new Set<string>(catalog.managed_tags.concat(catalog.contract_locked_tags));
@@ -38,12 +38,13 @@ export function effectiveParameters(project:Project,node:Step):Record<string,Eff
    for(const [tag,value] of Object.entries(preset))out[tag]={value,source:'阶段预设'};
  }
  for(const [tag,value] of Object.entries(local))out[tag]={value,source:'节点覆盖'};
+ const explicitCharge=node.data.parameters?.explicitCharge===true&&local.ICHARG!=null;
  const source=node.data.sourceDraft as {mode?:string;files?:string}|undefined;
  if(source){
    out.ISTART={value:source.mode!=='new'&&source.files==='both'&&!['bands','dos','vasp-wannier'].includes(calculationKind(node,project))?'1':'0',source:'节点执行合同'};
-   out.ICHARG={value:source.mode==='new'?'2':'1',source:'节点执行合同'};
+   if(!explicitCharge)out.ICHARG={value:source.mode==='new'?'2':'1',source:'节点执行合同'};
  }
- if(['bands','dos','vasp-wannier'].includes(calculationKind(node,project)))out.ICHARG={value:'11',source:'节点执行合同'};
+ if(!explicitCharge&&['bands','dos','vasp-wannier'].includes(calculationKind(node,project)))out.ICHARG={value:'11',source:'节点执行合同'};
  if(['bands','dos','vasp-wannier'].includes(calculationKind(node,project))&&!Object.hasOwn(shared,'LORBIT')&&!Object.hasOwn(local,'LORBIT'))out.LORBIT={value:'11',source:'节点执行合同'};
  if(calculationKind(node,project)==='vasp-wannier'){
   for(const [tag,value] of Object.entries({NCORE:'1',KPAR:'1',ISYM:'-1',LWANNIER90:'true',LWANNIER90_RUN:'false',LWRITE_MMN_AMN:'true'}))out[tag]={value,source:'节点执行合同'};
@@ -60,6 +61,9 @@ export function parameterTables(project:Project,node:Step) {
 }
 export type ParameterIssue={level:'error'|'warning';message:string};
 const numeric=(value:unknown)=>typeof value==='string'&&value.trim()!==''&&Number.isFinite(Number(value));
+function validEnum(d:Definition,value:string) {
+ return d.choices!.some(([key])=>key===value)||Boolean(d.allow_positive_integer&&/^[1-9][0-9]*$/.test(value));
+}
 export function checkParameters(project:Project,node:Step):ParameterIssue[] {
  const effective=effectiveParameters(project,node),issues:ParameterIssue[]=[];const value=(tag:string)=>effective[tag]?.value;
  for(const [tag,e] of Object.entries(effective)){
@@ -69,14 +73,14 @@ export function checkParameters(project:Project,node:Step):ParameterIssue[] {
   if(!singleLineValue(e.value))issues.push({level:'error',message:`${tag} 须为安全单行文本。`});
   if(d.applies_to&&!d.applies_to.includes(calculationKind(node,project)))issues.push({level:'error',message:`${tag} 不适用于当前节点类型。`});
   if(tag==='EDIFFG'&&e.value!=='0'&&numeric(e.value)&&Number(e.value)===0)issues.push({level:'error',message:'力或能量阈值必须大于 0；若只按 NSW 停止，请显式选择仅步数（EDIFFG=0）。'});
-  if(d.type==='enum'?!d.choices!.some(([v])=>v===e.value):d.type==='vector3'?(()=>{const parts=e.value.trim().split(/\s+/);return parts.length!==3||parts.some(x=>!numeric(x))||parts.every(x=>Number(x)===0);})():(!numeric(e.value)||(d.type==='integer'&&!Number.isInteger(Number(e.value)))||(d.positive&&Number(e.value)<=0)||(d.min!==undefined&&Number(e.value)<d.min)))issues.push({level:'error',message:`${tag} 的类型或取值不符合当前支持范围。`});
+  if(d.type==='enum'?!validEnum(d,e.value):d.type==='vector3'?(()=>{const parts=e.value.trim().split(/\s+/);return parts.length!==3||parts.some(x=>!numeric(x))||parts.every(x=>Number(x)===0);})():(!numeric(e.value)||(d.type==='integer'&&!Number.isInteger(Number(e.value)))||(d.positive&&Number(e.value)<=0)||(d.min!==undefined&&Number(e.value)<d.min)))issues.push({level:'error',message:`${tag} 的类型或取值不符合当前支持范围。`});
  }
  for(const tag of ['XC_FUNCTIONAL','ENCUT','EDIFF','ISPIN'])if(value(tag)===null)issues.push({level:'warning',message:`${tag} 尚未明确，工作台不会补成物理默认值。`});
  if(!node.data.sourceDraft&&value('ISTART')!==null&&value('ISTART')!=='0')issues.push({level:'error',message:'当前 ISTART 锁定为 0；非零值需要 WAVECAR 重启合同。'});
  const expectedCharge=['bands','dos','vasp-wannier'].includes(calculationKind(node,project))?'11':'2';
  if(!node.data.sourceDraft){
  if(value('ICHARG')==='1'&&['relax','scf'].includes(calculationKind(node,project)))issues.push({level:'warning',message:'ICHARG=1 需要在计算配置中选择 CHGCAR 来源并重新冻结。'});
- else if(value('ICHARG')!==null&&value('ICHARG')!==expectedCharge)issues.push({level:'error',message:`当前 ICHARG 锁定为 ${expectedCharge}；需核对 CHGCAR 依赖。`});
+ else if(value('ICHARG')!==null&&value('ICHARG')!==expectedCharge)issues.push({level:'warning',message:`当前来源建议 ICHARG=${expectedCharge}；保留显式值，按最终 INCAR 核对所需文件。`});
  }
  if(calculationKind(node,project)==='scf'&&value('LCHARG')==='false'&&project.edges.some(e=>e.source===node.id&&['bands','dos','vasp-wannier'].includes(project.nodes.find(n=>n.id===e.target)?.data.kind||'')))issues.push({level:'error',message:'该 SCF 有固定电荷下游，须写出 CHGCAR。'});
  if((value('EMIN')===null)!==(value('EMAX')===null)||value('EMIN')!==null&&value('EMAX')!==null&&Number(value('EMIN'))>=Number(value('EMAX')))issues.push({level:'error',message:'EMIN/EMAX 必须同时设置，且 EMIN < EMAX。'});
@@ -87,9 +91,10 @@ export function checkParameters(project:Project,node:Step):ParameterIssue[] {
   if(value('NSW')!==null&&Number(value('NSW'))!==0)issues.push({level:'error',message:'静态、能带和 DOS 节点不能执行离子更新；NSW 应为 0。'});
   if(value('IBRION')!==null&&value('IBRION')!=='-1')issues.push({level:'error',message:'静态、能带、DOS 和 VASP-Wannier 节点的 IBRION 应为 -1。'});
  }
- if(value('ISMEAR')==='-5'&&calculationKind(node,project)==='bands')issues.push({level:'error',message:'本能带路径任务不支持四面体积分（ISMEAR=−5）。'});
- if(value('ISMEAR')==='-5')issues.push({level:'warning',message:'四面体法的网格与体系适用性需结合实际 VASP 网格和体系核对。'});
- if(value('ISMEAR')!==null&&value('ISMEAR')!=='-5'&&value('SIGMA')===null)issues.push({level:'warning',message:'展宽方法已选，SIGMA 尚未明确。'});
+ const tetrahedron=['-4','-5','-14','-15'].includes(value('ISMEAR')||'');
+ if(tetrahedron&&calculationKind(node,project)==='bands')issues.push({level:'error',message:'本能带路径任务不支持四面体积分。'});
+ if(tetrahedron)issues.push({level:'warning',message:'四面体法的网格与体系适用性需结合实际 VASP 网格和体系核对。'});
+ if(value('ISMEAR')!==null&&!['-2','-3','-4','-5'].includes(value('ISMEAR')||'')&&value('SIGMA')===null)issues.push({level:'warning',message:'展宽方法已选，SIGMA 尚未明确。'});
  const s=upstreamStructure(project,node),tables=parameterTables(project,node);
  const noncollinear=value('LSORBIT')==='true'||value('LNONCOLLINEAR')==='true';
  if(value('LSORBIT')==='true'&&value('LNONCOLLINEAR')==='false')issues.push({level:'error',message:'SOC 会启用非共线框架，不能显式关闭 LNONCOLLINEAR。'});
@@ -107,11 +112,11 @@ export function checkParameters(project:Project,node:Step):ParameterIssue[] {
   }
  }
  if(value('LDAU')==='true'){
-  if(!['1','2'].includes(value('LDAUTYPE')||''))issues.push({level:'error',message:'启用 DFT+U 后必须明确方法。'});
+  if(!value('LDAUTYPE'))issues.push({level:'error',message:'启用 DFT+U 后必须明确方法。'});
   if(!s)issues.push({level:'error',message:'DFT+U 元素映射需要唯一、已导入的上游结构。'});
   else for(const symbol of new Set(s.atoms.map(a=>a.element))){const row=tables.hubbard[symbol];
    if(!row||!['-1','0','1','2','3'].includes(row.l)){issues.push({level:'error',message:`${symbol} 尚未明确 LDAUL 轨道（或选择不加 U）。`});continue;}
-   if(row.l!=='-1'&&(!numeric(row.u)||!numeric(row.j)||Number(row.u)<0||Number(row.j)<0))issues.push({level:'error',message:`${symbol} 的 U/J 需为明确的非负 eV 数值；本表单不支持负 U/J。`});
+   if(row.l!=='-1'&&(!numeric(row.u)||!numeric(row.j)||(value('LDAUTYPE')!=='3'&&(Number(row.u)<0||Number(row.j)<0))))issues.push({level:'error',message:value('LDAUTYPE')==='3'?`${symbol} 的自旋微扰势须为有效 eV 数值。`:`${symbol} 的 U/J 需为明确的非负 eV 数值。`});
    if(value('LDAUTYPE')==='2'&&numeric(row.u)&&numeric(row.j)&&Number(row.u)<Number(row.j))issues.push({level:'warning',message:`${symbol} 的 U−J 为负，请核实模型选择。`});
   }
  }

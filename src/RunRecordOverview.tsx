@@ -1,3 +1,4 @@
+import {inputVersionLabel} from './humanLabels';
 import {statusLabel} from './statusLabels';
 import DisclosureLabel from './DisclosureLabel';
 import RecordPlaceholder from './RecordPlaceholder';
@@ -30,7 +31,7 @@ export default function RunRecordOverview({rows,selected,onSelect,nodeLabel,onRe
    <button className="button" disabled={loading} onClick={onRefresh}>{loading?(current?'更新中…':'正在读取…'):'刷新运行记录'}</button>
   </div>
   {current?<><div className="run-state" data-state={current.state}><span aria-hidden="true">●</span> {completed?(direct?'执行结束':'调度结束'):statusLabel(current.state)}</div>
-   <dl className="monitor-facts">
+   <dl className="monitor-facts">{current.bundle_id&&<div><dt>输入版本</dt><dd>{inputVersionLabel(current.bundle_id,current.input_note)}</dd></div>}
     <div><dt>{direct?'直接进程':'作业号'}</dt><dd>{direct?directProcessLabel(current.state,current.direct_runtime):current.job_id||'尚未取得'}</dd></div>
     <div><dt>服务器</dt><dd>{current.config?.alias||'未记录'}</dd></div>
     <div><dt>计算节点</dt><dd>{String(current.node||'未记录')}</dd></div>

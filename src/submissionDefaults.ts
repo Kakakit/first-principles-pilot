@@ -26,3 +26,12 @@ export function runtimeFor(config:ServerConfig,profiles:RegisteredProfile[],sett
 export const emptySettings:WorkbenchSettings={version:1,runtimes:{},defaults:{},history_limit:5};
 export type SettingsContext={section:string;alias?:string;program?:string;focus?:'scripts';returnToRun?:boolean};
 export function openSettings(section='server',context:Omit<SettingsContext,'section'>={}){window.dispatchEvent(new CustomEvent('fpilot:settings',{detail:{section,...context}}));}
+
+export function restoredHost(config:ServerConfig,profiles:RegisteredProfile[],alias?:string):ServerConfig{
+ const profile=profiles.find(p=>p.selectable&&p.alias===alias);
+ if(!profile||config.alias===alias)return config;
+ const restored=runtimeFor(config,profiles,emptySettings,profile.alias);
+ // ServerPanel selects the program and applies its saved runtime when the plan is ready.
+ delete restored.program;
+ return restored;
+}

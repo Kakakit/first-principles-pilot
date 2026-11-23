@@ -1,7 +1,8 @@
 import DisclosureLabel from './DisclosureLabel';
 import Feedback from './Feedback';
 import {useDialogFocus} from './useDialogFocus';
-import {useEffect,useRef,useState} from 'react';
+import {usePanelTransition} from './usePanelTransition';
+import {useEffect,useState} from 'react';
 import type {ReactNode} from 'react';
 import {settingsSections} from './navigationHistory';
 import {settingsDrafts} from './submissionDrafts';
@@ -38,7 +39,7 @@ type Connection={resolved:Record<string,string>;connected?:boolean;note:string;p
 type Props={section:string;context?:SettingsContext;focus?:string;onSection:(id:string,focus?:string)=>void;
  onContext:(alias:string,program:string,replace?:boolean)=>void;onBack:()=>void;backup:ReactNode};
 export default function SettingsWorkbench({section,context,focus,onSection,onContext,onBack,backup}:Props){
- const scroll=useRef<HTMLDivElement>(null);
+ const scroll=usePanelTransition<HTMLDivElement>(section);
  const requests=useRequestScope('settings');
  const [profiles,setProfiles]=useState<RegisteredProfile[]>([]),[settings,setSettings]=useState<WorkbenchSettings>(emptySettings),[base,setBase]=useState<ServerConfig>({});
  const [,setRevision]=useState(0);

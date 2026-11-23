@@ -1370,7 +1370,7 @@ def workspace_checkpoint(payload: WorkspaceCheckpoint):
         raise HTTPException(422, str(exc)) from exc
 
 
-from .inputs import upload_potcar, assemble_potcar, generate, freeze, digest, ROOT, history
+from .inputs import upload_potcar, assemble_potcar, generate, freeze, digest, ROOT, history, reviewed_definition
 from . import potcar_library
 from . import servers
 from . import execution
@@ -1854,6 +1854,7 @@ class PotcarUpload(BaseModel):
 
 
 class InputRequest(BaseModel):
+    expected_definition_hash: Optional[str] = None
     project: dict
     node_id: str
     reason: str = ''
@@ -1921,10 +1922,28 @@ def import_potcar(payload: PotcarUpload):
         raise HTTPException(422, str(exc)) from exc
 
 
+class SharedImpactRequest(BaseModel):
+    project: dict
+    previous_shared: dict
+
+
+@app.post('/api/inputs/shared-impact')
+def shared_input_impact(payload: SharedImpactRequest):
+    from .inputs import shared_parameter_impact
+    try:
+        return shared_parameter_impact(payload.project, payload.previous_shared)
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post('/api/inputs/preview')
 def preview_inputs(payload: InputRequest):
     try:
-        return generate(payload.project, payload.node_id)
+        report = generate(payload.project, payload.node_id)
+        signature, selection = reviewed_definition(payload.project, payload.node_id, report)
+        chosen = next((c for c in selection['candidates'] if c['id'] == selection['selected_attempt_id']), None) if selection else None
+        return {**report, "definition_hash": signature,
+                "reviewed_source": f"{chosen['alias']} · {chosen['job_id'] or chosen['id']}" if chosen else None}
     except (ValueError, KeyError, TypeError, OSError) as exc:
         from .action_issues import error_detail
         raise HTTPException(422,error_detail(exc)) from exc
@@ -1933,6 +1952,12 @@ def preview_inputs(payload: InputRequest):
 @app.post('/api/inputs/freeze')
 def freeze_inputs(payload: InputRequest):
     try:
+        if payload.expected_definition_hash is not None:
+            report = generate(payload.project, payload.node_id)
+            signature, selection = reviewed_definition(payload.project, payload.node_id, report)
+            if signature != payload.expected_definition_hash:
+                raise HTTPException(409, '输入或所选上游运行自预览后已变化，请重新审查输入。')
+            return freeze(payload.project, payload.node_id, payload.reason, report=report, reviewed_selection=selection)
         return freeze(payload.project, payload.node_id, payload.reason)
     except (ValueError, KeyError, TypeError, OSError) as exc:
         from .action_issues import error_detail

@@ -4,7 +4,7 @@ import type {WindowDraft,WindowAdoption} from './windowScan';
 import SourcePanel from './SourcePanel';
 import type {SourceDraft} from './SourcePanel';
 import {useEffect} from 'react';
-import {useSubmissionDraft} from './useSubmissionDraft';
+import ConfigurationPage from './ConfigurationPage';
 import type {Project} from './model';
 import type {ParameterLayer} from './parameters';
 import ParameterPanel from './ParameterPanel';
@@ -17,7 +17,7 @@ import type {ContinuationCreated} from './scanContinuation';
 type Part='physics'|'source'|'files';
 type Props={
   onContinuationCreated?:(result:ContinuationCreated)=>void;
-  onProject:(project:Project)=>void;project:Project;nodeId:string;view:'config'|'run';bundleId?:string;configPart?:Part;onConfigPart?:(part:Part)=>void;
+  onProject:(project:Project)=>void;project:Project;nodeId:string;view:'config'|'run';bundleId?:string;configPart?:Part;
   onLayer:(nodeId:string|null,layer:ParameterLayer)=>void;
   onTemplates:(templates:NonNullable<NonNullable<Project['parameters']>['templates']>)=>void;
   onSource:(nodeId:string,value:SourceDraft)=>void;
@@ -36,29 +36,15 @@ export default function CalculationWorkspace(props:Props) {
   const {project,nodeId,view,onReview,onConfigure}=props;
   const node=project.nodes.find(item=>item.id===nodeId)!;
   useEffect(()=>{if(node.data.executionMode==='vasp'&&!['structure','scan','wannier90'].includes(node.data.kind)&&!node.data.sourceDraft){const parent=project.nodes.find(n=>n.id===project.edges.find(e=>e.target===nodeId)?.source);props.onSource(nodeId,{mode:parent&&parent.data.kind!=='structure'?'upstream':'new',purpose:'charge',files:'charge'});}},[nodeId]);
-  const [localPart,setLocalPart]=useSubmissionDraft<Part>('config:'+project.id+':'+nodeId+':part','physics');
-  const part=props.configPart||localPart;
-  const setPart=props.onConfigPart||setLocalPart;
   if(node.data.kind==='program')return <ProgramPanel key={node.id} project={project} node={node} view={view} initialId={props.initialAttemptId||props.bundleId} onSelect={id=>props.onAttemptChange?.(id,'user')} onResults={id=>props.onResults(nodeId,id)} onChange={props.onProgramDraft} onPrepared={props.onReview}/>;
   if(node.data.continuationBatchId)return <ScanPanel project={project} scanNode={node} view={view} onDraft={props.onScanDraft} onReview={()=>onReview()} onConfigure={onConfigure} onContinuationCreated={props.onContinuationCreated}/>;
   if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   if(node.data.kind==='scan')return <IndependentScanWorkspace {...props}/>;
   return <div className="calculation-workspace">
-    {view==='config'&&<div className="configuration-body">
-      <nav className="configuration-parts" aria-label="计算配置步骤">
-        <button className={part==='physics'?'active':''} aria-pressed={part==='physics'} onClick={()=>setPart('physics')}>1 · 物理参数与继承</button>
-        <button className={part==='source'?'active':''} aria-pressed={part==='source'} onClick={()=>setPart('source')}>2 · 计算来源与重启</button>
-        <button className={part==='files'?'active':''} aria-pressed={part==='files'} onClick={()=>setPart('files')}>3 · k 点、赝势与输入审查</button>
-      </nav>
-      {part==='physics'&&<div className="configuration-section">
-        <ParameterPanel project={project} initialNodeId={nodeId} embedded onLayer={props.onLayer} onTemplates={props.onTemplates} onNumWann={props.onNumWann} onProjections={props.onProjections}/>
-        <div className="configuration-next"><button className="button" onClick={()=>setPart('source')}>计算来源与重启</button><button className="button primary" onClick={()=>setPart('files')}>继续：k 点与输入审查</button></div>
-      </div>}
-      {part==='source'&&<div data-action-field="input.source"><SourcePanel advanced project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/></div>}
-      {part==='files'&&<div className="configuration-section">
-        <InputPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onDraft} onSharedPotcar={props.onSharedPotcar} onReview={onReview}/>
-      </div>}
-    </div>}
+    {view==='config'&&<ConfigurationPage part={props.configPart}>{footer=><>
+      <ParameterPanel continuous sourcePanel={<div data-action-field="input.source"><SourcePanel advanced project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/></div>} project={project} initialNodeId={nodeId} embedded onLayer={props.onLayer} onTemplates={props.onTemplates} onNumWann={props.onNumWann} onProjections={props.onProjections}/>
+      <InputPanel reviewFooter={footer} project={project} initialNodeId={nodeId} embedded onDraft={props.onDraft} onSharedPotcar={props.onSharedPotcar} onReview={onReview}/>
+    </>}</ConfigurationPage>}
     {view==='run'&&<div className="review-body">
       <div className="review-guide"><button className="button" onClick={onConfigure}>返回计算配置</button></div>
       <ExecutionPanel project={project} initialNodeId={nodeId} initialBundleId={props.bundleId} initialAttemptId={props.initialAttemptId} onAttemptChange={props.onAttemptChange} onResults={props.onResults}/>

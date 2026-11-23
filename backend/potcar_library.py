@@ -8,11 +8,15 @@ from pathlib import Path
 from .storage import ROOT
 
 
+def configured_path(workspace):
+    config = workspace / 'potcar-library.json'
+    if config.is_file():
+        return json.loads(config.read_text(encoding='utf-8'))['path']
+    return os.environ.get('FPILOT_POTCAR_LIBRARY', '')
+
+
 def library_root():
-    config = ROOT / 'potcar-library.json'
-    value = os.environ.get('FPILOT_POTCAR_LIBRARY')
-    if not value and config.exists():
-        value = json.loads(config.read_text())['path']
+    value = configured_path(ROOT)
     if not value or not Path(value).is_dir():
         raise ValueError('请配置存在的本机赝势库目录')
     return Path(value).resolve()
@@ -43,8 +47,9 @@ def header(path):
             'titel': title, 'enmax': float(enmax.group(1)), 'size_bytes': path.stat().st_size}
 
 
-def catalog():
-    root = library_root(); entries = []; skipped = 0
+def catalog(root=None):
+    root = library_root() if root is None else root
+    entries = []; skipped = 0
     for path in sorted(root.rglob('POTCAR')):
         try:
             path.resolve().relative_to(root)
@@ -57,15 +62,18 @@ def catalog():
 
 
 def configure(path):
+    if not path.strip():
+        raise ValueError('请填写本机赝势库目录')
     root = Path(path).expanduser().resolve()
     if not root.is_dir():
         raise ValueError('目录不存在')
+    indexed = catalog(root)
     ROOT.mkdir(parents=True, exist_ok=True)
     config = ROOT / 'potcar-library.json'
     with tempfile.NamedTemporaryFile(mode='w', dir=ROOT, delete=False) as out:
         json.dump({'path': str(root)}, out); name = out.name
     os.replace(name, config)
-    return {'path': str(root)}
+    return indexed
 
 
 def assemble(species, selections, functional):

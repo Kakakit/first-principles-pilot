@@ -1,5 +1,6 @@
-import ManifestExport from './ManifestExport';
+import {restoredHost} from './submissionDefaults';
 import DisclosureLabel from './DisclosureLabel';
+import ManifestExport from './ManifestExport';
 import ContinueScan from './ContinueScan';
 import type {ContinuationCreated} from './scanContinuation';
 import {taskSummary} from './taskSummary';
@@ -7,7 +8,8 @@ import TaskRecovery from './TaskRecovery';
 import {independentScan,calculationKind,splitScanValues} from './scanNodes';
 import CancelTask from './CancelTask';
 import ProgramAdaptation from './ProgramAdaptation';
-import {useSubmissionDraft} from './useSubmissionDraft';
+import {useContext} from 'react';
+import {RunPreferenceContext,useSubmissionDraft} from './useSubmissionDraft';
 import {sameCapacityTarget} from './executionUi';
 import WannierScanPanel from './WannierScanPanel';
 import type {WindowDraft,WindowAdoption} from './windowScan';
@@ -52,6 +54,7 @@ function VaspScanPanel({project,scanNode,onDraft,view,onReview,onConfigure,onSou
  const [reason,setReason]=useState(saved?.reason||''),[preview,setPreview]=useState<Preview|null>(null),[batch,setBatch]=useSubmissionDraft<Batch|null>('scan:'+project.id+':'+scanNode.id+':batch',null),[batches,setBatches]=useState<Batch[]>([]);
  const progress=useScanProgress(project.id,scanNode.id,batch,setBatch,setBatches);
  const draftKey='scan:'+project.id+':'+scanNode.id;
+ const preferences=useContext(RunPreferenceContext);
  const [config,setConfig]=useSubmissionDraft<ServerConfig|null>(draftKey+':config',null),[profiles,setProfiles]=useState<RegisteredProfile[]>([]),[probe,setProbe]=useSubmissionDraft<ServerProbe|null>(draftKey+':probe',null),[resource,setResource]=useState<ServerPreview|null>(null);
  const [pool,setPool]=useSubmissionDraft<string[]>(draftKey+':pool',[]),[maxParallel,setMaxParallel]=useSubmissionDraft(draftKey+':maxParallel',1),[scripts,setScripts]=useState<Record<string,ServerPreview>>({});
  const [limits,setLimits]=useState<{max_inflight_total:number;max_inflight_per_host:number;max_cores_per_host:number|null}|null>(null);
@@ -59,7 +62,8 @@ function VaspScanPanel({project,scanNode,onDraft,view,onReview,onConfigure,onSou
  const load=async()=>{
   const [server,history,control]=await Promise.all([api('/api/server'),api(`/api/scans?project_id=${encodeURIComponent(project.id)}`),api('/api/execution-control')]);
   const continued=history.batches.find((item:Batch)=>item.id===continuationId);
-  setLimits(control.settings);setConfig(old=>old||continued?.source_config||server.config);setProfiles(server.registered_profiles||[]);
+  setLimits(control.settings);setConfig(old=>{
+   return old||continued?.source_config||restoredHost(server.config,server.registered_profiles||[],preferences?.get(draftKey+':alias',''));});setProfiles(server.registered_profiles||[]);
   setBatches(history.batches.filter((item:Batch)=>item.scan_node_id===scanNode.id));
   setBatch(old=>old?history.batches.find((item:Batch)=>item.id===old.id)||null:continued||null);
  };

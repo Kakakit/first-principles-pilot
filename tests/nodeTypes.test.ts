@@ -61,3 +61,27 @@ test('interface effective parallel values match execution contract without modif
   n.data.parameters!.values.NCORE='6';n.data.parameters!.values.KPAR='2';const before=structuredClone(n);
   const e=effectiveParameters(p,n);assert.equal(e.NCORE.value,'1');assert.equal(e.KPAR.value,'1');assert.equal(e.NCORE.source,'节点执行合同');assert.deepEqual(n,before);
 });
+
+test('a comparison draft keeps only incoming edges and never copies approval',async()=>{
+ const {relatedVaspDraft}=await import('../src/nodeTypes.ts');
+ const project=newProject('sample',true),node=project.nodes[2];
+ node.data.sourceDraft={mode:'upstream',attempt_id:'original',acknowledge_differences:true};
+ const before=structuredClone(project);
+ const copy=relatedVaspDraft(project,node,'AFM · U=4');
+ assert.deepEqual(project,before);
+ assert.equal(copy.node.data.label,'AFM · U=4');
+ assert.deepEqual(copy.edges.map(e=>[e.source,e.target]),[[project.nodes[1].id,copy.node.id]]);
+ assert.deepEqual(copy.node.data.sourceDraft,{mode:'upstream',attempt_id:'original'});
+});
+
+test('a DOS draft binds the selected SCF run and preserves local model settings',async()=>{
+ const {relatedVaspDraft}=await import('../src/nodeTypes.ts');
+ const project=newProject('sample',true),scf=project.nodes[2];
+ scf.data.parameters={values:{ENCUT:'520',ISPIN:'2',ICHARG:'2'}};
+ const copy=relatedVaspDraft(project,scf,'DOS','older-scf');
+ assert.equal(copy.node.data.kind,'dos');
+ assert.equal(copy.node.data.parameters?.values.ICHARG,'11');
+ assert.equal(copy.node.data.parameters?.values.ENCUT,'520');
+ assert.equal(copy.edges[0].source,scf.id);
+ assert.equal((copy.node.data.sourceDraft as {attempt_id:string}).attempt_id,'older-scf');
+});

@@ -37,3 +37,23 @@ test('session drafts evict least recently used entries and release removed proje
  cache.set('chain:p:large','x'.repeat(2000));assert.equal(cache.size,1);
  cache.prune([]);assert.equal(cache.size,0);
 });
+
+test('a tab reload restores scoped choices and discards transient submission state',async()=>{
+ const {RunPreferences}=await import('../src/submissionDrafts.ts');
+ const memory=new Map<string,string>();
+ const storage={getItem:(k:string)=>memory.get(k)??null,setItem:(k:string,v:string)=>memory.set(k,v)} as Storage;
+ const prefs=new RunPreferences('/work/a',storage);
+ prefs.set('single:p:n:cores','16');
+ prefs.set('chain:p:selection',['n']);
+ prefs.set('single:p:n:probe',{ok:true});
+ prefs.set('single:p:n:config',{password:'secret'});
+ prefs.set('single:p:n:confirmation',true);
+ const restored=new RunPreferences('/work/a',storage);
+ assert.equal(restored.get('single:p:n:cores',''),'16');
+ assert.deepEqual(restored.get('chain:p:selection',[]),['n']);
+ assert.equal(restored.get('single:p:n:confirmation',false),false);
+ assert.doesNotMatch([...memory.values()].join(''),/secret|probe|confirmation/);
+ assert.equal(new RunPreferences('/work/b',storage).get('single:p:n:cores',''),'');
+ restored.prune([{id:'p',nodes:[]}]);
+ assert.equal(new RunPreferences('/work/a',storage).get('single:p:n:cores',''),'');
+});

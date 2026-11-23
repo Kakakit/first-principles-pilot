@@ -15,3 +15,8 @@ export function attemptLabel(record:LabelRecord,project?:Project,full=false){
  return [node?.data.label,full||short.length<=48?name:short.slice(0,48).join('')+'…',channelLabel(record.seed),timeLabel(record.created_at),record.job_id||(record.id?'attempt '+record.id.slice(0,8):'未提交'),record.state?statusLabel(record.state):''].filter(Boolean).join(' · ');
 }
 export function frozenLabel(record:LabelRecord,project?:Project){const node=project?.nodes.find(n=>n.id===record.node_id);return [record.input_reason||node?.data.label||'冻结输入',channelLabel(record.seed),timeLabel(record.created_at)].filter(Boolean).join(' · ');}
+
+export function inputVersionLabel(id:string,reason?:string|null){
+ const note=reason?.trim().replace(/\s+/g,' ');
+ return [note||'冻结输入',id.slice(0,8)].join(' · ');
+}

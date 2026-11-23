@@ -55,9 +55,17 @@
         [
           "Accurate",
           "Accurate · 更精细网格"
+        ],
+        [
+          "Single",
+          "Single · 单 FFT 网格，网格密度随主版本变化"
+        ],
+        [
+          "SingleN",
+          "SingleN · 单 FFT 网格，采用 Normal 的粗网格（VASP 6）"
         ]
       ],
-      "help": "只列当前工作台支持的模式；不替代 ENCUT 和网格收敛测试。",
+      "help": "Single 与 SingleN 控制 FFT 网格。能量截断和网格精度仍需单独检验。",
       "url": "https://vasp.at/wiki/PREC"
     },
     {
@@ -80,9 +88,109 @@
         [
           "All",
           "All · 全带同时优化"
+        ],
+        [
+          "Exact",
+          "Exact · 完全对角化"
+        ],
+        [
+          "Subrot",
+          "Subrot · 子空间旋转"
+        ],
+        [
+          "Conjugate",
+          "Conjugate · 全带共轭梯度，与 All 同义"
+        ],
+        [
+          "Damped",
+          "Damped · 阻尼轨道优化"
+        ],
+        [
+          "Eigenval",
+          "Eigenval · 从已有轨道重算本征值"
+        ],
+        [
+          "None",
+          "None · 保留轨道，重算占据"
+        ],
+        [
+          "Nothing",
+          "Nothing · 与 None 同义"
+        ],
+        [
+          "CHI",
+          "CHI · 响应函数"
+        ],
+        [
+          "TDHF",
+          "TDHF · 含时 Hartree–Fock / TDDFT"
+        ],
+        [
+          "BSE",
+          "BSE · Bethe–Salpeter 方程"
+        ],
+        [
+          "Timeev",
+          "Timeev · 实时传播"
+        ],
+        [
+          "ACFDT",
+          "ACFDT · RPA 能量"
+        ],
+        [
+          "RPA",
+          "RPA · 与 ACFDT 同义"
+        ],
+        [
+          "RPAR",
+          "RPAR · 低标度 RPA"
+        ],
+        [
+          "ACFDTR",
+          "ACFDTR · 与 RPAR 同义"
+        ],
+        [
+          "ACFDTRK",
+          "ACFDTRK · 低标度 MP2，配合 LMP2LT"
+        ],
+        [
+          "CRPA",
+          "CRPA · 约束 RPA"
+        ],
+        [
+          "EVGW0",
+          "EVGW0 · 更新 G 的准粒子能量，固定 W"
+        ],
+        [
+          "EVGW",
+          "EVGW · 更新 G 与 W 的准粒子能量"
+        ],
+        [
+          "QPGW0",
+          "QPGW0 · 更新准粒子轨道，固定 W"
+        ],
+        [
+          "QPGW",
+          "QPGW · 更新准粒子轨道和 W"
+        ],
+        [
+          "GW0R",
+          "GW0R · 自洽更新 G，固定 W"
+        ],
+        [
+          "GWR",
+          "GWR · 自洽更新 G 与 W"
+        ],
+        [
+          "G0W0R",
+          "G0W0R · 单次 GW"
+        ],
+        [
+          "EVGW0R",
+          "EVGW0R · 低标度 EVGW0（6.4 起）"
         ]
       ],
-      "help": "普通半局域 DFT 已列 Normal、Fast、VeryFast、All；实际算法兼容性仍需核对。",
+      "help": "基态优化、已有轨道后处理和多体计算使用不同前置输入。GW 采用 VASP 6 命名；选择算法后须按具体方法配置轨道、空带与响应参数。",
       "url": "https://vasp.at/wiki/ALGO"
     },
     {
@@ -109,10 +217,31 @@
         [
           "-5",
           "−5 · 四面体 + Blöchl 修正"
+        ],
+        [
+          "-2",
+          "-2 · 固定占据，读取 WAVECAR 或 FERWE/FERDO"
+        ],
+        [
+          "-3",
+          "-3 · 按 SMEARINGS 遍历展宽设置"
+        ],
+        [
+          "-4",
+          "-4 · 四面体积分"
+        ],
+        [
+          "-14",
+          "-14 · 四面体 + Fermi–Dirac 展宽"
+        ],
+        [
+          "-15",
+          "-15 · 四面体 + Blöchl 修正及 Fermi–Dirac 展宽"
         ]
       ],
-      "help": "方法应依据体系与任务选择；四面体法要求兼容的 k 点网格，不能用于单纯能带路径积分。",
-      "url": "https://vasp.at/wiki/ISMEAR"
+      "help": "可选择列出的模式，也可输入任意正整数作为 Methfessel–Paxton 阶数。四面体法要求 Γ 中心网格；−14、−15 使用 SIGMA。",
+      "url": "https://vasp.at/wiki/ISMEAR",
+      "allow_positive_integer": true
     },
     {
       "tag": "SIGMA",
@@ -166,6 +295,10 @@
           "−1 · 不更新离子"
         ],
         [
+          "0",
+          "0 · 分子动力学"
+        ],
+        [
           "1",
           "1 · RMM-DIIS / 准牛顿"
         ],
@@ -176,9 +309,33 @@
         [
           "3",
           "3 · 阻尼动力学优化"
+        ],
+        [
+          "6",
+          "6 · 有限差分声子，使用对称性"
+        ],
+        [
+          "8",
+          "8 · 微扰理论声子，使用对称性"
+        ],
+        [
+          "11",
+          "11 · 从标准输入接收结构"
+        ],
+        [
+          "12",
+          "12 · 由 Python 插件更新结构"
+        ],
+        [
+          "40",
+          "40 · 内禀反应坐标"
+        ],
+        [
+          "44",
+          "44 · 改进二聚体法"
         ]
       ],
-      "help": "当前只列静态与几何优化模式；分子动力学和声子另设任务类型。",
+      "help": "常规几何优化使用 1、2、3。其余模式需配置对应的动力学、声子、反应路径或交互输入。",
       "url": "https://vasp.at/wiki/IBRION"
     },
     {
@@ -186,6 +343,14 @@
       "label": "优化自由度",
       "type": "enum",
       "choices": [
+        [
+          "0",
+          "0 · 动原子，固定晶胞，不算应力"
+        ],
+        [
+          "1",
+          "1 · 动原子，固定晶胞，仅算应力迹"
+        ],
         [
           "2",
           "2 · 原子位置，固定晶胞"
@@ -197,6 +362,22 @@
         [
           "4",
           "4 · 原子位置和晶胞形状，固定体积"
+        ],
+        [
+          "5",
+          "5 · 仅改晶胞形状，固定体积"
+        ],
+        [
+          "6",
+          "6 · 改晶胞形状和体积，固定分数坐标"
+        ],
+        [
+          "7",
+          "7 · 仅改体积"
+        ],
+        [
+          "8",
+          "8 · 改原子位置和体积，固定晶胞形状（6.4.1 起）"
         ]
       ],
       "help": "晶胞变化需要额外评估应力与基组收敛；不根据材料标签自动选择。",
@@ -238,9 +419,17 @@
         [
           "2",
           "2 · Dudarev（U−J）"
+        ],
+        [
+          "3",
+          "3 · 线性响应，测定 U"
+        ],
+        [
+          "4",
+          "4 · Liechtenstein，不含交换劈裂"
         ]
       ],
-      "help": "这里只支持方法 1、2；方法 3 是线性响应，不作为普通 +U 模板。",
+      "help": "方法 3 的 LDAUU、LDAUJ 分别为自旋向上、向下通道的微扰势（eV），可取负值。",
       "url": "https://vasp.at/wiki/LDAUTYPE"
     },
     {
@@ -255,7 +444,7 @@
       "tag": "ISTART",
       "label": "波函数重启方式",
       "type": "enum",
-      "help": "当前仅支持 0；其他值需要真实 WAVECAR 及兼容性合同。",
+      "help": "1、2 从 WAVECAR 续算，分别重建或保持基组。3 用于严格延续动力学，还需 TMPCAR。",
       "url": "https://vasp.at/wiki/ISTART",
       "choices": [
         [
@@ -280,9 +469,13 @@
       "tag": "ICHARG",
       "label": "初始电荷方式",
       "type": "enum",
-      "help": "普通 SCF/优化为 2；读取已核对 CHGCAR 续算为 1（在提交页选择来源并预览最终 INCAR）；能带/DOS 固定电荷为 11。",
+      "help": "1、11 读取 CHGCAR，4 读取 POT。5 还需外部程序与 vasp.lock 同步，工作台普通提交未接入。以最终 INCAR 核对依赖。",
       "url": "https://vasp.at/wiki/ICHARG",
       "choices": [
+        [
+          "0",
+          "0 · 由初始波函数构造电荷"
+        ],
         [
           "1",
           "1 · 读取 CHGCAR 续算（提交页选择来源）"
@@ -292,8 +485,24 @@
           "2 · 原子电荷"
         ],
         [
+          "4",
+          "4 · 从 POT 读取局域势"
+        ],
+        [
+          "5",
+          "5 · 外部程序逐步更新占据"
+        ],
+        [
+          "10",
+          "10 · 固定初始波函数对应的电荷"
+        ],
+        [
           "11",
           "11 · 固定 CHGCAR"
+        ],
+        [
+          "12",
+          "12 · 固定原子电荷叠加"
         ]
       ]
     },
@@ -405,7 +614,7 @@
       "tag": "LREAL",
       "label": "实空间投影",
       "type": "enum",
-      "help": "可能影响精度，需按体系验证。",
+      "help": "Auto 自动优化实空间投影子，.FALSE. 在倒空间投影，.TRUE. 直接使用文件中的投影子（官方不推荐）。",
       "url": "https://vasp.at/wiki/LREAL",
       "choices": [
         [
@@ -456,55 +665,156 @@
       "min": 1
     },
     {
-      "tag": "LORBIT", "label": "轨道投影输出", "type": "enum",
-      "choices": [["10", "10 · 按 l 分解"], ["11", "11 · 按 lm 分解（PDOS/fatband 默认）"]],
-      "help": "DOS/能带节点默认 11，可显式覆盖；生成 DOSCAR 与含轨道分解的 PROCAR。投影权重有 PAW 投影范围限制。",
+      "tag": "LORBIT",
+      "label": "轨道投影输出",
+      "type": "enum",
+      "choices": [
+        [
+          "0",
+          "0 · 球内 l 投影，需 RWIGS"
+        ],
+        [
+          "1",
+          "1 · 球内 lm 投影，需 RWIGS"
+        ],
+        [
+          "2",
+          "2 · 球内 lm 投影及相位，需 RWIGS"
+        ],
+        [
+          "5",
+          "5 · 写 PROOUT，需 RWIGS"
+        ],
+        [
+          "10",
+          "10 · 按 l 分解"
+        ],
+        [
+          "11",
+          "11 · 按 lm 分解（PDOS/fatband 默认）"
+        ],
+        [
+          "12",
+          "12 · PAW 投影及相位，仅宜定性"
+        ],
+        [
+          "13",
+          "13 · 逐带选投影子，仅宜定性"
+        ],
+        [
+          "14",
+          "14 · 按 EMIN/EMAX 能窗优化投影子"
+        ]
+      ],
+      "help": "小于 10 时应为各元素提供 RWIGS。12、13 的相位解释受限，14 采用同一能窗优化投影子。",
       "url": "https://vasp.at/wiki/LORBIT"
     },
     {
-      "tag": "LSORBIT", "label": "自旋轨道耦合", "type": "enum",
-      "choices": [["true", "开启 SOC"], ["false", "关闭 SOC"]],
+      "tag": "LSORBIT",
+      "label": "自旋轨道耦合",
+      "type": "enum",
+      "choices": [
+        [
+          "true",
+          "开启 SOC"
+        ],
+        [
+          "false",
+          "关闭 SOC"
+        ]
+      ],
       "help": "开启后自动使用非共线框架，必须选择 vasp_ncl；SAXIS 定义自旋量子化轴。",
       "url": "https://vasp.at/wiki/LSORBIT"
     },
     {
-      "tag": "LNONCOLLINEAR", "label": "非共线磁性", "type": "enum",
-      "choices": [["true", "开启"], ["false", "关闭"]],
+      "tag": "LNONCOLLINEAR",
+      "label": "非共线磁性",
+      "type": "enum",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭"
+        ]
+      ],
       "help": "即使不计算 SOC，也需 vasp_ncl 与每原子三分量 MAGMOM。LSORBIT=true 时自动开启。",
       "url": "https://vasp.at/wiki/LNONCOLLINEAR"
     },
     {
-      "tag": "SAXIS", "label": "自旋量子化轴", "type": "vector3",
+      "tag": "SAXIS",
+      "label": "自旋量子化轴",
+      "type": "vector3",
       "help": "三个有限数且非零，例如 0 0 1；SOC 时 MAGMOM 分量处于该自旋坐标系。",
       "url": "https://vasp.at/wiki/SAXIS"
     },
     {
-      "tag": "GGA_COMPAT", "label": "GGA 非共线兼容近似", "type": "enum",
-      "choices": [["true", "开启"], ["false", "关闭（SOC 常用）"]],
+      "tag": "GGA_COMPAT",
+      "label": "GGA 非共线兼容近似",
+      "type": "enum",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭（SOC 常用）"
+        ]
+      ],
       "help": "VASP 建议非共线 GGA 可设为 false 以提高数值精度；不自动替用户改变物理设置。",
       "url": "https://vasp.at/wiki/GGA_COMPAT"
     },
     {
-      "tag": "LORBMOM", "label": "输出轨道磁矩", "type": "enum",
-      "choices": [["true", "开启"], ["false", "关闭"]],
+      "tag": "LORBMOM",
+      "label": "输出轨道磁矩",
+      "type": "enum",
+      "choices": [
+        [
+          "true",
+          "开启"
+        ],
+        [
+          "false",
+          "关闭"
+        ]
+      ],
       "help": "SOC 分析轨道磁矩时开启；需核对 OUTCAR 的具体输出。",
       "url": "https://vasp.at/wiki/LORBMOM"
     },
     {
-      "tag": "AMIX", "label": "电荷混合幅度", "type": "number", "min": 0,
-      "help": "电子收敛调节项；依体系选择，不提供通用物理默认值。", "url": "https://vasp.at/wiki/AMIX"
+      "tag": "AMIX",
+      "label": "电荷混合幅度",
+      "type": "number",
+      "min": 0,
+      "help": "电子收敛调节项；依体系选择，不提供通用物理默认值。",
+      "url": "https://vasp.at/wiki/AMIX"
     },
     {
-      "tag": "BMIX", "label": "电荷 Kerker 混合", "type": "number", "min": 0,
-      "help": "电子收敛调节项；需结合混合谱评估。", "url": "https://vasp.at/wiki/BMIX"
+      "tag": "BMIX",
+      "label": "电荷 Kerker 混合",
+      "type": "number",
+      "min": 0,
+      "help": "电子收敛调节项；需结合混合谱评估。",
+      "url": "https://vasp.at/wiki/BMIX"
     },
     {
-      "tag": "AMIX_MAG", "label": "磁化混合幅度", "type": "number", "min": 0,
-      "help": "磁性/非共线收敛调节项。", "url": "https://vasp.at/wiki/AMIX_MAG"
+      "tag": "AMIX_MAG",
+      "label": "磁化混合幅度",
+      "type": "number",
+      "min": 0,
+      "help": "磁性/非共线收敛调节项。",
+      "url": "https://vasp.at/wiki/AMIX_MAG"
     },
     {
-      "tag": "BMIX_MAG", "label": "磁化 Kerker 混合", "type": "number", "min": 0,
-      "help": "磁性/非共线收敛调节项。", "url": "https://vasp.at/wiki/BMIX_MAG"
+      "tag": "BMIX_MAG",
+      "label": "磁化 Kerker 混合",
+      "type": "number",
+      "min": 0,
+      "help": "磁性/非共线收敛调节项。",
+      "url": "https://vasp.at/wiki/BMIX_MAG"
     }
   ],
   "known_tags": [
@@ -1117,5 +1427,6 @@
     "XC"
   ],
   "target_vasp_version": "未核对；以所选服务器实际 VASP 版本和 OUTCAR 为准",
-  "normalization": "MediaWiki 页面标题中的空格对应 INCAR tag 下划线；仅收录规范大写标识符"
+  "normalization": "MediaWiki 页面标题中的空格对应 INCAR tag 下划线；仅收录规范大写标识符",
+  "enum_reviewed": "2026-11-23"
 }
