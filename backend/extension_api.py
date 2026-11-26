@@ -44,6 +44,9 @@ def uninstall(key:str):return call(p.uninstall,key)
 @router.get('/runtimes')
 def runtimes():return {'runtimes':remote.runtimes(),'aliases':call(servers.registered_profiles),'local':environments.local_default(),'overrides':environments.settings()['overrides']}
 
+@router.post('/runtimes/{alias}/use-site')
+def use_site_runtime(alias:str):return call(remote.use_site_runtime,alias)
+
 @router.put('/runtimes/local')
 def local_runtime(payload:dict):return call(environments.save_local,payload)
 

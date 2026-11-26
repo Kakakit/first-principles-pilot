@@ -49,6 +49,23 @@ class JobTemplateTests(unittest.TestCase):
         self.assertEqual(rendered['parent_hash'],record['script_hash'])
         self.assertEqual(job_templates.get_template(record['id'])['original_text'],PBS)
 
+    def test_unclassified_script_keeps_launcher_and_identity_on_rename(self):
+        with patch.object(job_templates.servers, 'load_registry', return_value={'hosts': {'synthetic-pbs': {}}}):
+            record = job_templates.import_template(SAFE_PBS, 'synthetic-pbs', 'script', 'uploaded.pbs')
+        for program in ('vasp_std', 'vasp_ncl', 'wannier90'):
+            config = {'scheduler': 'pbs', 'runtime_source': 'script', 'program': program}
+            self.assertTrue(job_templates.fits_program(record, program))
+            preview = job_templates.render_template(record['id'], RESOURCES, 'synthetic-pbs', config)
+            self.assertTrue(preview['submission_supported'])
+            self.assertIn('/opt/vasp/vasp_std', preview['rendered_text'])
+            self.assertIn('ppn=16', preview['resource_diff'])
+            self.assertIsNone(preview['program_adaptation'])
+        self.assertEqual(record['launch_program'], 'vasp_std')
+        renamed = job_templates.rename_template(record['id'], '常规计算')
+        self.assertEqual(renamed['id'], record['id'])
+        self.assertEqual(job_templates.list_templates()[0]['name'], '常规计算')
+        self.assertEqual(job_templates.get_template(record['id'])['original_text'], SAFE_PBS)
+
     def test_mixed_pbs_resources_survive_and_ncl_reuses_original(self):
         original=SAFE_PBS.replace('nodes=node01:ppn=48','nodes=node01:ppn=48,mem=96gb,walltime=01:00:00')
         record=job_templates.import_template(original,'jutai-1','vasp_std','user')

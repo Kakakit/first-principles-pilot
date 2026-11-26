@@ -142,30 +142,55 @@ def path_for(key):
     return ROOT / 'job-templates' / 'metadata' / (key + '.json')
 
 
+def complex_layout(text, scheduler, blockers):
+    if any('Slurm' in warning for warning in blockers):
+        return True
+    if scheduler == 'pbs':
+        return bool(re.search(r'(?m)^\s*#PBS\s+-l.*(?:select=|nodes=(?:[2-9]|[1-9][0-9]+):)', text))
+    if scheduler == 'slurm':
+        return bool(re.search(r'(?m)^\s*#SBATCH\s+.*(?:--cpus-per-task(?:=|\s+)(?!1(?:\s|$))|-c\s*(?:[2-9]|[1-9]\d+)|--ntasks-per-|--gpus-per-task|--cpus-per-gpu|--nodes(?:=|\s+)(?!1(?:\s|$)))',text))
+    return False
+
+
 def get_template(key, include_script=True):
     record = json.loads(path_for(key).read_text(encoding='utf-8'))
     raw = (ROOT / 'job-templates' / 'scripts' / record['script_hash']).read_bytes()
     # Re-evaluate legacy metadata; cached availability is never authorization.
     text = raw.decode('utf-8')
     scheduler = record.get('scheduler', 'custom')
-    values, _, _ = parse(text, scheduler)
+    values, layout_warnings, _ = parse(text, scheduler)
+    record['script_controls_resources'] = complex_layout(execution_text(text), scheduler, layout_warnings)
     record.update(resources=values, blockers=[], submission_supported=True,
                   availability='selectable', runtime_validation_required=True)
     from .gpu_requests import hints
     request = hints(text, record['program'], values)
     if request: record['resource_request'] = request
     from .vasp_variants import capabilities
+    from .vasp_variants import inspect
+    record['launch_program'] = inspect(execution_text(text)).get('program')
     record['compatible_programs'] = capabilities(execution_text(text), record['program'])
     record.pop('program_conflict', None)
     from .verified_templates import SOURCES
     evidence = next((item[4] for item in SOURCES if item[0] == record['alias'] and item[2] == record['script_hash']), None)
     record['verification_status'] = ('candidate' if evidence.startswith('CANDIDATE') else 'historical') if evidence else 'user_imported'
+    label = ROOT / 'job-templates' / 'names' / key
+    if label.exists():
+        record['name'] = label.read_text(encoding='utf-8')
     if include_script: record['original_text'] = text
     return record
 
 
+def rename_template(key, name):
+    record = get_template(key, False)
+    name = name.strip()
+    if not name or len(name) > 200 or any(ord(char) < 32 for char in name):
+        raise ValueError('请输入单行脚本名称')
+    atomic(ROOT / 'job-templates' / 'names' / key, name.encode('utf-8'))
+    return {**record, 'name': name}
+
+
 def fits_program(record, program):
-    return (record.get('scheduler') == 'custom' or
+    return (record.get('program') == 'script' or record.get('scheduler') == 'custom' or
             (record['program'] == program or program == 'vasp_std' and record['program'] == 'gpu_vasp'
              or program in record.get('compatible_programs', [])))
 
@@ -190,7 +215,7 @@ def import_template(text, alias, program, source, name='', prepared=False, paren
     detected = servers.normalize_scheduler(scheduler)
     if alias not in servers.load_registry()['hosts']:
         raise ValueError('请选择登记的 SSH 别名')
-    if program not in ('vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other'):
+    if program not in ('script', 'vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other'):
         raise ValueError('程序类型无效')
     for value in (source, name or '未命名模板'):
         if not isinstance(value, str) or not value.strip() or len(value) > 1000 or any(c in value for c in '\r\n\x00'):
@@ -318,8 +343,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     if config and servers.normalize_scheduler(config.get('scheduler')) != record['scheduler']:
         blockers.append('模板调度器与所选主机不一致')
     missing = [key for key in FIELDS if key not in values]
-    raw_mode = raw_mode or bool(missing) or any('Slurm' in b for b in parsed_blockers) or bool(re.search(r'(?m)^\s*#PBS\s+-l.*(?:select=|nodes=[2-9][0-9]*:)',execution_original))
-    if record['scheduler']=='slurm' and re.search(r'(?m)^\s*#SBATCH\s+.*(?:--cpus-per-task(?:=|\s+)(?!1(?:\s|$))|--ntasks-per-|--gpus-per-task|--cpus-per-gpu|--nodes(?:=|\s+)(?!1(?:\s|$)))',execution_original): raw_mode=True
+    raw_mode = raw_mode or bool(missing) or complex_layout(execution_original, record['scheduler'], parsed_blockers)
     rendered = execution_original if raw_mode else (render_pbs(execution_original, values, indexes) if record['scheduler']=='pbs'
                 else render_slurm(execution_original, values)) if not blockers else None
     gpu_mode = not raw_mode and bool(values.get('mpi_ranks'))
@@ -328,7 +352,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
     program_adaptation, variant_blockers, variant_diff = None, [], ''
     expected = (servers.program_name(config) if config else None) or record['program']
     original_program = 'vasp_std' if record['program'] == 'gpu_vasp' else record['program']
-    if not raw_mode and rendered and (script_mode or record.get('adapter_version') == 2) and expected in ('vasp_std','vasp_ncl') and original_program != expected:
+    if record['program'] != 'script' and not raw_mode and rendered and (script_mode or record.get('adapter_version') == 2) and expected in ('vasp_std','vasp_ncl') and original_program != expected:
         if fits_program(record, expected):
             from .vasp_variants import adapt
             before_variant = rendered
@@ -336,7 +360,7 @@ def render_template(template_id, resources=None, alias=None, config=None, allow_
             variant_diff = ''.join(difflib.unified_diff(before_variant.splitlines(True), rendered.splitlines(True), fromfile='resource-preview', tofile='program-preview'))
         else:
             variant_blockers.append('此原稿无法明确切换至 {}；请选择对应脚本，或明确程序启动命令后保存副本'.format(expected))
-    if rendered and config and not script_mode and record.get('adapter_version')!=2 and PurePosixPath(config.get('vasp_executable','')).name == 'vasp_ncl':
+    if record['program'] != 'script' and rendered and config and not script_mode and record.get('adapter_version')!=2 and PurePosixPath(config.get('vasp_executable','')).name == 'vasp_ncl':
         standard = str(PurePosixPath(config['vasp_executable']).with_name('vasp_std'))
         registered_standard=servers.select_profile(selected)['vasp_executable']
         rendered = rendered.replace(registered_standard,config['vasp_executable']).replace(standard, config['vasp_executable'])

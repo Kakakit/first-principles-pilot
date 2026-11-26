@@ -25,6 +25,25 @@ def runtimes():
     return json.loads(path.read_text()) if path.exists() else {}
 
 
+def _runtime_lock():
+    from filelock import FileLock
+    directory=ROOT/'extensions-v2'
+    directory.mkdir(parents=True,exist_ok=True)
+    return FileLock(str(directory/'runtimes.lock'),timeout=8)
+
+
+def use_site_runtime(alias):
+    from .remote_transport import _interpreter
+    with _runtime_lock():
+        current=runtimes()
+        if alias not in current:
+            config=servers.validate(servers.select_profile(alias))
+            current[alias]={'alias':alias,'python':_interpreter(alias),'config':config,
+                            'node':'','cores':None,'reason':'使用已登记服务器的现有 Python'}
+            protocol.atomic_json(ROOT/'extensions-v2/runtimes.json',current)
+        return current[alias]
+
+
 def save_runtime(value):
     if not isinstance(value,dict) or set(value)!={'alias','python','config','node','cores','reason'}: raise ValueError('远端运行时字段无效')
     value={**value,'config':servers.validate(value['config'])}
@@ -32,7 +51,10 @@ def save_runtime(value):
     if not isinstance(value['python'],str) or not value['python'].startswith('/') or any(c in value['python'] for c in '\n\r\0'): raise ValueError('请输入已有 Python 的单行绝对路径')
     if value['node'] and not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',value['node']): raise ValueError('计算节点名称无效')
     if value['cores'] is not None and (type(value['cores']) is not int or value['cores']<1): raise ValueError('核数须为正整数或默认')
-    result=runtimes(); result[value['alias']]=value; protocol.atomic_json(ROOT/'extensions-v2/runtimes.json',result)
+    with _runtime_lock():
+        result=runtimes()
+        result[value['alias']]=value
+        protocol.atomic_json(ROOT/'extensions-v2/runtimes.json',result)
     return value
 
 

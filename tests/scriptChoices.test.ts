@@ -54,3 +54,18 @@ test('host tool paths override stale per-program copies including cleared paths'
  const next=runtimeFor({alias:'gpu'},profiles,saved,'gpu','vasp_ncl');
  assert.equal(next.pyw90_python,'/new/python');assert.equal(next.pyw90_package,'');
 });
+
+test('unclassified scripts are available at every step without cross-step auto-selection',()=>{
+ const record={...script,program:'script'};
+ const config=importedChoice({alias:'gpu',scheduler:'pbs'},'vasp_std',record);
+ assert.equal(scriptFits(record,'gpu','pbs','wannier90'),true);
+ assert.equal(variantLabel(record,'vasp_ncl'),'');
+ assert.equal(fillScriptSelections(config,['vasp_std','vasp_ncl'],[record]),config);
+});
+
+import {literalSlurmFields} from '../src/scriptDirectives.ts';
+test('script copy distinguishes CPU threads from MPI ranks and leaves shell text alone',()=>{
+ const body='#SBATCH --ntasks=8\n#SBATCH --cpus-per-task=4\n#SBATCH --gpus=$NGPU\nmodule load vasp\n#SBATCH -J ignored';
+ assert.deepEqual(literalSlurmFields(body).map(f=>[f.label,f.value]),[['MPI 进程数','8'],['每进程 CPU 核数','4']]);
+ assert.equal(literalSlurmFields('#SBATCH -c 1\n#SBATCH -c 2').length,0);
+});

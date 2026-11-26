@@ -1,14 +1,27 @@
 import type {ServerConfig} from './executionUi';
 export type ResourceRequest={mode:'gpu';allocation:'whole_node'|'requested';mpi_ranks:number|null;gpus:number|null;devices?:string[];gpu_type?:string};
-export type ScriptRecord={id:string;name:string;alias:string;scheduler:string;program:string;source:string;original_text?:string;resources?:Record<string,string|number>;resource_request?:ResourceRequest;compatible_programs?:string[];availability?:string;parent_id?:string;program_conflict?:string;verification_status?:'candidate'|'historical'|'user_imported'};
+export type ScriptRecord={id:string;name:string;alias:string;scheduler:string;program:string;source:string;launch_program?:string;script_controls_resources?:boolean;original_text?:string;resources?:Record<string,string|number>;resource_request?:ResourceRequest;compatible_programs?:string[];availability?:string;parent_id?:string;program_conflict?:string;verification_status?:'candidate'|'historical'|'user_imported'};
 export const programLabels:Record<string,string>={vasp_std:'VASP 常规',vasp_ncl:'VASP SOC／非共线',gpu_vasp:'GPU VASP',wannier90:'Wannier90',other:'其他程序'};
 export const schedulerName=(value:string)=>(value||'pbs').toLowerCase().replace('pbs/torque','pbs').replace('torque','pbs');
+export function availableScript(script:ScriptRecord,alias:string,scheduler:string){
+ return script.alias===alias&&schedulerName(script.scheduler)===schedulerName(scheduler);
+}
+function recentKey(alias:string,program:string){return JSON.stringify(['fpilot.script-choice',alias,program]);}
+export function lastChoice(alias:string,program:string){
+ try{return localStorage.getItem(recentKey(alias,program));}catch{return null;}
+}
+export function rememberChoice(alias:string,program:string,id:string){
+ try{localStorage.setItem(recentKey(alias,program),id);localStorage.setItem('fpilot.script-time.'+id,String(Date.now()));}catch{/* Storage may be unavailable. */}
+}
+export function recentTime(id:string){
+ try{return Number(localStorage.getItem('fpilot.script-time.'+id))||0;}catch{return 0;}
+}
 export function scriptFits(script:ScriptRecord,alias:string,scheduler:string,program:string){
- return Boolean(script.alias===alias&&schedulerName(script.scheduler)===schedulerName(scheduler)&&(schedulerName(scheduler)==='custom'||script.program===program||program==='vasp_std'&&script.program==='gpu_vasp'||!script.program_conflict&&script.compatible_programs?.includes(program)));
+ return Boolean(script.alias===alias&&schedulerName(script.scheduler)===schedulerName(scheduler)&&(script.program==='script'||schedulerName(scheduler)==='custom'||script.program===program||program==='vasp_std'&&script.program==='gpu_vasp'||!script.program_conflict&&script.compatible_programs?.includes(program)));
 }
 export function variantLabel(script:ScriptRecord,program:string){
  const original=script.program==='gpu_vasp'?'vasp_std':script.program;
- return original!==program&&script.compatible_programs?.includes(program)?`${original} → ${program}（同目录）`:'';
+ return original!=='script'&&original!==program&&script.compatible_programs?.includes(program)?`${original} → ${program}（同目录）`:'';
 }
 export function fillScriptSelections(config:ServerConfig,programs:string[],scripts:ScriptRecord[]):ServerConfig {
  if(config.runtime_source!=='script')return config;
@@ -18,7 +31,8 @@ export function fillScriptSelections(config:ServerConfig,programs:string[],scrip
  for(const program of programs){
   if(choices[program])continue;
   const eligible=scripts.filter(s=>!s.program_conflict&&scriptFits(s,config.alias,config.scheduler,program));
-  const shared=eligible.find(s=>preferred.includes(s.id)),record=shared||(eligible.length===1?eligible[0]:undefined);
+  const recent=scripts.find(s=>s.id===lastChoice(config.alias,program)&&availableScript(s,config.alias,config.scheduler));
+  const shared=eligible.find(s=>s.program!=='script'&&preferred.includes(s.id)),record=recent||shared||(eligible.length===1&&(programs.length===1||eligible[0].program!=='script')?eligible[0]:undefined);
   if(record){choices[program]=record.id;changed=true;}
  }
  return changed?{...config,template_id:choices[programs[0]]||'',program:programs[0],vasp_executable:programs[0],script_templates:JSON.stringify(choices)}:config;

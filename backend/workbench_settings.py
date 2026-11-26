@@ -59,7 +59,6 @@ def save(value):
             item=job_templates.get_template(template)
             if item.get('alias')!=config['alias']:raise ValueError('默认脚本必须属于当前主机')
             if item.get('scheduler')!=servers.normalize_scheduler(config['scheduler']):raise ValueError('默认脚本调度器须与所选服务器一致')
-            if not job_templates.fits_program(item,program):raise ValueError('默认脚本须支持所选程序，且原稿分类正确')
             if not config['queue'] and item.get('resources',{}).get('queue'):config['queue']=item['resources']['queue']
         previous['runtimes'][key]=config
         previous['defaults'][key]=template

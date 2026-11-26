@@ -499,7 +499,7 @@ def _node_config(config, choice):
         if not template and config.get('template_id'):
             from . import job_templates
             record=job_templates.get_template(config['template_id'],False)
-            if record['alias']==config['alias'] and record['scheduler']==servers.normalize_scheduler(config['scheduler']) and job_templates.fits_program(record,executable):
+            if record['program']!='script' and record['alias']==config['alias'] and record['scheduler']==servers.normalize_scheduler(config['scheduler']) and job_templates.fits_program(record,executable):
                 template=record['id']
     if template:return servers.with_script(config,template,executable)
     if config.get('runtime_source')=='script':raise ValueError('请为 '+executable+' 选择该服务器的已导入脚本')

@@ -2045,7 +2045,7 @@ class TemplateImport(BaseModel):
     name: str
     scheduler: Literal['pbs', 'slurm', 'custom']
     alias: str
-    program: Literal['vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other']
+    program: Literal['script', 'vasp_std', 'vasp_ncl', 'gpu_vasp', 'wannier90', 'other'] = 'script'
     source: str
     prepared: bool = False
     parent_id: Optional[str] = None
@@ -2085,6 +2085,18 @@ def template_get(key: str):
         return job_templates.get_template(key)
     except (ValueError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
+
+class ScriptDisplayName(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+@app.put('/api/job-templates/{key}/name')
+def template_rename(key: str, payload: ScriptDisplayName):
+    try:
+        return job_templates.rename_template(key, payload.name)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
 
 @app.post('/api/job-templates/{key}/preview')
 def template_preview(key: str, payload: TemplatePreview):
@@ -2293,6 +2305,25 @@ def site_register(payload:dict):
     except (OSError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
 
 
+@app.post('/api/sites/first-login')
+def site_first_login(request: Request, payload: dict):
+    import os
+    import subprocess
+    from urllib.parse import urlsplit
+    from .ssh_onboarding import native_command
+    origin = request.headers.get('origin')
+    if (not request.client or request.client.host not in ('127.0.0.1', '::1')
+            or request.url.hostname not in ('127.0.0.1', 'localhost', '::1')
+            or origin and urlsplit(origin).hostname not in ('127.0.0.1', 'localhost', '::1')):
+        raise HTTPException(403, '请在本机工作台打开首次登录助手')
+    if os.environ.get('FPILOT_REMOTE_DISABLED') == '1':
+        raise HTTPException(403, '当前工作区已禁用远端连接')
+    try:
+        return native_command(payload)
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @app.post('/api/sites/check-ssh')
 def site_check_ssh(payload:dict):
     from . import site_registration
@@ -2303,7 +2334,7 @@ def site_check_ssh(payload:dict):
 @app.post('/api/sites/test-connection')
 def site_test_connection(payload:dict):
     from . import site_registration
-    try:return site_registration.test_connection(payload.get('alias'),payload.get('python',''),payload.get('remote_workspace_root'))
+    try:return site_registration.test_connection(payload.get('alias'),payload.get('python',''),payload.get('remote_workspace_root'),fresh=payload.get('fresh') is True)
     except ValueError as exc:raise HTTPException(422,str(exc)) from exc
 
 

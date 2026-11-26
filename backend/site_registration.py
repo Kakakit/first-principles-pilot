@@ -211,14 +211,33 @@ def check_ssh(alias):
     return {'alias':alias,'resolved':fields,'evidence':'LOCAL_CONFIG_ONLY','note':'本机配置已解析，未连接服务器。首次连接请在终端执行 ssh '+alias+' exit，核对主机指纹并完成认证。'}
 
 
-def test_connection(alias, python='', remote_workspace_root=None):
+@contextmanager
+def fresh_options():
+    # OpenSSH propagates -F to its implicit ProxyJump children. Set the first
+    # values globally so every hop authenticates afresh, even on gateways that
+    # allow forwarding but do not allow opening a shell.
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='fpilot-ssh-check-') as directory:
+        config=Path(directory)/'config'
+        lines=['BatchMode yes','ControlMaster no','ControlPath none','StrictHostKeyChecking yes']
+        system=Path(os.environ.get('PROGRAMDATA','C:/ProgramData'))/'ssh/ssh_config' if os.name=='nt' else Path('/etc/ssh/ssh_config')
+        for path in (Path.home()/'.ssh/config',system):
+            if path.is_file():
+                name=path.as_posix().replace('\\','\\\\').replace('"','\\"')
+                lines.extend(['Host *','Include "'+name+'"'])
+        config.write_text('\n'.join(lines)+'\n',encoding='utf-8')
+        yield ['-F',str(config),'-S','none']
+
+
+def test_connection(alias, python='', remote_workspace_root=None, *, fresh=False):
     from .platform_runtime import ssh_options
     resolved=check_ssh(alias)
     if python and (not isinstance(python,str) or not python.startswith('/') or any(c in python for c in '\r\n\x00')):
         raise ValueError('服务器 Python 应为单行 Linux 绝对路径')
     candidates=[python] if python else ['python3','python']
     code='import sys,json,base64,concurrent.futures,subprocess,signal; print("FPILOT_PYTHON="+json.dumps({"path":sys.executable,"version":list(sys.version_info[:3]),"supported":sys.version_info >= (3,8)}))'
-    command="printf 'FPILOT_SSH_OK\\n'\n"
+    command="printf 'FPILOT_SSH_OK\\nFPILOT_CONNECTION_OK\\n'\n"
     for name in ('qsub','qstat','sbatch','squeue','sacct','sinfo'):
         command+='printf '+shlex.quote('FPILOT_TOOL_'+name+'=%s\n')+' "$(command -v '+name+' || true)"\n'
     for candidate in candidates:
@@ -227,7 +246,10 @@ def test_connection(alias, python='', remote_workspace_root=None):
         from .remote_paths import workspace_probe_command
         command+='(\n'+workspace_probe_command(remote_workspace_root)+"\n) && printf 'FPILOT_ROOT_READY=1\\n' || printf 'FPILOT_ROOT_READY=0\\n'\n"
     from . import remote_transport
-    receipt=remote_transport.legacy(['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=8',*ssh_options(alias,resolved['resolved']),alias,command],timeout=25,retry='manual')
+    from contextlib import nullcontext
+    context=fresh_options() if fresh else nullcontext(ssh_options(alias,resolved['resolved']))
+    with context as options:
+        receipt=remote_transport.legacy(['ssh','-T','-o','BatchMode=yes','-o','ConnectTimeout=8',*options,alias,command],timeout=25,retry='manual')
     from types import SimpleNamespace
     result=SimpleNamespace(returncode=receipt['exit_code'] if receipt['exit_code'] is not None else 255,
                            stdout=receipt['stdout'],stderr=receipt['stderr'])

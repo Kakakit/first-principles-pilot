@@ -475,3 +475,15 @@
 .file-tag-matches {display:flex;flex-wrap:wrap;gap:3px 8px;max-height:10rem;overflow:auto}
 .file-tag-matches button {display:inline-flex;gap:4px;align-items:baseline}
 .file-tag-matches small {opacity:.75}
+
+.configuration-file-pane {width:var(--input-preview-size,40%);box-sizing:border-box;flex:none}
+.input-preview-divider {flex:0 0 10px;display:grid;place-items:center;cursor:col-resize;touch-action:none;user-select:none}
+.input-preview-divider span {width:3px;height:32px;border-radius:3px;background:var(--ui-muted);opacity:.55}
+.input-preview-divider:hover span,.input-preview-divider:focus-visible span {opacity:1;background:var(--color-accent)}
+.vasp-file-preview {grid-template-columns:minmax(0,1fr)}
+.vasp-file-preview textarea {white-space:pre;overflow-x:auto;overflow-wrap:normal}
+@container (max-width:780px) {
+ .configuration-file-pane {order:-2;width:100%;height:var(--input-preview-size,32%);max-height:none}
+ .input-preview-divider {order:-1;cursor:row-resize}
+ .input-preview-divider span {width:32px;height:3px}
+}
