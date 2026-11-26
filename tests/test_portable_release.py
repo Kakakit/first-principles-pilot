@@ -13,6 +13,7 @@ class PlatformTests(unittest.TestCase):
         for abrupt in (False,True):
             with tempfile.TemporaryDirectory() as tmp:
                 data=Path(tmp)/'中文 数据'
+                if abrupt:(Path(tmp)/'local.json').write_text(json.dumps({'worker_mode':'track'}))
                 with socket.socket() as probe:probe.bind(('127.0.0.1',0));port=probe.getsockname()[1]
                 command=[sys.executable,str(root/'launch.py'),'--workspace',str(data),'--config',str(Path(tmp)/'local.json'),'--port',str(port),'--no-browser']
                 process=subprocess.Popen(command,cwd=root,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -27,6 +28,7 @@ class PlatformTests(unittest.TestCase):
                         if process.poll() is not None:break
                         time.sleep(.1)
                     self.assertIsNotNone(worker_pid,'launcher/worker did not become ready')
+                    self.assertEqual(state['mode'],'track' if abrupt else 'advance')
                     process.kill() if abrupt else process.terminate()
                     process.wait(timeout=12)
                     deadline=time.monotonic()+5

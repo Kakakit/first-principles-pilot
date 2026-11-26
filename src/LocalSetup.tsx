@@ -12,12 +12,12 @@ export function FirstRunNotice(){
  return <div className="first-run-notice" role="status"><div><strong>欢迎使用计算工作台</strong><span>先确认本机路径，再登记服务器与脚本。已有结构可直接导入。</span></div><button className="button primary" onClick={()=>openSettings('data')}>开始设置</button><button className="button" onClick={()=>{sessionStorage.setItem('fpilot-setup-later','1');setShow(false);}}>稍后设置</button></div>;
 }
 
-type Values={workspace:string;research_root:string;port:number;worker_enabled:boolean};
+type Values={workspace:string;research_root:string;port:number;worker_enabled:boolean;worker_mode:'track'|'advance'};
 type Setup={current:Partial<Values>&{potcar_library?:string};saved:Partial<Values>;python:string;python_version:string};
 export default function LocalSetup({group='data'}:{group?:'data'|'worker'}){
  const [info,setInfo]=useState<Setup|null>(null),[message,setMessage]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [draft,setDraft]=useSettingsDraft<Partial<Values>>('local:'+group,{});
- const baseline={worker_enabled:true,...info?.current,...info?.saved};
+ const baseline={worker_enabled:true,worker_mode:'advance' as const,...info?.current,...info?.saved};
  const form={...baseline,...draft};
  const changes=(values:Partial<Values>)=>Object.fromEntries(Object.entries(values).filter(([key,value])=>baseline[key as keyof Values]!==value));
  const patch=changes(draft);
@@ -39,8 +39,9 @@ export default function LocalSetup({group='data'}:{group?:'data'|'worker'}){
   <h3>{group==='data'?'本机数据目录':'启动时的后台监控'}</h3>
   {info&&<fieldset disabled={busy}>
    {group==='worker'?<>
-    <label className="check-label"><input type="checkbox" checked={form.worker_enabled} onChange={e=>update({worker_enabled:e.target.checked})}/>启动监控与已授权任务的自动推进</label>
-    <p>已保存设置 · {baseline.worker_enabled?'启动时开启':'启动时关闭'}。修改在重新启动工作台后生效。</p>
+    <label>启动后的后台职责<select value={form.worker_enabled?form.worker_mode:'off'} onChange={e=>{const mode=e.target.value;update(mode==='off'?{worker_enabled:false}:{worker_enabled:true,worker_mode:mode as 'track'|'advance'});}}>
+     <option value="off">关闭后台监控</option><option value="track">只追踪已有 VASP 作业（PBS / Slurm）</option><option value="advance">监控并推进已授权的任务</option></select></label>
+    <p>{form.worker_enabled&&form.worker_mode==='track'?'按原作业号与运行目录核对状态，计算链和扫描的后续步骤等待。':''}保存并重新启动工作台后生效。</p>
    </>:<>
     <label>本机数据目录<input value={form.workspace||''} onChange={e=>update({workspace:e.target.value})} placeholder="填写本机绝对路径"/></label>
     <p>当前生效 · <code>{info.current.workspace}</code></p>

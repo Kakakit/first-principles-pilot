@@ -23,6 +23,9 @@ export function normalizeLocation(route:TaskDestination):TaskNavigation{
  const result:TaskNavigation={projectId:page==='problems'||settings?'':route.projectId||'',page,nodeId:node,
   attemptId:node&&page!=='properties'?route.attemptId||'':'',runScope:(page==='run'||page==='config')&&route.runScope==='chain'?'chain':'node'};
  if(subpages[page])result.subpage=subpages[page].includes(route.subpage||'')?route.subpage:subpages[page][0];
+ if(result.subpage==='compare'&&route.comparisonNodes)result.comparisonNodes=route.comparisonNodes;
+ if(result.comparisonNodes&&route.baselineId&&result.attemptId)result.baselineId=route.baselineId;
+ if(result.runScope==='chain'&&route.chainId)result.chainId=route.chainId;
  if(settings){
   result.section=settingsSection(route.section);
   if(result.section==='server'){
@@ -47,7 +50,7 @@ export function locationHash(route:TaskNavigation){
  const query=new URLSearchParams();
  for(const [key,value] of [['node',route.nodeId],['attempt',route.attemptId],['view',route.subpage],
   ['scope',route.runScope==='chain'?'chain':''],['alias',route.alias],['program',route.program],['focus',route.focus],
-  ['bundle',route.bundleId],['project',route.page==='datasets'?route.projectId:'']] as const){
+  ['baseline',route.baselineId],['compareNodes',route.comparisonNodes],['chain',route.chainId],['bundle',route.bundleId],['project',route.page==='datasets'?route.projectId:'']] as const){
   if(value)query.set(key,value);
  }
  return '#'+path+(query.size?'?'+query:'');
@@ -64,7 +67,7 @@ export function locationFromHash(hash:string):TaskNavigation|null{
   const get=(key:string)=>query.get(key)||undefined;
   return normalizeLocation({page:kind==='projects'?page:kind,projectId:kind==='projects'?identity:get('project'),
    section:kind==='settings'?identity:undefined,nodeId:get('node'),attemptId:get('attempt'),subpage:get('view'),
-   alias:get('alias'),program:get('program'),focus:get('focus'),bundleId:get('bundle'),
+   baselineId:get('baseline'),comparisonNodes:get('compareNodes'),chainId:get('chain'),alias:get('alias'),program:get('program'),focus:get('focus'),bundleId:get('bundle'),
    runScope:get('scope')==='chain'?'chain':'node'});
  }catch{return null;}
 }

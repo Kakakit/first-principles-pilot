@@ -8,6 +8,19 @@ from pathlib import Path
 from .storage import ROOT
 
 
+def resolve_functional(shared, node):
+    """Use the input generator's precedence and INCAR parser, without file I/O."""
+    from .incar_text import resolve, complete, complete_values
+    if complete(node):
+        _, values, _ = complete_values(node)
+        return {'functional': values.get('XC_FUNCTIONAL'), 'source': '完整手动 INCAR'}
+    layers = [(label, layer.get('values', {}), layer.get('manualIncarText', ''))
+              for label, layer in [('共享设置', shared), ('节点覆盖', node)]]
+    values, origins, _, _ = resolve(layers)
+    return {'functional': values.get('XC_FUNCTIONAL'),
+            'source': origins.get('XC_FUNCTIONAL', '未设置')}
+
+
 def configured_path(workspace):
     config = workspace / 'potcar-library.json'
     if config.is_file():

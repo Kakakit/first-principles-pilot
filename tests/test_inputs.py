@@ -29,6 +29,39 @@ class InputTests(unittest.TestCase):
         for sequence, node in enumerate(self.project['nodes'], 1):
             node['data'].update(executionMode='vasp', stageSequence=sequence, stageSlug=node['data']['kind'])
 
+    def test_node_constraints_and_shift_survive_freeze_without_editing_source(self):
+        before = copy.deepcopy(self.project['nodes'][0]['data']['structure'])
+        count = len(before['atoms'])
+        draft = self.project['nodes'][1]['data']['inputDraft']
+        base = inputs.generate(self.project, 'c')['reference_geometry_sha256']
+        draft.update(selective_base=base, selective_flags='FFT'+'TTT'*(count-1), mesh_shift='0.5 0 0')
+        report = inputs.generate(self.project, 'c')
+        self.assertEqual(report['errors'], [])
+        self.assertIn('F F T', report['files']['POSCAR'])
+        self.assertTrue(report['files']['KPOINTS'].endswith('0.5 0 0\n'))
+        frozen = inputs.freeze(self.project, 'c', 'local constraints')
+        with zipfile.ZipFile(inputs.ROOT/'inputs'/(frozen['id']+'.zip')) as archive:
+            self.assertEqual(archive.read('POSCAR').decode(), report['files']['POSCAR'])
+        self.assertEqual(self.project['nodes'][0]['data']['structure'], before)
+        draft['selective_base'] = 'stale'
+        self.assertTrue(any('结构已变化' in err for err in inputs.generate(self.project,'c')['errors']))
+        draft['kpoints_edit'] = ''
+        self.assertTrue(any('尚未应用' in err for err in inputs.generate(self.project,'c')['errors']))
+
+    def test_complete_incar_preview_and_freeze_preserve_exact_text(self):
+        from backend.app import InputRequest, live_input_files
+        node = self.project['nodes'][1]
+        text = '# preserved comment\nENCUT = 520\n'
+        node['data']['parameters'].update(incarMode='complete', completeIncarText=text)
+        preview = live_input_files(InputRequest(project=self.project, node_id='c'))
+        self.assertEqual(preview['files']['INCAR'], text)
+        frozen = inputs.freeze(self.project, 'c', 'complete INCAR')
+        with zipfile.ZipFile(inputs.ROOT/'inputs'/(frozen['id']+'.zip')) as archive:
+            files = {'INCAR': archive.read('INCAR')}
+        manifest = frozen['manifest']
+        self.assertEqual(files['INCAR'], text.encode())
+        self.assertEqual(execution._restart_policy(manifest, files)['ICHARG'], 2)
+
     def tearDown(self):
         inputs.ROOT = self.old
         self.temp.cleanup()

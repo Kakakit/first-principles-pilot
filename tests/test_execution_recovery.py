@@ -246,7 +246,59 @@ class RecoveryTests(unittest.TestCase):
             self.assertIn('qstat -f',calls[-1]);version[0]='two'
             ex.refresh('a',automatic=True);self.assertGreater(len(reads.read_text()),len(first))
 
+    def test_tracker_only_queries_tracked_jobs_and_never_advances(self):
+        self.record()
+        self.record('prepared','PREPARED')
+        cancelling=self.record('cancel')
+        cancelling['cancellation']={'state':'UNKNOWN'}
+        ex.save(cancelling)
+        with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'Job Id: 123.node01\n job_state = Q','stderr':''}) as ssh, \
+             patch('backend.chain_runs.tick', side_effect=AssertionError('no dispatch')), \
+             patch('backend.scans.tick', side_effect=AssertionError('no scan')), \
+             patch('backend.file_lifecycle.tick', side_effect=AssertionError('no cleanup')), \
+             patch('backend.execution_cancel.recover', side_effect=AssertionError('no cancellation')):
+            result=worker.tick(tracking_only=True)
+        self.assertEqual(result,{'checked':1,'errors':[]})
+        ssh.assert_called_once_with('jutai-1','qstat -f 123.node01',timeout=30,mutating=False)
+        self.assertEqual(ex.get('a')['state'],'QUEUED')
+        self.assertEqual(ex.get('prepared')['state'],'PREPARED')
+
+    def test_tracker_slurm_uses_original_cluster_and_skips_changed_target(self):
+        record=self.record('slurm')
+        record.update(config={'alias':'slurm','scheduler':'slurm'},job_id='123',job_cluster='east')
+        ex.save(record)
+        old=self.record('moved',alias='changed')
+        old['settings_snapshot']={'connection':{'hostname':'old'}}
+        ex.save(old)
+        with patch('backend.site_registration.connection_identity',return_value={'hostname':'other'}), \
+             patch('backend.project_sync.continuation_connection',return_value=False), \
+             patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'123|RUNNING','stderr':''}) as ssh:
+            result=worker.tick(tracking_only=True)
+        self.assertEqual(result['checked'],1)
+        self.assertEqual(result['errors'][0]['attempt_id'],'moved')
+        ssh.assert_called_once()
+        self.assertIn('squeue -M east',ssh.call_args.args[1])
+        self.assertIn('--jobs=123',ssh.call_args.args[1])
+        self.assertEqual(ex.get('slurm')['state'],'RUNNING')
+
+    def test_tracker_unknown_without_id_recovers_only_original_receipt(self):
+        record=self.record(state='UNKNOWN');record.update(job_id=None,automatic_audit_paused=True);ex.save(record)
+        with patch.object(ex,'ssh',return_value={'exit_code':0,'stdout':'','stderr':''}) as ssh:
+            self.assertEqual(worker.tick(tracking_only=True)['checked'],1)
+            self.assertEqual(ex.get('a')['state'],'UNKNOWN')
+            self.assertIn('.job-id',ssh.call_args.args[1])
+            ssh.return_value={'exit_code':0,'stdout':'123.node01','stderr':''}
+            worker.tick(tracking_only=True)
+            self.assertEqual(ex.get('a')['job_id'],'123.node01')
+            self.assertTrue(all(call.kwargs['mutating'] is False for call in ssh.call_args_list))
+
+    def test_tracker_restart_and_singleton_use_isolated_fake_ssh(self):
+        self.check_worker_restart('track')
+
     def test_real_worker_restart_and_singleton_use_isolated_fake_ssh(self):
+        self.check_worker_restart('advance')
+
+    def check_worker_restart(self,worker_mode):
         self.record()
         shim=self.root/'bin';shim.mkdir();mode=self.root/'mode';mode.write_text('offline')
         ssh=shim/'ssh'
@@ -260,10 +312,11 @@ class RecoveryTests(unittest.TestCase):
                 if predicate():return
                 time.sleep(.05)
             self.fail('worker did not reach expected state')
-        first=subprocess.Popen([sys.executable,'-m','backend.worker','--interval','30'],cwd=cwd,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
+        command=[sys.executable,'-m','backend.worker','--mode',worker_mode]
+        first=subprocess.Popen(command+['--interval','30'],cwd=cwd,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
         try:
             wait_for(lambda:bool(ex.get('a').get('tracking_error')))
-            second=subprocess.run([sys.executable,'-m','backend.worker','--once'],cwd=cwd,env=env,capture_output=True,timeout=8)
+            second=subprocess.run(command+['--once'],cwd=cwd,env=env,capture_output=True,timeout=8)
             self.assertEqual(second.returncode,0)
             self.assertEqual((self.root/'ssh-calls').read_text().count('BatchMode=yes'),1)
             first.kill();first.wait(timeout=5)
@@ -272,8 +325,9 @@ class RecoveryTests(unittest.TestCase):
             values=json.loads(health_path.read_text())
             for value in values.values():value['next_retry_at']=0
             health_path.write_text(json.dumps(values))
-            resumed=subprocess.run([sys.executable,'-m','backend.worker','--once'],cwd=cwd,env=env,capture_output=True,timeout=8)
+            resumed=subprocess.run(command+['--once'],cwd=cwd,env=env,capture_output=True,timeout=8)
             self.assertEqual(resumed.returncode,0,resumed.stderr.decode())
+            self.assertEqual(json.loads((self.root/'worker-state.json').read_text())['mode'],worker_mode)
             self.assertEqual(ex.get('a')['state'],'COMPLETED')
             calls=(self.root/'ssh-calls').read_text();self.assertNotIn('qsub',calls);self.assertIn('qstat -f 123.node01',calls)
         finally:

@@ -117,6 +117,9 @@ def save(record, expected_updated_at=False):
             control.journal(c,record['id'],'STATE_CHANGED',{'from':existing.get('state'),'to':record['state'],'job_id':record.get('job_id')})
         from . import branch_bindings
         branch_bindings.commit(c,record)
+        from . import summary_collection
+        if summary_collection.eligible(record) and not summary_collection.eligible(existing):
+            summary_collection.enqueue(c, record)
         c.execute('UPDATE attempts SET state=?,body=? WHERE id=?',(record['state'],json.dumps(record,ensure_ascii=False),record['id']));c.commit()
     if record['state']=='FAILED':
         from . import problem_records
@@ -183,7 +186,14 @@ def _restart_policy(manifest, files):
     policy = manifest.get('source_plan')
     if manifest.get('source_contract', {}).get('schema') == 'fpilot.source-contract.v2' and policy:
         init = policy['initialization']
-        if any(_incar_value(files['INCAR'], name) != str(value) for name, value in init.items()):
+        def initialization(name):
+            actual = _incar_value(files['INCAR'], name)
+            if actual is not None or manifest.get('incar_mode') != 'complete':
+                return actual
+            if name == 'ISTART':
+                return '1' if 'WAVECAR' in policy['required_files'] else '0'
+            return '0' if initialization('ISTART') != '0' else '2'
+        if any(initialization(name) != str(value) for name, value in init.items()):
             raise ValueError('冻结初始化参数与来源文件角色不一致')
         return {'schema': 'fpilot.vasp-restart.v2', 'stage': manifest['stage'], **init,
                 'required_files': policy['required_files'], 'uses_wavecar': 'WAVECAR' in policy['required_files'],
@@ -252,6 +262,10 @@ def source_file_plan(snapshot, incar):
                       snapshot.get('schema') == 'fpilot.chain-source.v1' and
                       str(snapshot.get('kind', '')).endswith('-restart'))
     for name, info in snapshot['files'].items():
+        structure_role = (snapshot.get('source_contract') or {}).get('roles', {}).get('structure', {})
+        if (snapshot.get('schema') == 'fpilot.chain-source.v1' and snapshot.get('actual_poscar')
+                and structure_role.get('file') == name and structure_role.get('usage') == 'geometry-reference'):
+            continue
         if snapshot.get('schema') == 'fpilot.role-source.v1' and info.get('usage') == 'geometry-reference' and name in ('POSCAR', 'CONTCAR'):
             continue  # verified baseline; the bundle contains the scaled POSCAR
         target = 'POSCAR' if name == 'CONTCAR' else name
@@ -313,6 +327,7 @@ def _v2_chain_source(bundle_id, manifest, source_id, alias, kind):
     _, raw = bundle(bundle_id, allow_dependencies=True)
     report = {**manifest, 'files': {name: value.decode() for name, value in raw.items() if name != 'POTCAR'}}
     if kind != 'dependency':
+        report.pop('node_poscar', None)  # A continuation starts from its actual previous geometry.
         stage = kind.split('-', 1)[0]
         if stage != manifest['stage'] or source['node_id'] != manifest['node_id'] or source['state'] != 'COMPLETED':
             raise ValueError('续算来源与当前节点或已完成状态不符')
@@ -719,6 +734,9 @@ def prepare(bundle_id,config,probe_id,node,cores=None,reason='',template_id=None
         audit.setdefault('warnings', []).append('GPU 模式按 VASP OpenACC 的 NCORE=1 检查 MPI/KPAR；原 INCAR 未修改，实际 GPU 程序能力仍需核对')
     storage_source = role_source or chain_source or restart or dependency
     storage_plan = source_file_plan(storage_source, files['INCAR'])
+    preserve_geometry = manifest.get('selective_flags') or (manifest.get('node_poscar') and not (chain_source_kind or '').endswith('-restart'))
+    if preserve_geometry and any(entry['target'] == 'POSCAR' for entry in storage_plan.values()):
+        raise ValueError('此续算来源将覆盖节点 POSCAR，请在节点配置中明确结构来源并重新冻结。')
     identity = remote_paths.readable_identity(manifest, project)
     with closing(db()) as identity_db:
         prior_attempts = [json.loads(row[0]) for row in identity_db.execute('SELECT body FROM attempts')]
@@ -1121,8 +1139,20 @@ def vasp_file_evidence(out):
             'last_ionic_step': count('IONIC_STEP')}
 
 
-def refresh(key, poll_receipt=None, automatic=False):
+def trackable_vasp(record):
+    return (record.get('kind') in (None, 'vasp') and record['state'] in
+            ('DISPATCHING','SUBMITTED','QUEUED','RUNNING','HELD','EXITING','UNKNOWN')
+            and record.get('path_schema') == 'fpilot.remote-attempt-path'
+            and scheduler_name(record) in ('pbs','slurm')
+            and record.get('cancellation', {}).get('state') not in ('IN_FLIGHT','ACCEPTED','UNKNOWN','RETRYABLE')
+            and not recycle.inactive('attempts',record['id'],record))
+
+
+def refresh(key, poll_receipt=None, automatic=False, *, tracking_only=False):
     record=get(key)
+    if tracking_only:
+        if not trackable_vasp(record):return record
+        assert_recovery_target(record)
     if not automatic and recycle.inactive('attempts',key,record):return record
     if record.get('cancellation', {}).get('state') in ('IN_FLIGHT', 'ACCEPTED', 'UNKNOWN', 'RETRYABLE'):
         from .execution_cancel import recover
@@ -1149,7 +1179,7 @@ def refresh(key, poll_receipt=None, automatic=False):
             record.update(state=observed,updated_at=now(),status_receipt=poll_receipt,evidence=evidence,
                           tracking_error='',tracking_checked_at=now(),state_checked_at=now())
             return save(record,expected_updated_at=previous)
-    if automatic and record.get('automatic_audit_paused'):return record
+    if automatic and not tracking_only and record.get('automatic_audit_paused'):return record
     if not automatic:record.pop('automatic_audit_paused',None)
     if automatic and record['state']=='UNKNOWN' and not record.get('job_id'):
         previous=record.get('updated_at');assert_recovery_target(record)
@@ -1189,7 +1219,7 @@ if test -s .exit-status; then printf 'FPILOT_EXIT='; cat .exit-status; fi
         command=file_status_command(record,path,command,['OUTCAR','OSZICAR','INCAR','vasp.out','.exit-status','.job-id'])
     scheduler=scheduler_name(record)
     command+=batch_scheduler.query(scheduler,record)
-    receipt=ssh(record['config']['alias'],command,timeout=30)
+    receipt=ssh(record['config']['alias'],command,timeout=30,**({'mutating':False} if tracking_only else {}))
     if receipt.get('exit_code') in (None,255):
         record.update(tracking_error=receipt.get('stderr') or 'SSH 连接未完成',tracking_checked_at=now(),updated_at=now(),automatic_audit_paused=not bool(record.get('job_id')))
         return save(record,expected_updated_at=expected_updated_at)
@@ -1215,7 +1245,7 @@ if test -s .exit-status; then printf 'FPILOT_EXIT='; cat .exit-status; fi
     from .fast_dispatch import tracking_note
     tracking_note(record)
     result=save(record,expected_updated_at=expected_updated_at)
-    if result['state']=='FAILED':
+    if result['state']=='FAILED' and not tracking_only:
         servers.invalidate_runtime(record['config'])
         from .execution_control import freeze_failure
         freeze_failure(key)

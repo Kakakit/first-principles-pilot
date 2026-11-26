@@ -22,6 +22,21 @@ def external_update_issue(tags):
         return 'ICHARG=5 需要外部程序逐步提供 GAMMA 或 vaspgamma.h5 并通过 vasp.lock 同步；当前提交方式未接入该程序'
 
 
+def complete(layer):
+    return layer.get('incarMode', 'overlay') == 'complete'
+
+
+def complete_values(layer):
+    text = layer.get('completeIncarText', '')
+    if not isinstance(text, str) or not text.strip() or len(text.encode()) > MAX_BYTES or '\0' in text:
+        raise ValueError('完整 INCAR 须为非空且不超过 256 KiB 的普通文本')
+    tags, _, malformed = parse(text)
+    values = {tag: semantic(tag, value) for tag, value in tags.items()}
+    if str(values.get('GGA', '')).upper() in ('PE', 'PS'):
+        values['XC_FUNCTIONAL'] = 'PBE' if values['GGA'].upper() == 'PE' else 'PBEsol'
+    return text, values, malformed
+
+
 def semantic(tag, value):
     if tag in BOOLS:
         if value.upper() in _parser.TRUE_VALUES: return 'true'
@@ -61,6 +76,22 @@ def render(tags, fragments):
     for fragment in fragments:
         if fragment: text = merge(text, fragment)
     return text
+
+
+def duplicates(layers):
+    """Report overlap for user editing; leave both source drafts untouched."""
+    seen, result = {}, []
+    for label, fields, text in layers:
+        for tag, value in fields.items():
+            if value is not None: seen[tag] = (str(value), label)
+            else: seen.pop(tag, None)
+        for tag, value in parse(text)[0].items():
+            previous = seen.get(tag)
+            if previous and not previous[1].endswith(' · 文本'):
+                result.append({'tag': tag, 'form_value': previous[0], 'form_layer': previous[1],
+                               'text_value': value, 'text_layer': label})
+            seen[tag] = (value, label+' · 文本')
+    return result
 
 
 def replace(text, tag, value):

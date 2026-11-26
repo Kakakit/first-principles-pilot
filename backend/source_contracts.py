@@ -334,6 +334,7 @@ def bind(policy, record, report, verification_mode):
         if observed.get('partial') or not observed.get('structure'):
             raise ValueError('来源 '+structure_name+' 不完整或不可解析')
         geometry = observed['structure']
+        source_volume = geometry['volume']
         if geometry['source']['sha256'] != observed_files[structure_name]['sha256']:
             raise ValueError(structure_name+' 在审查期间发生变化')
         if structure_name == 'POSCAR' and input_poscar_hash(record, old_manifest) != observed_files['POSCAR']['sha256']:
@@ -354,13 +355,28 @@ def bind(policy, record, report, verification_mode):
                 raise ValueError('POSCAR 扫描与实际缩放输入不同，请重新预览')
             raw = text.encode()
             geometry = structure_geometry(raw)
+        if report.get('node_poscar'):
+            raw = configured.encode()
+            geometry = structure_geometry(raw)
+        if report.get('selective_flags'):
+            from . import node_constraints
+            # Resolve against the source run's original input before following
+            # its relaxed sites by row. Reject any unverified site mapping.
+            original = old_files.get('POSCAR') or old_files.get('POSCAR.reference')
+            if (not original or hashlib.sha256(original).hexdigest() != input_poscar_hash(record, old_manifest)
+                    or not compare_geometry(structure_geometry(original), structure_geometry(configured.encode()))):
+                raise ValueError('来源运行的原子坐标或顺序与节点约束基准不匹配，请重新核对结构。')
+            raw = node_constraints.apply(raw.decode(), report['selective_flags']).encode()
+            geometry = structure_geometry(raw)
         from .structure_edit import geometry_hash
         report['files'].pop('POSCAR.reference', None)
         report['files']['POSCAR'] = raw.decode()
         report['geometry_sha256'], report['source_sha256'] = geometry_hash(geometry), geometry['source']['sha256']
+        if report.get('selective_flags') or report.get('node_poscar'):
+            report['source_sha256'] = observed_files[structure_name]['sha256']
         report['structure_source'] = {'attempt_id': record['id'], 'job_id': record.get('job_id'), 'file': structure_name,
                                     'sha256': observed_files[structure_name]['sha256'],
-                                    'volume_A3': geometry_scan['volume_before_A3'] if geometry_scan else geometry['volume'],
+                                    'volume_A3': source_volume,
                                     **({'scaled_poscar_sha256': geometry_scan['poscar_sha256']} if geometry_scan else {})}
     else:
         geometry = structure_geometry(report['files']['POSCAR'].encode())
@@ -391,7 +407,7 @@ def bind(policy, record, report, verification_mode):
         roles[role] = {'attempt_id': record['id'], 'alias': alias, 'node_id': record['node_id'], 'file': name,
                        'source_path': path, 'metadata': info, 'source_bundle_id': record['bundle_id'],
                        'differences': review['differences']}
-        if role == 'structure' and report.get('poscar_scan'):
+        if role == 'structure' and (report.get('poscar_scan') or report.get('selective_flags') or report.get('node_poscar')):
             # The scaled POSCAR is already immutable in the bundle. Recheck its
             # original source at prepare/dispatch, but never copy it over POSCAR.
             roles[role]['usage'] = 'geometry-reference'
@@ -399,6 +415,8 @@ def bind(policy, record, report, verification_mode):
             'files': policy['files'], 'structure': 'source' if structure_name else 'configured',
             'verification_mode': verification_mode, 'roles': roles, 'source_plan': policy,
             'initialization': policy['initialization'], 'warnings': review['warnings'], 'wavefunction_header': wave,
+            **({'node_poscar': True} if report.get('node_poscar') else {}),
+            **({'selective_flags': report['selective_flags']} if report.get('selective_flags') else {}),
             **({'poscar_scan': report['poscar_scan']} if report.get('poscar_scan') else {})}
 
 
@@ -438,7 +456,7 @@ def materialize(contract, alias):
         if fresh != role['metadata']:
             raise ValueError('冻结来源文件已变化，请重新审查')
         files[role['file']] = {**fresh, 'source_path': role['source_path'],
-                              **({'usage': 'geometry-reference'} if role.get('usage') == 'geometry-reference' and contract.get('poscar_scan') and role['file'] in ('POSCAR', 'CONTCAR') else {})}
+                              **({'usage': 'geometry-reference'} if role.get('usage') == 'geometry-reference' and (contract.get('poscar_scan') or contract.get('selective_flags') or contract.get('node_poscar')) and role['file'] in ('POSCAR', 'CONTCAR') else {})}
     if contract.get('wavefunction_header'):
         role = contract['roles']['wavefunction']
         if source_files.wave_header(alias, role['source_path'], ex.ssh) != contract['wavefunction_header']:
@@ -530,7 +548,7 @@ def draft_differences(project, node_id, bundle_id):
     new_name = 'POSCAR' if 'POSCAR' in generated else 'POSCAR.reference'
     old_raw = files[old_name]
     new_text = generated.get(new_name)
-    if manifest.get('structure_source') and new_name == 'POSCAR.reference':
+    if manifest.get('structure_source') and new_name == 'POSCAR.reference' and not manifest.get('node_poscar'):
         # Compare the two configured references. The frozen actual geometry belongs to its upstream attempt.
         nodes = {n['id']: n for n in baseline['nodes']}
         pending, visited = [node_id], set()
@@ -541,7 +559,11 @@ def draft_differences(project, node_id, bundle_id):
             visited.add(parent)
             data = nodes[parent]['data']
             if data['kind'] == 'structure':
-                old_raw = inputs.input_geometry(data['structure'])['poscar'].encode()
+                reference = inputs.input_geometry(data['structure'])['poscar']
+                if manifest.get('selective_flags'):
+                    from . import node_constraints
+                    reference = node_constraints.apply(reference, manifest['selective_flags'])
+                old_raw = reference.encode()
                 old_name = 'POSCAR.reference'
                 break
             pending.extend(e['source'] for e in baseline['edges'] if e['target'] == parent)

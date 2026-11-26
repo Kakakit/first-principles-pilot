@@ -22,7 +22,7 @@ export const catalog: Record<Kind, {label: string; en: string; description: stri
   program: {label:'自定义程序',en:'CUSTOM PROGRAM',description:'编辑文本输入，在服务器直接运行命令',color:'#39758a'},
   scan: { label: '参数迭代', en: 'PARAMETER SCAN', description: '迭代 VASP 参数或逐个测试 Wannier90 窗口边界', color: '#7058a1' },
 };
-export type StepData = { kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'|'program'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
+export type StepData = { comparisonBaseline?:{nodeId:string;attemptId:string}; kind: Kind; label: string; note: string; params: Record<string, string>; executionMode:'vasp'|'wannier90'|'scan'|'program'; stageSequence:number; stageSlug:string; extensionId?:string; structure?:StructureDocument; parameters?:ParameterLayer; [key: string]: unknown };
 export type Step = Node<StepData, 'step'>;
 export type Project = { remoteWorkspaceRoot?:string; remotePathPolicy?:'project-directory-v2'; remoteDirectories?:Record<string,string>; stagePolicy?:'kind-fixed-v1'; parameters?:ParameterProject; sharedPotcar?:{id:string;provenance_id?:string}; recipeRuntime?:unknown; id: string; name: string; remoteSlug?:string; nodes: Step[]; edges: Edge[]; updatedAt: string };
 export type Workspace = { activeId: string; projects: Project[] };
@@ -68,6 +68,8 @@ export function parseWorkspace(raw: string): Workspace {
       if (!n || !nonempty(n.id) || nodeIds.has(n.id) || n.type !== 'step' || !n.position || !Number.isFinite(n.position.x) || !Number.isFinite(n.position.y) || Math.abs(n.position.x)>1e6 || Math.abs(n.position.y)>1e6 || !n.data || !kinds.includes(n.data.kind) || !nonempty(n.data.label) || !text(n.data.note) || !n.data.params || typeof n.data.params !== 'object' || Array.isArray(n.data.params) || Object.keys(n.data.params).length > 30 || !Object.values(n.data.params).every(v=>text(v,200))) throw new Error('流程节点格式无效。');
       if(!Number.isInteger(n.data.stageSequence)||n.data.stageSequence<1||n.data.stageSequence>999||!text(n.data.stageSlug,48)||!/^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/.test(n.data.stageSlug)||((n.data.kind==='program')!==(n.data.executionMode==='program'))||!['vasp','wannier90','scan','program'].includes(n.data.executionMode)||((n.data.kind==='scan')!==(n.data.executionMode==='scan'))||((n.data.kind==='wannier90')!==(n.data.executionMode==='wannier90')))throw new Error('节点执行类型或远程阶段标识无效。');
       if(p.stagePolicy==='kind-fixed-v1'&&n.data.stageSequence!==STAGE_SEQUENCES[n.data.kind as Kind])throw new Error('新项目阶段编号须与节点类型一致。');
+      const baseline=n.data.comparisonBaseline;
+      if(baseline!==undefined&&(!baseline||!nonempty(baseline.nodeId)||!nonempty(baseline.attemptId)))throw new Error('对照基线记录格式无效。');
       if(n.data.programDraft!==undefined){
         const draft=n.data.programDraft;
         if(n.data.kind!=='program'||!draft||typeof draft.alias!=='string'||typeof draft.command!=='string'||
@@ -80,7 +82,7 @@ export function parseWorkspace(raw: string): Workspace {
       if(n.data.structureOrigin!==undefined){if(n.data.kind!=='structure')throw new Error('来源记录只属于结构节点');validateStructureOrigin(n.data.structureOrigin,n.data.structure);}
       if(n.data.structureOriginNodeId!==undefined&&(!n.data.structureOrigin||!nonempty(n.data.structureOriginNodeId)))throw new Error('结构来源连线引用无效');
       if(n.data.parameters!==undefined)validateLayer(n.data.parameters);
-      if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info','sampling','kspacing','kgamma'].includes(k)&&typeof v==='string'&&v.length<=20000))throw new Error('输入文件配置格式无效。');}
+      if(n.data.inputDraft!==undefined){const d=n.data.inputDraft;if(!d||typeof d!=='object'||Array.isArray(d)||!Object.entries(d).every(([k,v])=>['grid','center','path','line_points','potcar_id','potcar_provenance_id','reason','projections','num_wann','path_structure_hash','path_source_attempt_id','path_source_file','kmesh_info','sampling','kspacing','kgamma','mesh_shift','kpoints_edit','selective_flags','selective_base','poscar_edit','poscar_text','poscar_base','poscar_edit_base','weighted_kpoints'].includes(k)&&typeof v==='string'&&(['poscar_edit','poscar_text','weighted_kpoints','kpoints_edit'].includes(k)?new TextEncoder().encode(v).length<=262144:v.length<=20000)))throw new Error('输入文件配置格式无效。');}
       nodeIds.add(n.id);
     }
     const edgeIds = new Set();

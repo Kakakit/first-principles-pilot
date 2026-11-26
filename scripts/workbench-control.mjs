@@ -17,7 +17,9 @@ export function configuration(){
   const [apiPort,devPort,controlPort]=ports;
   const env={...process.env,PYTHONUTF8:'1',FPILOT_CONFIG:configPath,FPILOT_PORT:String(devPort),FPILOT_API_PORT:String(apiPort),FPILOT_CONTROL_URL:`http://127.0.0.1:${controlPort}`};
   for(const [key,name] of [['workspace','FPILOT_WORKSPACE'],['research_root','FPILOT_RESEARCH_ROOT'],['potcar_library','FPILOT_POTCAR_LIBRARY'],['safe_pull','FPILOT_SAFE_PULL']])if(!env[name]&&value[key])env[name]=value[key];
-  return {apiPort,devPort,controlPort,configPath,env,python:process.env.FPILOT_PYTHON||value.python||(process.platform==='win32'?'python':'python3'),workspace:resolve(env.FPILOT_WORKSPACE||join(root,'workspace-data')),workerEnabled:value.worker_enabled!==false};
+  const workerMode=value.worker_mode??'advance';
+  if(!['advance','track'].includes(workerMode))throw new Error('后台模式无效');
+  return {workerMode,apiPort,devPort,controlPort,configPath,env,python:process.env.FPILOT_PYTHON||value.python||(process.platform==='win32'?'python':'python3'),workspace:resolve(env.FPILOT_WORKSPACE||join(root,'workspace-data')),workerEnabled:value.worker_enabled!==false};
 }
 export function available(port){
   return new Promise((done,fail)=>{const server=netServer();server.once('error',fail);server.listen(port,'127.0.0.1',()=>server.close(done));});
@@ -58,7 +60,7 @@ export class Workbench {
       if(!['running','starting'].includes(this.phase))return;
       if(name==='worker'&&this.phase==='running'){
         this.error='监控进程退出，正在恢复；项目授权保持。';
-        this.workerTimer=setTimeout(()=>{if(this.phase==='running')this.spawn('worker',this.config.python,['-m','backend.worker']);},5000);
+        this.workerTimer=setTimeout(()=>{if(this.phase==='running')this.spawn('worker',this.config.python,['-m','backend.worker','--mode',this.config.workerMode]);},5000);
       }else if(this.phase==='running'){
         this.error=`${name} 已退出（${signal||code}），请查看启动日志。`;
         this.busy=true;this.operation=this.stop().then(()=>{this.phase='error';this.busy=false;});
@@ -78,7 +80,7 @@ export class Workbench {
     if(existsSync(path))renameSync(path,join(this.runtime,`workbench-${Date.now()}.log`));
     this.log=openSync(path,'a',0o600);
     this.spawn('API',this.config.python,['-m','uvicorn','backend.app:app','--host','127.0.0.1','--port',String(this.config.apiPort)]);
-    if(this.config.workerEnabled)this.spawn('worker',this.config.python,['-m','backend.worker']);
+    if(this.config.workerEnabled)this.spawn('worker',this.config.python,['-m','backend.worker','--mode',this.config.workerMode]);
     const deadline=Date.now()+45000;
     // Vite reconnects old tabs as soon as it starts. Wait for the API first,
     // otherwise those tabs load a placeholder workspace after a proxy failure.
@@ -96,7 +98,7 @@ export class Workbench {
         const [api,page]=await Promise.all([fetch(`http://127.0.0.1:${this.config.apiPort}/api/health`,{signal:AbortSignal.timeout(1500)}),fetch(`http://127.0.0.1:${this.config.devPort}`,{signal:AbortSignal.timeout(1500)})]);
         const info=await api.json();
         let workerReady=!this.config.workerEnabled;
-        if(this.config.workerEnabled){const response=await fetch(`http://127.0.0.1:${this.config.apiPort}/api/execution-control`,{signal:AbortSignal.timeout(1500)});const value=await response.json();workerReady=value.worker?.healthy&&value.worker?.pid===this.children.get('worker')?.pid;}
+        if(this.config.workerEnabled){const response=await fetch(`http://127.0.0.1:${this.config.apiPort}/api/execution-control`,{signal:AbortSignal.timeout(1500)});const value=await response.json();workerReady=value.worker?.healthy&&value.worker?.mode===this.config.workerMode&&value.worker?.pid===this.children.get('worker')?.pid;}
         if(api.ok&&info.mode==='local-workspace'&&page.ok&&workerReady){this.phase='running';this.startedAt=new Date().toISOString();return;}
       }catch{}
       await sleep(200);

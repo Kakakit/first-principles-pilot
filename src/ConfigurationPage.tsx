@@ -1,8 +1,12 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {useIssueField} from './useActionCheck';
 import type {ReactNode} from 'react';
 
 /** One scroll container keeps the section index and review controls in view. */
-export default function ConfigurationPage({part,children}:{part?:string;children:(footer:HTMLDivElement|null)=>ReactNode}){
+export default function ConfigurationPage({part,children,files=false}:{part?:string;files?:boolean;children:(footer:HTMLDivElement|null,preview:HTMLDivElement|null)=>ReactNode}){
+ const [preview,setPreview]=useState<HTMLDivElement|null>(null);
+ const [showFiles,setShowFiles]=useState(true);
+ useIssueField(field=>{if(['parameter.incar','input.constraints','input.poscar','input.kpoints-edit'].includes(field))setShowFiles(true);});
  const body=useRef<HTMLDivElement>(null);
  const [footer,setFooter]=useState<HTMLDivElement|null>(null);
  const [sections,setSections]=useState<string[]>([]);
@@ -47,8 +51,10 @@ export default function ConfigurationPage({part,children}:{part?:string;children
   if(rect.right>bounds.right)bar.scrollLeft+=rect.right-bounds.right;
  },[active]);
  return <div className="vasp-configuration">
-  <nav ref={nav} className="configuration-parts" aria-label="计算配置区域">{sections.map(label=><button key={label} type="button" className={active===label?'active':''} aria-current={active===label?'location':undefined} onClick={()=>jump(label,true)}>{label}</button>)}</nav>
-  <div ref={body} data-navigation-scroll className="configuration-section">{children(footer)}</div>
+  <nav ref={nav} className="configuration-parts" aria-label="计算配置区域">{files&&<button aria-expanded={showFiles} onClick={()=>setShowFiles(!showFiles)}>输入文件</button>}{sections.map(label=><button key={label} type="button" className={active===label?'active':''} aria-current={active===label?'location':undefined} onClick={()=>jump(label,true)}>{label}</button>)}</nav>
+  <div className="configuration-split">
+  <div ref={body} data-navigation-scroll className="configuration-section">{children(footer,preview)}</div>
+  {files&&<div ref={setPreview} hidden={!showFiles} className="configuration-file-pane"/>}</div>
   <div ref={setFooter} className="configuration-review-bar"/>
  </div>;
 }

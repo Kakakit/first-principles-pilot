@@ -46,12 +46,15 @@ def validate(value, partial=False):
     if not partial or 'worker_enabled' in value:
         if partial and type(value['worker_enabled']) is not bool:raise ValueError('监控开关值无效')
         result['worker_enabled']=bool(value.get('worker_enabled',True))
+    if 'worker_mode' in value:
+        if value['worker_mode'] not in ('advance','track'):raise ValueError('后台模式无效')
+        result['worker_mode']=value['worker_mode']
     result['setup_completed']=True
     return result
 
 
 def save(value, partial=False):
-    if partial and (not value or set(value)-{'workspace','port','research_root','worker_enabled'}):
+    if partial and (not value or set(value)-{'workspace','port','research_root','worker_enabled','worker_mode'}):
         raise ValueError('本机设置字段无效')
     try:
         with FileLock(str(CONFIG)+'.lock',timeout=5):
@@ -64,6 +67,8 @@ def _save(value, partial):
     previous=read()
     changed=validate(value,partial)
     valid={**previous['saved'],**changed} if partial else changed
+    if 'worker_mode' not in changed and 'worker_mode' in previous['saved']:
+        valid['worker_mode']=previous['saved']['worker_mode']
     valid['python']=sys.executable
     if os.environ.get('FPILOT_SAFE_PULL'):
         valid['safe_pull']=os.environ['FPILOT_SAFE_PULL']
@@ -74,5 +79,6 @@ def _save(value, partial):
     write_json(CONFIG,valid)
     restart=any(key in changed and changed[key]!=previous['current'][key] for key in ('workspace','port','research_root')) or (
         'worker_enabled' in changed and changed['worker_enabled']!=previous['saved'].get('worker_enabled',True))
+    restart=restart or ('worker_mode' in changed and changed['worker_mode']!=previous['saved'].get('worker_mode','advance'))
     return {'saved':valid,'restart_required':restart,
         'note':'配置已保存。更换数据目录、研究目录、端口或自动推进开关后，请停止并重新启动工作台；原目录保留，不自动搬迁。'}

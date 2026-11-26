@@ -41,8 +41,8 @@ export default function CalculationWorkspace(props:Props) {
   if(node.data.kind==='wannier90')return <WannierPanel project={project} initialNodeId={nodeId} embedded onDraft={props.onWannierDraft} view={view} onReview={()=>onReview()} onConfigure={onConfigure}/>;
   if(node.data.kind==='scan')return <IndependentScanWorkspace {...props}/>;
   return <div className="calculation-workspace">
-    {view==='config'&&<ConfigurationPage part={props.configPart}>{footer=><>
-      <ParameterPanel continuous sourcePanel={<div data-action-field="input.source"><SourcePanel advanced project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/></div>} project={project} initialNodeId={nodeId} embedded onLayer={props.onLayer} onTemplates={props.onTemplates} onNumWann={props.onNumWann} onProjections={props.onProjections}/>
+    {view==='config'&&<ConfigurationPage files part={props.configPart}>{(footer,preview)=><>
+      <ParameterPanel key={nodeId} previewHost={preview} onFileDraft={props.onDraft} continuous sourcePanel={<div data-action-field="input.source"><SourcePanel advanced project={project} nodeId={nodeId} onChange={value=>props.onSource(nodeId,value)}/></div>} project={project} initialNodeId={nodeId} embedded onLayer={props.onLayer} onTemplates={props.onTemplates} onNumWann={props.onNumWann} onProjections={props.onProjections}/>
       <InputPanel reviewFooter={footer} project={project} initialNodeId={nodeId} embedded onDraft={props.onDraft} onSharedPotcar={props.onSharedPotcar} onReview={onReview}/>
     </>}</ConfigurationPage>}
     {view==='run'&&<div className="review-body">

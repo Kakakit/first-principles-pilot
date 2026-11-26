@@ -20,3 +20,11 @@
 @media(max-width:1200px){.green-workbench .result-evidence-strip{gap:12px}.green-workbench .metric-grid{gap:16px}.green-workbench .extension-common{grid-template-columns:1fr}}
 @media(max-width:900px){.green-workbench .node-results{padding:16px}.green-workbench .node-results>.page-heading{flex-wrap:wrap;gap:12px}.green-workbench .result-evidence-strip,.green-workbench .metric-grid{grid-template-columns:1fr 1fr}.green-workbench .result-context>label{min-width:128px}.green-workbench .result-context>label:last-child{min-width:192px}.green-workbench .section-action-heading{flex-wrap:wrap}.green-workbench .result-sections{gap:12px}.green-workbench .extension-sources label{grid-template-columns:1fr}}
 .green-workbench .result-feedback:empty{display:none}.green-workbench .node-results>.page-heading>.result-mode{margin:0}.green-workbench .node-results>.problem-note-entry>button:first-child{margin:0 0 8px;padding:4px 0;border:0;background:none;color:var(--color-muted-text)}
+
+.node-results .result-disclosure {
+  display:flex;align-items:center;gap:.65em;width:100%;padding:.8em 1em;
+  color:inherit;background:var(--color-surface);border:0;border-radius:6px;
+  text-align:left;font:inherit;font-weight:600;cursor:pointer;
+}
+.result-disclosure::before {content:'▸'}
+.result-disclosure[aria-expanded=true]::before {content:'▾'}

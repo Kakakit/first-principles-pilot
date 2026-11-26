@@ -35,7 +35,7 @@ export function typeSwitchPreview(project:Project,node:Step,kind:Kind){
   return {node:next,changes,issues:inspectFlow({...project,nodes:project.nodes.map(n=>n.id===node.id?next:n)}).filter(i=>i.level==='error'),label:catalog[kind].label};
 }
 
-export function relatedVaspDraft(project:Project,source:Step,name:string,scfAttemptId?:string){
+export function relatedVaspDraft(project:Project,source:Step,name:string,scfAttemptId?:string,baselineAttemptId?:string){
   if(!VASP_KINDS.includes(source.data.kind as VaspKind)||!name.trim()||name.trim().length>100)throw new Error('请填写 1 至 100 字的计算节点名称');
   if(scfAttemptId&&source.data.kind!=='scf')throw new Error('DOS 需要以上游 SCF 为来源');
   const parents=scfAttemptId?[source.id]:project.edges.filter(e=>e.target===source.id).map(e=>e.source);
@@ -51,6 +51,7 @@ export function relatedVaspDraft(project:Project,source:Step,name:string,scfAtte
     node.data.sourceDraft={mode:'upstream',purpose:'charge',files:'charge',read_charge:true,attempt_id:scfAttemptId};
     node.position={x:source.position.x+270,y:source.position.y+185};
   }else{
+    if(baselineAttemptId)node.data.comparisonBaseline={nodeId:source.id,attemptId:baselineAttemptId};
     const draft=source.data.sourceDraft as {mode?:string}|undefined;
     if(draft?.mode==='upstream'||draft?.mode==='new'){
       const binding={...draft} as Record<string,unknown>;

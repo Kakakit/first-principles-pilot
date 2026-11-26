@@ -451,3 +451,27 @@
 .parameter-search-matches {display:flex;gap:4px 12px;flex-wrap:wrap}
 .vasp-configuration .parameter-group>details {margin-block:8px}
 .vasp-configuration .parameter-group .atoms-scroll {max-height:24rem;overflow:auto}
+
+.configuration-split {display:flex;flex:1;min-height:0;min-width:0;container-type:inline-size}
+.configuration-split>.configuration-section {min-width:0}
+.configuration-file-pane {overflow:auto;width:clamp(270px,32%,480px);padding:12px;background:var(--color-surface-raised)}
+.vasp-file-preview {display:grid;align-content:start;gap:10px;min-width:0}
+.vasp-file-preview nav,.vasp-file-preview .file-tools {display:flex;align-items:center;flex-wrap:wrap;gap:4px}
+.vasp-file-preview nav button {flex:1;border:0;border-radius:6px;padding:6px 3px;background:transparent;color:inherit;font:inherit}
+.vasp-file-preview nav button[aria-pressed=true] {background:var(--color-surface);box-shadow:0 2px 6px #0002}
+.file-tools input[type=search] {flex:1;min-width:7em;width:7em}
+.vasp-file-preview textarea,.vasp-file-preview pre {width:100%;box-sizing:border-box;min-height:12em;max-height:52vh;overflow:auto;line-height:1.55;font-family:var(--font-mono,monospace);font-size:13px}
+.vasp-file-preview textarea {height:36vh;resize:vertical}
+.vasp-file-preview pre {white-space:pre;margin:0}
+.vasp-file-preview label {display:flex;gap:6px;align-items:center;margin-block:6px}
+.vasp-file-preview fieldset {display:flex;gap:10px}
+@container (max-width:780px) {
+ .configuration-file-pane {order:-1;width:100%;max-height:32vh;box-sizing:border-box}
+ .configuration-split>.configuration-section {width:100%}
+ .vasp-file-preview textarea {height:14vh;min-height:5em}
+}
+.vasp-configuration {container-type:inline-size}
+@container (max-width:780px) {.configuration-split {flex-direction:column}}
+.file-tag-matches {display:flex;flex-wrap:wrap;gap:3px 8px;max-height:10rem;overflow:auto}
+.file-tag-matches button {display:inline-flex;gap:4px;align-items:baseline}
+.file-tag-matches small {opacity:.75}

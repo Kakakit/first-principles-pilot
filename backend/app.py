@@ -17,7 +17,10 @@ async def lifespan(application):
     from . import extension_protocol
     import threading
     threading.Thread(target=extension_protocol.warm_doctors,name='extension-startup',daemon=True).start()
-    try:yield
+    from . import summary_collection
+    try:
+        with summary_collection.service():
+            yield
     finally:
         file_transfers.stop();analysis_queue.stop();remote_transport.close_all()
 
@@ -537,6 +540,24 @@ def window_compare(batch_id: str, payload: WindowComparison):
 def results_compare(payload: ResultComparison):
     try: return scan_results.compare(payload.project_id,payload.attempt_ids)
     except (ValueError,OSError,KeyError) as exc: raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/results/{key}/summary-collection')
+def request_summary_collection(key: str, project_id: str, retry: bool = False, checked_at: Optional[str] = None):
+    from . import summary_collection
+    try:
+        return summary_collection.request(project_id, key, retry, checked_at)
+    except (ValueError, OSError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/api/results/{key}/summary-collection')
+def summary_collection_status(key: str, project_id: str):
+    from . import summary_collection
+    try:
+        return summary_collection.status(project_id, key)
+    except (ValueError, OSError, KeyError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.get('/api/results/{key}/summary')
@@ -1860,6 +1881,15 @@ class InputRequest(BaseModel):
     reason: str = ''
 
 
+@app.post('/api/inputs/incar-remove')
+def remove_incar_assignment(payload: dict):
+    from . import incar_text
+    text=payload.get('text',''); tags=payload.get('remove',[])
+    if not isinstance(text,str) or len(text.encode())>incar_text.MAX_BYTES or not isinstance(tags,list) or any(not isinstance(t,str) for t in tags):
+        raise HTTPException(422,'请提供有效 INCAR 文本和待移除参数')
+    return {'text':incar_text.remove(text,set(tags))}
+
+
 class LibraryConfig(BaseModel):
     path: str
 
@@ -1875,6 +1905,19 @@ def read_library():
     try:
         return potcar_library.catalog()
     except (ValueError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+class LibraryFunctional(BaseModel):
+    shared: dict = Field(default_factory=dict)
+    node: dict = Field(default_factory=dict)
+
+
+@app.post('/api/potcar-library/functional')
+def library_functional(payload: LibraryFunctional):
+    try:
+        return potcar_library.resolve_functional(payload.shared, payload.node)
+    except (ValueError, TypeError, AttributeError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
@@ -1932,6 +1975,24 @@ def shared_input_impact(payload: SharedImpactRequest):
     from .inputs import shared_parameter_impact
     try:
         return shared_parameter_impact(payload.project, payload.previous_shared)
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post('/api/inputs/live-preview')
+def live_input_files(payload: InputRequest):
+    try:
+        from . import incar_text
+        report = generate(payload.project, payload.node_id, live=True)
+        node = next(n for n in payload.project['nodes'] if n['id'] == payload.node_id)
+        layer = node['data'].get('parameters', {})
+        if incar_text.complete(layer):
+            _, duplicates, malformed = incar_text.parse(layer.get('completeIncarText', ''))
+            report['incar_notes'] = [row['tag'] + ' 重复出现在第 ' + '、'.join(map(str, row['lines'])) + ' 行。'
+                                    for row in duplicates]
+            if malformed:
+                report['incar_notes'].append('请核对第 ' + '、'.join(map(str, malformed)) + ' 行的赋值或引号。')
+        return report
     except (ValueError, KeyError, TypeError, OSError) as exc:
         raise HTTPException(422, str(exc)) from exc
 

@@ -167,18 +167,24 @@ def case_project(project, base_id, dimensions, values, baseline=None):
             definition = parameter_catalog.DEFINITIONS.get(tag)
             if definition and definition['type'] in ('number','integer','ediffg') and len(value) <= 200:
                 layer.setdefault('values', {})[tag] = value
-            layer['manualIncarText'] = replace(layer.get('manualIncarText',''),tag,value)
+            text_key='completeIncarText' if layer.get('incarMode')=='complete' else 'manualIncarText'
+            layer[text_key] = replace(layer.get(text_key,''),tag,value)
         elif kind in ('u', 'j'):
             element = dimension['element']
             row = layer.setdefault('hubbard', {}).setdefault(element, copy.deepcopy(base_hubbard.get(element, {'l':'-1','u':'0','j':'0'})))
             row[kind] = value
             from .incar_text import parse, replace
             tag = 'LDAUU' if kind == 'u' else 'LDAUJ'
-            raw = layer.get('manualIncarText','')
+            text_key='completeIncarText' if layer.get('incarMode')=='complete' else 'manualIncarText'
+            raw = layer.get(text_key,'')
             if tag in parse(raw)[0]:
                 fields = [layer['hubbard'].get(s,base_hubbard[s])[kind] for s in report['species']]
-                layer['manualIncarText'] = replace(raw,tag,' '.join(fields))
-        elif kind == 'kmesh': node['data'].setdefault('inputDraft', {})['grid'] = value
+                layer[text_key] = replace(raw,tag,' '.join(fields))
+        elif kind == 'kmesh':
+            draft = node['data'].setdefault('inputDraft', {})
+            draft.pop('weighted_kpoints', None)
+            draft.pop('kmesh_info', None)
+            draft.update(grid=value, sampling='explicit')
         elif kind == 'poscar':
             from .structure_edit import edit_poscar, input_geometry
             from .scan_geometry import transform

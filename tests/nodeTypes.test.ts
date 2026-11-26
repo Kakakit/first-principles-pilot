@@ -85,3 +85,17 @@ test('a DOS draft binds the selected SCF run and preserves local model settings'
  assert.equal(copy.edges[0].source,scf.id);
  assert.equal((copy.node.data.sourceDraft as {attempt_id:string}).attempt_id,'older-scf');
 });
+
+test('a comparison draft retains its exact baseline across save and reload, independent copies clear it',async()=>{
+ const {relatedVaspDraft}=await import('../src/nodeTypes.ts');
+ const project=newProject('baseline'),source=makeStep('scf');
+ project.nodes.push(source);
+ const comparison=relatedVaspDraft(project,source,'U=4',undefined,'original-run').node;
+ project.nodes.push(comparison);
+ const workspace={activeId:project.id,projects:[project]};
+ const saved=parseWorkspace(JSON.stringify(workspace));
+ assert.deepEqual(saved.projects[0].nodes.at(-1)?.data.comparisonBaseline,{nodeId:source.id,attemptId:'original-run'});
+ assert.equal(copyDraftNode(project,comparison).data.comparisonBaseline,undefined);
+ assert.equal(relatedVaspDraft(project,comparison,'DOS','follow-up').node.data.comparisonBaseline,undefined);
+ assert.equal(mergeWorkspace(workspace,workspace).projects.at(-1)?.nodes.at(-1)?.data.comparisonBaseline,undefined);
+});

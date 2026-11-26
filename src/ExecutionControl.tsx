@@ -6,7 +6,7 @@ import {useRequestScope} from './useRequestScope';
 import {useSettingsDraft} from './useSubmissionDraft';
 
 type Limits={max_inflight_total:number|null;max_inflight_per_host:number|null;max_cores_per_host:number|null;worker_interval_seconds?:number};
-type Status={healthy:boolean;running:boolean;pid?:number;heartbeat_age_seconds?:number;interval_seconds?:number;interval_source?:string};
+type Status={mode?:'track'|'advance';healthy:boolean;running:boolean;pid?:number;heartbeat_age_seconds?:number;interval_seconds?:number;interval_source?:string};
 type Draft=Partial<Pick<Limits,'max_inflight_total'|'max_inflight_per_host'|'max_cores_per_host'>>&{interval?:string};
 const limitFields=[['max_inflight_total','总在途任务上限'],['max_inflight_per_host','每主机在途任务上限'],['max_cores_per_host','每主机在途核数上限']] as const;
 
@@ -42,7 +42,7 @@ export default function ExecutionControl(){
  };
  return <section className="input-submit-card">
   <h3>刷新周期与在途额度</h3>
-  <p>当前监控 · {worker?.healthy?'正在运行':worker?.running?'心跳已过期':'未运行'}{worker?.interval_seconds?' · '+worker.interval_seconds+' 秒':''}。已保存周期 {saved?.worker_interval_seconds??300} 秒。</p>
+  <p>当前监控 · {worker?.healthy?'正在运行':worker?.running?'心跳已过期':'未运行'}{worker?.running&&(worker.mode==='track'?' · 只追踪 VASP 作业':' · 自动推进')}{worker?.interval_seconds?' · '+worker.interval_seconds+' 秒':''}。已保存周期 {saved?.worker_interval_seconds??300} 秒。</p>
   {saved&&<fieldset disabled={busy}>
    <label>核查周期（秒）<input type="number" min="1" step="1" value={interval} onChange={e=>update('interval',e.target.value)}/></label>
    {limitFields.map(([key,label])=><label key={key}>{label}<input type="number" min="1" value={form[key]??''} onChange={e=>update(key,e.target.value===''?null:Number(e.target.value))}/></label>)}

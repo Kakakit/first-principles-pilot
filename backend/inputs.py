@@ -105,13 +105,70 @@ class GenerationContext:
         self.geometry = {}
 
 
-def generate(project,node_id,context=None):
-    report=_generate(project,node_id,context)
+def path_file(options):
+    count = number(options.get("line_points", ""))
+    if not count.is_integer() or not 2 <= count <= 10000:
+        raise ValueError("每段点数需为 2–10000 整数")
+    lines = [line.split() for line in options.get("path", "").splitlines() if line.strip()]
+    if not 2 <= len(lines) <= 200 or len(lines) % 2:
+        raise ValueError("路径需成对端点，每行三个倒空间分数坐标和可选标签")
+    rendered = []
+    for i, line in enumerate(lines):
+        if len(line) not in (3, 4):
+            raise ValueError("路径端点格式无效")
+        rendered.append(" ".join(str(number(x)) for x in line[:3]) + (" ! " + line[3] if len(line) == 4 else ""))
+        if i % 2:
+            rendered.append("")
+    return f"Explicit path\n{int(count)}\nLine-mode\nReciprocal\n" + "\n".join(rendered) + "\n"
+
+
+def mesh_file(options):
+    grid = [number(x) for x in options.get("grid", "").split()]
+    if len(grid) != 3 or any(not x.is_integer() or not 1 <= x <= 1000 for x in grid):
+        raise ValueError("网格需三个 1–1000 的整数")
+    center = options.get("center")
+    if center not in ("Gamma", "Monkhorst-Pack"):
+        raise ValueError("请明确网格中心")
+    shift = options.get('mesh_shift', '0 0 0').split()
+    if len(shift) != 3 or any(not math.isfinite(number(x)) for x in shift):
+        raise ValueError("附加位移需要三个有限数值")
+    text = "Regular mesh\n0\n" + center + "\n" + " ".join(str(int(x)) for x in grid) + "\n" + " ".join(shift) + "\n"
+    return text, grid, center
+
+
+def weighted_file(options):
+    text = options['weighted_kpoints']
+    if not isinstance(text, str) or len(text.encode()) > 262144:
+        raise ValueError('带权点表须为 256 KiB 以内的文本')
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if len(lines) < 4 or not lines[1].isdigit() or int(lines[1]) != len(lines) - 3 or not lines[2].lower().startswith(('r','c','k')):
+        raise ValueError('显式 KPOINTS 的点数、坐标模式与点表不一致')
+    for line in lines[3:]:
+        fields = line.split('!')[0].split()
+        if len(fields) != 4:
+            raise ValueError('每行需要三个坐标和一个权重')
+        for field in fields:
+            number(field)
+    return text
+
+
+def scalar_tags(values):
+    tags = {k: str(v).strip() for k, v in values.items() if v is not None and k != "XC_FUNCTIONAL"}
+    for tag in ('LWAVE', 'LCHARG', 'LASPH', 'LSORBIT', 'LNONCOLLINEAR', 'GGA_COMPAT', 'LORBMOM'):
+        if tags.get(tag) in ('true', 'false'): tags[tag] = '.TRUE.' if tags[tag] == 'true' else '.FALSE.'
+    if values.get("LDAU") in ("true", "false"): tags["LDAU"] = ".TRUE." if values["LDAU"] == "true" else ".FALSE."
+    if values.get("XC_FUNCTIONAL") in ("PBE", "PBEsol"):
+        tags["GGA"] = "PE" if values.get("XC_FUNCTIONAL") == "PBE" else "PS"
+    return tags
+
+
+def generate(project,node_id,context=None,*,live=False):
+    report=_generate(project,node_id,context,live=live)
     report['issues']=getattr(report.get('errors'),'issues',report.get('issues',[]))
     return report
 
 
-def _generate(project, node_id, context=None):
+def _generate(project, node_id, context=None, *, live=False):
     context = context or GenerationContext(project)
     if context.project is not project:
         raise ValueError('输入生成上下文与项目不一致')
@@ -125,6 +182,9 @@ def _generate(project, node_id, context=None):
     shared = project.get("parameters", {}).get("shared", {})
     local = node["data"].get("parameters", {})
     values, origins = {}, {}
+    from . import input_policy
+    complete = incar_text.complete(local)
+    parameter_issues = warnings if complete else errors
     inherited = case_inheritance(project, node)
     layers = [("共享设置", shared.get("values", {}), shared.get('manualIncarText',''))]
     if inherited: layers.append(("继承 case · " + inherited["snapshot"]["parameter_summary"], inherited["values"], ''))
@@ -135,11 +195,18 @@ def _generate(project, node_id, context=None):
     if local.get('moments'): layers.append(('节点磁矩表', {'MAGMOM':None}, ''))
     if local.get('hubbard'): layers.append(('节点 Hubbard 表', {k:None for k in ('LDAUL','LDAUU','LDAUJ')}, ''))
     layers.append(("节点覆盖", local.get("values", {}), local.get('manualIncarText','')))
-    try: values, origins, manual_tags, manual_fragments = incar_text.resolve(layers)
+    try:
+        if complete:
+            complete_text, values, malformed = incar_text.complete_values(local)
+            origins = {tag: '完整手动 INCAR' for tag in values}
+            manual_tags, manual_fragments = dict(values), []
+            if malformed: warnings.append('完整 INCAR 有未解析行：'+','.join(map(str,malformed))+'；原文保持，请自行核对')
+        else:
+            values, origins, manual_tags, manual_fragments = incar_text.resolve(layers)
     except ValueError as exc:
         errors.add('input.incar',str(exc),'parameter.incar',subpage='physics')
         return {'errors':errors,'warnings':[],'dependencies':[],'files':{},'ready':False}
-    if kind in ('bands', 'dos', 'vasp-wannier') and 'LORBIT' not in values:
+    if not complete and kind in ('bands', 'dos', 'vasp-wannier') and 'LORBIT' not in values:
         values['LORBIT'], origins['LORBIT'] = '11', '节点执行合同'
     confirmations = set(shared.get('confirmed_custom_tags', [])) | set(local.get('confirmed_custom_tags', []))
     validation_levels = {}
@@ -155,7 +222,7 @@ def _generate(project, node_id, context=None):
             if definition and definition.get('applies_to') and kind not in definition['applies_to']:
                 raise ValueError('该参数不适用于当前节点类型')
         except ValueError as exc:
-            errors.append(f"{tag}: {exc}")
+            parameter_issues.append(f"{tag}: {exc}")
     required = ["XC_FUNCTIONAL", "ENCUT", "EDIFF", "ISPIN", "ISMEAR", "NSW", "IBRION", "LDAU"]
     if kind == "relax":
         required += ["ISIF", "EDIFFG"]
@@ -163,31 +230,46 @@ def _generate(project, node_id, context=None):
     if values.get("ISMEAR") not in ("-2", "-3", "-4", "-5"):
         required.append("SIGMA")
     for tag in required:
-        if values.get(tag) is None:
-            errors.append(f"请明确 {tag}")
+        if not complete and values.get(tag) is None:
+            parameter_issues.append(f"请明确 {tag}")
     noncollinear = values.get('LSORBIT') == 'true' or values.get('LNONCOLLINEAR') == 'true'
     if values.get('LSORBIT') == 'true' and values.get('LNONCOLLINEAR') == 'false':
-        errors.append('LSORBIT=true 会启用非共线框架，不能设置 LNONCOLLINEAR=false')
+        parameter_issues.append('LSORBIT=true 会启用非共线框架，不能设置 LNONCOLLINEAR=false')
     if noncollinear and values.get('ISPIN') != '1':
-        errors.append('非共线/SOC 请使用 ISPIN=1；VASP 6.5 起 ISPIN=2 与非共线 MAGMOM 组合会报错')
+        parameter_issues.append('非共线/SOC 请使用 ISPIN=1；VASP 6.5 起 ISPIN=2 与非共线 MAGMOM 组合会报错')
     if values.get('SAXIS') is not None and not noncollinear:
-        errors.append('SAXIS 仅用于非共线/SOC 节点')
+        parameter_issues.append('SAXIS 仅用于非共线/SOC 节点')
     if values.get('NPAR') is not None and values.get('NCORE') is not None:
-        errors.append('NPAR 与 NCORE 不能同时设置')
+        parameter_issues.append('NPAR 与 NCORE 不能同时设置')
     for tag, level in validation_levels.items():
         if level == 'official-passthrough':
             warnings.append(f'{tag} 按 VASP Wiki 已知 tag 原样传递；目标 VASP 版本与物理适用性未自动验证')
         elif level == 'unverified-custom':
             warnings.append(f'{tag} 为自定义参数，未自动验证目标 VASP 是否识别')
-    if errors:
-        return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
     try:
         if kind == "relax":
-            if number(values["NSW"]) <= 0 or values["IBRION"] not in ("1", "2", "3"):
-                errors.append("优化需 NSW > 0 和离子优化算法")
-        elif number(values["NSW"]) != 0 or values["IBRION"] != "-1":
-            errors.append("静态、能带和 DOS 需 NSW=0、IBRION=-1")
-    except ValueError: errors.append('节点类型合同无法读取 NSW；请核对最终 INCAR')
+            if number(values.get("NSW")) <= 0 or values.get("IBRION") not in ("1", "2", "3"):
+                parameter_issues.append("优化需 NSW > 0 和离子优化算法")
+        elif number(values.get("NSW")) != 0 or values.get("IBRION") != "-1":
+            parameter_issues.append("静态、能带和 DOS 需 NSW=0、IBRION=-1")
+    except ValueError: parameter_issues.append('节点类型合同无法读取 NSW；请核对最终 INCAR')
+    def incomplete_report():
+        result = {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
+        if not live:
+            return result
+        result['partial'] = True
+        result['parameters'] = {k: {'value': v, 'source': origins[k]} for k, v in values.items()}
+        options = node['data'].get('inputDraft', {})
+        result['files']['INCAR'] = complete_text if complete else incar_text.render(scalar_tags(values), manual_fragments)
+        if kind in ('relax', 'scf') and options.get('sampling') == 'spacing':
+            result['sampling_mode'] = 'spacing'
+        else:
+            try:
+                result['files']['KPOINTS'] = weighted_file(options) if options.get('weighted_kpoints') else path_file(options) if kind == 'bands' else mesh_file(options)[0]
+            except ValueError as exc:
+                errors.add('input.kpoints', 'KPOINTS: ' + str(exc), 'input.path' if kind == 'bands' else 'input.grid')
+        return result
+
     parents = context.parents[node_id]
     if len(parents) != 1:
         errors.add('input.upstream-count','计算节点必须具有唯一直接上游','project.flow',page='flow',subpage=None)
@@ -207,7 +289,7 @@ def _generate(project, node_id, context=None):
     visit(node_id, set())
     if len(roots) != 1 or not roots[0]["data"].get("structure"):
         errors.add('input.structure','需要唯一、已导入的上游结构','project.flow',page='flow',subpage=None)
-        return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
+        return incomplete_report()
     source = roots[0]["data"]["structure"]
     # Revalidate explicit edits; legacy cached POSCARs remain untrusted.
     root_id = roots[0]['id']
@@ -229,7 +311,7 @@ def _generate(project, node_id, context=None):
         source_plan = source_contracts.plan(project, node_id, values)
     except ValueError as exc:
         errors.add('input.source',str(exc),'input.source',subpage='source')
-        return {"errors": errors, "warnings": warnings, "dependencies": [], "files": {}, "ready": False}
+        return incomplete_report()
     if source_plan['parent_id']:
         for name in source_plan['required_files']:
             dependencies.append({'node_id': source_plan['parent_id'], 'file': name, 'status': 'pending',
@@ -238,23 +320,39 @@ def _generate(project, node_id, context=None):
     # Legacy drafts with ICHARG=1 but no source selection remain reviewable;
     # preparation still requires an explicit source. New SourceDraft owns init.
     restart_required = not source_draft and not source_plan['parent_id'] and values.get('ICHARG') == '1'
-    if not source_draft and not restart_required:
-        if values.get('ISTART') not in (None, str(source_plan['initialization']['ISTART'])):
-            errors.append('ISTART 非零需要已核对的 WAVECAR 重启合同')
-    local_charge = local.get('values', {}).get('ICHARG')
-    explicit_charge = ('ICHARG' in manual_tags
-                       or local_charge is not None and local.get('explicitCharge') is True
-                       or not source_draft and kind not in source_contracts.FIXED and values.get('ICHARG') is not None)
-    for name, value in source_plan['initialization'].items():
-        if name == 'ICHARG' and explicit_charge:
-            if values.get(name) is not None and values[name] != expected_icharg:
-                warnings.append('ICHARG 与来源建议 '+expected_icharg+' 不同，按实际 INCAR 核对条件文件')
-            continue
-        if restart_required and name == 'ICHARG':
-            continue
-        if name in manual_tags:
-            if values[name] != str(value): errors.append(name+' 手动文本与计算来源合同不一致；请选择对应文件来源或修改文本')
-        else: values[name], origins[name] = str(value), '计算来源合同'
+    if complete:
+        explicit_charge = False
+        defaults = {'ISTART': 1 if 'WAVECAR' in source_plan['required_files'] else 0}
+        defaults['ICHARG'] = 0 if values.get('ISTART', str(defaults['ISTART'])) != '0' else 2
+        for name, recommended in source_plan['initialization'].items():
+            actual = values.get(name, str(defaults[name]))
+            try:
+                source_plan['initialization'][name] = int(actual)
+            except (TypeError, ValueError):
+                errors.add('input.restart', name + ' 须为整数', 'parameter.' + name, subpage='physics')
+                continue
+            if values.get(name) is None and recommended != int(actual):
+                errors.add('input.restart', name + ' 缺省值与来源合同不一致，请明确填写', 'parameter.' + name, subpage='physics')
+            elif recommended != int(actual):
+                warnings.append(name + ' 与来源建议不同，按实际 INCAR 核对条件文件')
+    else:
+        if not source_draft and not restart_required:
+            if values.get('ISTART') not in (None, str(source_plan['initialization']['ISTART'])):
+                errors.append('ISTART 非零需要已核对的 WAVECAR 重启合同')
+        local_charge = local.get('values', {}).get('ICHARG')
+        explicit_charge = ('ICHARG' in manual_tags
+                           or local_charge is not None and local.get('explicitCharge') is True
+                           or not source_draft and kind not in source_contracts.FIXED and values.get('ICHARG') is not None)
+        for name, value in source_plan['initialization'].items():
+            if name == 'ICHARG' and explicit_charge:
+                if values.get(name) is not None and values[name] != expected_icharg:
+                    warnings.append('ICHARG 与来源建议 '+expected_icharg+' 不同，按实际 INCAR 核对条件文件')
+                continue
+            if restart_required and name == 'ICHARG':
+                continue
+            if name in manual_tags:
+                if values[name] != str(value): errors.append(name+' 手动文本与计算来源合同不一致；请选择对应文件来源或修改文本')
+            else: values[name], origins[name] = str(value), '计算来源合同'
     if restart_required:
         warnings.append('ICHARG=1 需要 CHGCAR；此草稿可先冻结，再在准备运行时选择兼容来源')
     if kind in ('scf', 'relax') and values.get('LCHARG') == 'false':
@@ -266,15 +364,18 @@ def _generate(project, node_id, context=None):
             except ValueError:
                 needs_charge = False  # child generation reports its own invalid policy
             if needs_charge:
-                errors.append('该节点有读取 CHGCAR 的下游，LCHARG 必须开启')
+                parameter_issues.append('该节点有读取 CHGCAR 的下游，LCHARG 必须开启')
                 break
     if (values.get('EMIN') is None) != (values.get('EMAX') is None):
-        errors.append('EMIN 与 EMAX 必须同时设置')
+        parameter_issues.append('EMIN 与 EMAX 必须同时设置')
     elif values.get('EMIN') is not None and values.get('EMAX') is not None:
         try:
-            if number(values['EMIN']) >= number(values['EMAX']): errors.append('EMIN 必须小于 EMAX')
+            if number(values['EMIN']) >= number(values['EMAX']): parameter_issues.append('EMIN 必须小于 EMAX')
         except ValueError: pass
     options = node["data"].get("inputDraft", {})
+    if options.get('kpoints_edit') is not None:
+        errors.add('input.kpoints-edit', 'KPOINTS 文件编辑尚未应用，请应用到采样设置或取消编辑。',
+                   'input.kpoints-edit')
     native = kind in ('relax','scf') and options.get('sampling') == 'spacing'
     sampling_note = ''
     kmesh_generation = None
@@ -290,7 +391,7 @@ def _generate(project, node_id, context=None):
         parent_potcar_id = parent["data"].get("inputDraft", {}).get("potcar_id") or project.get('sharedPotcar', {}).get('id')
         if effective_potcar_id != parent_potcar_id:
             warnings.append("POTCAR 与上游 SCF 不同；固定电荷来源差异须在授权前审阅")
-        if values["LDAU"] == "true":
+        if values.get("LDAU") == "true":
             for tag in ("LDAUTYPE", "LMAXMIX"):
                 if parent_values.get(tag) != values.get(tag):
                     warnings.append(f"{tag} 与上游 SCF 不一致；须审阅固定电荷来源")
@@ -298,30 +399,67 @@ def _generate(project, node_id, context=None):
             current_u = dict(shared.get("hubbard", {}), **local.get("hubbard", {}))
             if any(parent_u.get(s) != current_u.get(s) for s in species):
                 warnings.append("U / J / L 与上游 SCF 不一致；须审阅固定电荷来源")
-        if values["ISPIN"] == "2" or noncollinear:
+        if values.get("ISPIN") == "2" or noncollinear:
             parent_m = dict(shared.get("moments", {}), **parent_layer.get("moments", {}))
             current_m = dict(shared.get("moments", {}), **local.get("moments", {}))
             if any(parent_m.get(a["id"]) != current_m.get(a["id"]) for a in geometry["atoms"]):
                 warnings.append("磁矩对称性设置与上游 SCF 不一致；须审阅固定电荷来源")
     reference_geometry = bool(source_plan['structure_file'])
     files = {"POSCAR.reference" if reference_geometry else "POSCAR": geometry["poscar"]}
-    tags = {k: str(v).strip() for k, v in values.items() if v is not None and k != "XC_FUNCTIONAL"}
-    for tag in ('LWAVE', 'LCHARG', 'LASPH', 'LSORBIT', 'LNONCOLLINEAR', 'GGA_COMPAT', 'LORBMOM'):
-        if tag in tags: tags[tag] = '.TRUE.' if tags[tag] == 'true' else '.FALSE.'
-    tags["LDAU"] = ".TRUE." if values["LDAU"] == "true" else ".FALSE."
-    if values["XC_FUNCTIONAL"] in ("PBE", "PBEsol"):
-        tags["GGA"] = "PE" if values["XC_FUNCTIONAL"] == "PBE" else "PS"
-    tags.setdefault('ISTART', '0')
-    tags.setdefault('ICHARG', expected_icharg)
-    tags.setdefault('LCHARG', '.FALSE.' if kind in ('bands', 'dos', 'vasp-wannier') else '.TRUE.')
-    tags.setdefault('LWAVE', '.FALSE.')
-    if kind == 'vasp-wannier':
+    constraints = options.get('selective_flags')
+    base_geometry = geometry_hash(geometry)
+    candidate = options.get('poscar_edit') if live and 'poscar_edit' in options else options.get('poscar_text')
+    poscar_summary = None
+    if 'poscar_edit' in options:
+        errors.add('input.poscar-edit', 'POSCAR 草稿尚未采用，请核对结构或撤销编辑。', 'input.poscar')
+    if candidate is not None:
+        from .structure_edit import edit_poscar
+        try:
+            source_key = options.get('poscar_edit_base') if live and 'poscar_edit' in options else options.get('poscar_base')
+            if source_key != base_geometry:
+                raise ValueError('参考结构已变化，请恢复来源后重新编辑')
+            if geometry_scan:
+                raise ValueError('请在结构扫描的基准节点修改 POSCAR')
+            if reference_geometry and not source_draft:
+                raise ValueError('请明确上游运行的来源后采用节点 POSCAR')
+            edited = edit_poscar(geometry, candidate)
+            if not edited['summary']['atom_ids_preserved']:
+                raise ValueError('元素、数量或排列已变化，请在结构管理中重新建立原子映射')
+            if not source_contracts.compare_geometry(geometry, edited['structure']):
+                source_contracts.assert_no_permutation(geometry, edited['structure'])
+            geometry = edited['structure']
+            files[next(iter(files))] = candidate
+            poscar_summary = {'before': edited['summary']['volume_before'], 'after': geometry['volume']}
+        except (ValueError, IndexError, TypeError, OverflowError) as exc:
+            errors.add('input.poscar', 'POSCAR: ' + str(exc), 'input.poscar')
+    if constraints and 'poscar_edit' not in options and (candidate is None or poscar_summary):
+        from . import node_constraints
+        try:
+            if options.get('selective_base') != base_geometry:
+                raise ValueError('来源结构已变化，请重新选择本节点的原子约束。')
+            if geometry_scan:
+                raise ValueError('结构扫描与节点约束需要分别配置。')
+            if reference_geometry and not source_draft:
+                raise ValueError('请先明确上游结构来源，再应用节点约束。')
+            name = next(iter(files))
+            files[name] = node_constraints.apply(files[name], constraints)
+            geometry = dict(geometry, atoms=[dict(atom, selective=[v == 'T' for v in constraints[3*i:3*i+3]])
+                                             for i, atom in enumerate(geometry['atoms'])])
+        except ValueError as exc:
+            errors.add('input.constraints', str(exc), 'input.constraints')
+    tags = scalar_tags(values)
+    if not complete:
+        tags.setdefault('ISTART', '0')
+        tags.setdefault('ICHARG', expected_icharg)
+        tags.setdefault('LCHARG', '.FALSE.' if kind in ('bands', 'dos', 'vasp-wannier') else '.TRUE.')
+        tags.setdefault('LWAVE', '.FALSE.')
+    if kind == 'vasp-wannier' and not complete:
         from .projections import body, simple_count
         projection_text = options.get('projections', '')
         recommended_wann = simple_count(projection_text, geometry['atoms'], noncollinear)
         raw_wann = values.get('NUM_WANN') if 'NUM_WANN' in manual_tags else options.get('num_wann', '')
         if not isinstance(raw_wann, str) or not re.fullmatch(r'[1-9]\d*', raw_wann.strip()):
-            errors.append('请明确填写 NUM_WANN 正整数；简单轨道计数仅供参考，复杂投影请手动填写')
+            parameter_issues.append('请明确填写 NUM_WANN 正整数；简单轨道计数仅供参考，复杂投影请手动填写')
             num_wann = None
         else:
             num_wann = int(raw_wann)
@@ -330,7 +468,7 @@ def _generate(project, node_id, context=None):
             except (TypeError, ValueError):
                 too_many_bands = False  # NBANDS 的类型错误由参数审查单独报告
             if num_wann > 100000 or too_many_bands:
-                errors.append('NUM_WANN 不得超过 NBANDS，且须为合理的正整数')
+                parameter_issues.append('NUM_WANN 不得超过 NBANDS，且须为合理的正整数')
         tags.update(ISYM='-1', NCORE='1', KPAR='1', LWANNIER90='.TRUE.', LWANNIER90_RUN='.FALSE.',
                     LWRITE_MMN_AMN='.TRUE.')
         if num_wann is not None:
@@ -345,7 +483,7 @@ def _generate(project, node_id, context=None):
         if [a["element"] for a in geometry["atoms"]] != inherited["elements"]: errors.add('input.case-atoms','case 磁矩与当前结构元素或原子顺序不符','parameter.MAGMOM',subpage='physics')
         else: moments.update(dict(zip([a["id"] for a in geometry["atoms"]], inherited["moments"])))
     moments.update(local.get("moments", {}))
-    if noncollinear and 'MAGMOM' not in manual_tags:
+    if not complete and noncollinear and 'MAGMOM' not in manual_tags:
         try:
             vectors = []
             for atom in geometry['atoms']:
@@ -355,16 +493,16 @@ def _generate(project, node_id, context=None):
                 vectors.extend(str(number(part)) for part in parts)
             tags['MAGMOM'] = ' '.join(vectors)
         except ValueError:
-            errors.append('非共线/SOC 请按原子 ID 填写三个初始 MAGMOM 分量，例如 0 0 4')
-    elif values["ISPIN"] == "2" and 'MAGMOM' not in manual_tags:
+            parameter_issues.append('非共线/SOC 请按原子 ID 填写三个初始 MAGMOM 分量，例如 0 0 4')
+    elif not complete and values.get("ISPIN") == "2" and 'MAGMOM' not in manual_tags:
         try:
             tags["MAGMOM"] = " ".join(str(number(moments.get(a["id"]))) for a in geometry["atoms"])
         except ValueError:
-            errors.append("请按原子 ID 填写全部初始 MAGMOM")
+            parameter_issues.append("请按原子 ID 填写全部初始 MAGMOM")
     hubbard = dict(shared.get("hubbard", {}), **(inherited["hubbard"] if inherited else {}), **local.get("hubbard", {}))
-    if values.get("LDAU") == "true" and not all(k in manual_tags for k in ('LDAUL','LDAUU','LDAUJ')):
+    if not complete and values.get("LDAU") == "true" and not all(k in manual_tags for k in ('LDAUL','LDAUU','LDAUJ')):
         if not values.get("LDAUTYPE"):
-            errors.append("请明确 LDAUTYPE")
+            parameter_issues.append("请明确 LDAUTYPE")
         ls, us, js = [], [], []
         for element in species:
             row = hubbard.get(element, {})
@@ -377,53 +515,40 @@ def _generate(project, node_id, context=None):
                     raise ValueError()
                 ls.append(l); us.append(str(u)); js.append(str(j))
             except ValueError:
-                errors.append(f"{element} 的 L / U / J 未明确")
+                parameter_issues.append(f"{element} 的 L / U / J 未明确")
         tags.update({k:v for k,v in dict(LDAUL=" ".join(ls), LDAUU=" ".join(us), LDAUJ=" ".join(js)).items() if k not in manual_tags})
         needed = max([2 * int(l) for l in ls] + [0])
-        if number(values.get("LMAXMIX") or "0") < needed:
-            errors.append(f"当前 +U 电荷交接需要显式 LMAXMIX ≥ {needed}")
+        if input_policy.advise(warnings, number, values.get("LMAXMIX") or "0") is not None and number(values.get("LMAXMIX") or "0") < needed:
+            errors.add('input.lmaxmix',f'当前 +U 电荷交接需要显式 LMAXMIX ≥ {needed}','parameter.LMAXMIX',subpage='physics')
     try:
-        if kind == "bands":
-            count = number(options.get("line_points", ""))
-            if not count.is_integer() or not 2 <= count <= 10000:
-                raise ValueError("每段点数需为 2–10000 整数")
-            lines = [line.split() for line in options.get("path", "").splitlines() if line.strip()]
-            if not 2 <= len(lines) <= 200 or len(lines) % 2:
-                raise ValueError("路径需成对端点，每行三个倒空间分数坐标和可选标签")
-            rendered = []
-            for i, line in enumerate(lines):
-                if len(line) not in (3, 4):
-                    raise ValueError("路径端点格式无效")
-                rendered.append(" ".join(str(number(x)) for x in line[:3]) + (" ! " + line[3] if len(line) == 4 else ""))
-                if i % 2:
-                    rendered.append("")
-            files["KPOINTS"] = f"Explicit path\n{int(count)}\nLine-mode\nReciprocal\n" + "\n".join(rendered) + "\n"
+        if options.get('weighted_kpoints'):
+            if native:
+                raise ValueError('显式点表与 KSPACING 模式冲突')
+            files['KPOINTS'] = weighted_file(options)
+            sampling_note = '使用显式带权 k 点列表。'
+        elif kind == "bands":
+            files["KPOINTS"] = path_file(options)
             if tetrahedron:
-                errors.append("能带路径不支持四面体积分")
+                parameter_issues.append("能带路径不支持四面体积分")
         elif native:
-            if 'KSPACING' not in tags:
-                tags['KSPACING'] = options.get('kspacing','')
-            if 'KGAMMA' not in tags:
-                tags['KGAMMA'] = options.get('kgamma','.TRUE.')
+            if not complete:
+                if 'KSPACING' not in tags:
+                    tags['KSPACING'] = options.get('kspacing','')
+                if 'KGAMMA' not in tags:
+                    tags['KGAMMA'] = options.get('kgamma','.TRUE.')
             spacing, gamma = incar_text.native_spacing(tags)
             sampling_note = f'采用 INCAR 间距 {spacing:g} Å⁻¹，KGAMMA={".TRUE." if gamma else ".FALSE."}；VASP 按运行晶格生成网格。'
         else:
-            grid = [number(x) for x in options.get("grid", "").split()]
-            if len(grid) != 3 or any(not x.is_integer() or not 1 <= x <= 1000 for x in grid):
-                raise ValueError("网格需三个 1–1000 的整数")
-            if values.get('KPAR') is not None and number(values['KPAR']) > math.prod(grid):
-                errors.append('KPAR 大于规则网格总 k 点数，不可并行分组')
-            center = options.get("center")
-            if center not in ("Gamma", "Monkhorst-Pack"):
-                raise ValueError("请明确网格中心")
-            files["KPOINTS"] = "Regular mesh\n0\n" + center + "\n" + " ".join(str(int(x)) for x in grid) + "\n0 0 0\n"
+            files['KPOINTS'], grid, center = mesh_file(options)
+            if values.get('KPAR') is not None and (input_policy.advise(warnings, number, values['KPAR']) or 0) > math.prod(grid):
+                parameter_issues.append('KPAR 大于规则网格总 k 点数，不可并行分组')
             if options.get('kmesh_info'):
                 from . import kpoints
                 kmesh_generation=kpoints.generation_info(options['kmesh_info'],[int(x) for x in grid],center)
             if tetrahedron:
                 warnings.append("四面体积分仍需实际 VASP 网格和适用性验证；网格尺寸检查不证明四面体可用")
                 if min(grid) < 2:
-                    errors.append("当前四面体模式要求三个方向至少各 2 个网格点")
+                    parameter_issues.append("当前四面体模式要求三个方向至少各 2 个网格点")
     except ValueError as exc:
         errors.add('input.kpoints',str(exc) if native else f'KPOINTS: {exc}','input.path' if kind=='bands' else 'input.grid')
     potcar = None
@@ -440,7 +565,7 @@ def _generate(project, node_id, context=None):
             if digest(receipt_raw) != receipt_id:
                 raise ValueError('赝势来源记录校验失败')
             receipt = json.loads(receipt_raw)
-            if receipt['sha256'] != effective_potcar_id or receipt['functional'] != values['XC_FUNCTIONAL']:
+            if receipt['sha256'] != effective_potcar_id:
                 raise ValueError('赝势选择来源与当前配置不同，请重新从库生成')
             potcar["library_provenance"] = receipt
         records = potcar["records"]
@@ -448,12 +573,13 @@ def _generate(project, node_id, context=None):
             errors.add('input.potcar-content','POTCAR 数据集数或 LEXCH / ENMAX 不完整','input.potcar')
         expected = "CA" if values.get("XC_FUNCTIONAL") == "LDA" else "PE"
         if any(r.get("lexch", "").upper() != expected for r in records):
-            errors.append("POTCAR 泛函元数据与所选泛函不匹配（PBEsol 使用 PBE 势）")
-        if records and number(values["ENCUT"]) < max(r.get("enmax", 0) for r in records):
+            parameter_issues.append("POTCAR 泛函元数据与所选泛函不匹配（PBEsol 使用 PBE 势）")
+        cutoff = input_policy.advise(warnings, number, values.get("ENCUT")) if values.get("ENCUT") is not None else None
+        if records and cutoff is not None and cutoff < max(r.get("enmax", 0) for r in records):
             warnings.append("ENCUT 低于 POTCAR 最大 ENMAX，请给出收敛依据")
     except (ValueError, OSError) as exc:
         errors.add('input.potcar',f'POTCAR: {exc}','input.potcar')
-    files["INCAR"] = incar_text.render(tags, manual_fragments)
+    files["INCAR"] = complete_text if complete else incar_text.render(tags, manual_fragments)
     # Source checks and displayed metadata must describe the exact saved text.
     tags = incar_text.parse(files['INCAR'])[0]
     if explicit_charge and not restart_required:
@@ -483,7 +609,7 @@ def _generate(project, node_id, context=None):
                        'input.source' if supported else 'parameter.incar', subpage='source' if supported else 'physics')
         file_requirements.append(dict(file=name, trigger=trigger, source=origin, status=status))
     if 'KPOINTS' in files and ('KSPACING' in tags or 'KGAMMA' in tags):
-        sampling_note = ('采用能带路径' if kind=='bands' else '采用显式网格 '+options.get('grid',''))+'；KPOINTS 优先，INCAR 的 KSPACING / KGAMMA 不决定本次采样。'
+        sampling_note = ('采用显式带权点表' if options.get('weighted_kpoints') else '采用能带路径' if kind=='bands' else '采用显式网格 '+options.get('grid',''))+'；KPOINTS 优先，INCAR 的 KSPACING / KGAMMA 不决定本次采样。'
     for name in manual_tags:
         if name in tags:
             values[name] = incar_text.semantic(name,tags[name])
@@ -491,11 +617,11 @@ def _generate(project, node_id, context=None):
     if kind == 'vasp-wannier':
         for name,expected in {'ISYM':'-1','NCORE':'1','KPAR':'1','LWANNIER90':'true','LWANNIER90_RUN':'false','LWRITE_MMN_AMN':'true'}.items():
             if incar_text.semantic(name,tags.get(name,'')) != expected:
-                errors.append(name+' 手动文本与 VASP-Wannier 接口合同不一致；请修改文本，未自动改回')
+                parameter_issues.append(name+' 手动文本与 VASP-Wannier 接口合同不一致；请修改文本，未自动改回')
     try:
         source_contracts.validate_pead(files['INCAR'])
     except ValueError as exc:
-        errors.append(str(exc))
+        parameter_issues.append(str(exc))
     warnings.append("输入格式与兼容性审查不代替能量、力、k 点和磁态收敛验证")
     incar_tags = {tag: {'value': value,
                         'source': origins[tag] if tag in origins else
@@ -504,9 +630,13 @@ def _generate(project, node_id, context=None):
                                   'Hubbard 元素表' if tag in ('LDAUL','LDAUU','LDAUJ') else '工作台执行合同',
                         'validation': validation_levels.get(tag, 'generated-contract')}
                   for tag, value in tags.items()}
-    return {"file_requirements":file_requirements,"sampling_mode":"spacing" if native else "explicit","sampling_note":sampling_note, "errors": errors, "warnings": warnings, "dependencies": dependencies, "files": files,
+    return {"file_requirements":file_requirements,"sampling_mode":"spacing" if native else "explicit","sampling_note":sampling_note,"incar_mode": "complete" if complete else "overlay", "manual_duplicates": [] if complete else incar_text.duplicates(layers), "errors": errors, "warnings": warnings, "dependencies": dependencies, "files": files,
             "ready": not errors and not dependencies and not restart_required, "potcar": potcar, "species": species,
             "potcar_source": "节点覆盖" if options.get('potcar_id') else "项目共享",
+            "reference_geometry_sha256": base_geometry,
+            **({"selective_flags": constraints} if constraints and candidate is None else {}),
+            **({"node_poscar": True} if candidate is not None else {}),
+            **({"poscar_review": dict(poscar_summary, text=candidate)} if live and poscar_summary else {}),
             "geometry_sha256": geometry_hash(geometry), "source_sha256": source["source"]["sha256"],
             "parameters": {k: {"value": v, "source": origins[k], "validation": validation_levels.get(k, 'unset')} for k, v in values.items()},
             "incar_tags": incar_tags,

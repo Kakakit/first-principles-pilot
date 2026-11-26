@@ -20,7 +20,7 @@ def batch(records):
         command=('qstat -f '+ ' '.join(map(shlex.quote,ids)) if scheduler=='pbs' else
                  "squeue"+(" -M "+shlex.quote(cluster) if cluster else "")+" -h --array --jobs="+shlex.quote(','.join(ids))+" -o '%i|%T'")
         receipt=ex.ssh(alias,command,timeout=30,mutating=False)
-        if receipt.get('exit_code') is None:
+        if receipt.get('exit_code') in (None,255):
             result.update({row['id']:receipt for row in rows});continue
         states={}
         if scheduler=='pbs':

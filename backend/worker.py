@@ -7,7 +7,7 @@ import subprocess
 import sys
 import threading
 import time
-from contextlib import closing
+from contextlib import closing, nullcontext
 from datetime import datetime, timezone
 from . import execution as ex
 from . import execution_control as control
@@ -28,7 +28,7 @@ def state():
         return {'running':False,'healthy':False,'note':'监控未启动；检查本机设置的自动推进开关，并重新启动工作台'}
 
 
-def tick(refresh=None, notify=False):
+def tick(refresh=None, notify=False, *, tracking_only=False):
     custom_refresh=refresh
     refresh=refresh or ex.refresh
     with closing(ex.db()) as c:
@@ -41,13 +41,24 @@ def tick(refresh=None, notify=False):
     groups={}
     for row in rows:
         value=json.loads(row[0]);groups.setdefault(value.get('config',{}).get('alias',''),[]).append(row)
-    for alias in due:groups.setdefault(alias,[])
+    if not tracking_only:
+        for alias in due:groups.setdefault(alias,[])
     def refresh_host(pair):
         alias,host_rows=pair
         checked=0;errors=[]
-        if alias in due:remote_transport.recover(alias)
         from . import remote_monitor
         live_records=[json.loads(row[0]) for row in host_rows]
+        if tracking_only:
+            selected=[]
+            for record in live_records:
+                try:
+                    if ex.trackable_vasp(record):
+                        ex.assert_recovery_target(record)
+                        selected.append(record)
+                except (ValueError,OSError) as exc:
+                    errors.append({'attempt_id':record['id'],'message':control.redact(str(exc))[:1000]})
+            live_records=selected
+        if alias in due and (live_records or not tracking_only):remote_transport.recover(alias)
         scheduler=remote_monitor.batch([r for r in live_records if command_mode(r.get('config',{})) is None]) if custom_refresh is None else {}
         for r in live_records:
             if command_mode(r.get('config',{}))=='opaque':continue
@@ -59,9 +70,13 @@ def tick(refresh=None, notify=False):
                 timeout=r.get('dispatch_timeout_seconds',900 if any(item.get('mode')=='reflink-or-copy' for item in r.get('source_file_plan',{}).values()) else 180)
                 if age<timeout+65:continue
             try:
-                updated=refresh(r['id']) if custom_refresh is not None else ex.refresh(r['id'],poll_receipt=scheduler.get(r['id']),automatic=True)
+                if custom_refresh is not None:
+                    updated=refresh(r['id'])
+                else:
+                    options={'tracking_only':True} if tracking_only else {}
+                    updated=ex.refresh(r['id'],poll_receipt=scheduler.get(r['id']),automatic=True,**options)
                 checked+=1
-                if updated['state']=='FAILED':control.freeze_failure(r['id'])
+                if not tracking_only and updated['state']=='FAILED':control.freeze_failure(r['id'])
                 if notify and updated['state'] in ('FAILED','COMPLETED') and not recycle.inactive('attempts',r['id'],r):notify_terminal(r['id'])
             except Exception as exc:
                 if recycle.inactive('attempts',r['id'],r):continue
@@ -79,6 +94,8 @@ def tick(refresh=None, notify=False):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1,min(4,len(groups)))) as pool:
         for count,failures in pool.map(isolated_host,groups.items()):
             checked+=count;errors.extend(failures)
+    if tracking_only:
+        return {'checked':checked,'errors':errors}
     with closing(ex.db()) as c:
         failed=[row[0] for row in c.execute("SELECT id FROM attempts WHERE state='FAILED'")]
     for key in failed:
@@ -125,7 +142,7 @@ def interval_seconds(override=None):
 def wait_for_cycle(stop, heartbeat, override=None, parent=None):
     from . import remote_health
     started=time.monotonic()
-    retry_times=[r['next_retry_at'] for r in remote_health.status() if r['state']=='COOLDOWN' and r.get('next_retry_at')]
+    retry_times=[] if heartbeat.get('mode')=='track' else [r['next_retry_at'] for r in remote_health.status() if r['state']=='COOLDOWN' and r.get('next_retry_at')]
     retry_deadline=started+max(1,min(retry_times)-time.time()) if retry_times else float('inf')
     while not stop.is_set():
         if parent and not process_alive(int(parent)):stop.set();break
@@ -140,30 +157,35 @@ def wait_for_cycle(stop, heartbeat, override=None, parent=None):
         stop.wait(min(1,remaining))
 
 
-def run(interval=None, once=False):
+def run(interval=None, once=False, mode='advance'):
+    if mode not in ('advance','track'):raise ValueError('后台模式无效')
     # The platform file lock is released by the OS after a crash.
     ex.ROOT.mkdir(parents=True,exist_ok=True)
     with exclusive_lock(ex.ROOT/'worker.lock') as owned:
-        if not owned:return 0
+        if not owned:
+            print('该工作区已有后台进程，本次启动已退出。',file=sys.stderr)
+            return 0
         stop=threading.Event()
         def quit_worker(*_):stop.set()
         signal.signal(signal.SIGTERM,quit_worker);signal.signal(signal.SIGINT,quit_worker)
         started=ex.now()
-        heartbeat=dict(pid=os.getpid(),running=True,started_at=started,interval_seconds=interval_seconds(interval),interval_source='settings' if interval is None else 'command-line')
+        heartbeat=dict(mode=mode,pid=os.getpid(),running=True,started_at=started,interval_seconds=interval_seconds(interval),interval_source='settings' if interval is None else 'command-line')
+        from . import summary_collection
         try:
-            while not stop.is_set():
-                parent=os.environ.get('FPILOT_LAUNCHER_PID')
-                if parent and not process_alive(int(parent)):break
-                heartbeat.update(heartbeat_epoch=time.time(),interval_seconds=interval_seconds(interval))
-                control.write_json(ex.ROOT/'worker-state.json',heartbeat)
-                try:
-                    result=tick(notify=os.environ.get('FPILOT_NOTIFICATIONS','1')!='0')
-                except Exception as exc:
-                    result={'checked':0,'errors':[{'batch':'worker-cycle','message':control.redact(str(exc))[:1000]}]}
-                heartbeat.update(heartbeat_epoch=time.time(),last_cycle=result)
-                control.write_json(ex.ROOT/'worker-state.json',heartbeat)
-                if once:break
-                wait_for_cycle(stop,heartbeat,interval,parent)
+            with (nullcontext() if once else summary_collection.service()):
+                while not stop.is_set():
+                    parent=os.environ.get('FPILOT_LAUNCHER_PID')
+                    if parent and not process_alive(int(parent)):break
+                    heartbeat.update(heartbeat_epoch=time.time(),interval_seconds=interval_seconds(interval))
+                    control.write_json(ex.ROOT/'worker-state.json',heartbeat)
+                    try:
+                        result=tick(tracking_only=True) if mode=='track' else tick(notify=os.environ.get('FPILOT_NOTIFICATIONS','1')!='0')
+                    except Exception as exc:
+                        result={'checked':0,'errors':[{'batch':'worker-cycle','message':control.redact(str(exc))[:1000]}]}
+                    heartbeat.update(heartbeat_epoch=time.time(),last_cycle=result)
+                    control.write_json(ex.ROOT/'worker-state.json',heartbeat)
+                    if once:break
+                    wait_for_cycle(stop,heartbeat,interval,parent)
         finally:
             control.write_json(ex.ROOT/'worker-state.json',dict(heartbeat,running=False,heartbeat_epoch=time.time()))
     return 0
@@ -173,10 +195,17 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--once',action='store_true')
     parser.add_argument('--interval',type=int,default=None,help='Override the saved worker period in seconds')
+    parser.add_argument('--mode', choices=('track','advance'), help='track only follows existing PBS/Slurm VASP attempts')
     args=parser.parse_args()
+    from .local_setup import CONFIG
+    mode = args.mode
+    if mode is None:
+        saved = json.loads(CONFIG.read_text(encoding='utf-8-sig')) if CONFIG.exists() else {}
+        mode = saved.get('worker_mode', 'advance')
+    if mode not in ('track','advance'):parser.error('后台模式无效')
     if args.interval is not None:
         try:control.validate_interval(args.interval)
         except ValueError as error:parser.error(str(error))
-    return run(args.interval,args.once)
+    return run(args.interval,args.once,mode)
 
 if __name__=='__main__':raise SystemExit(main())

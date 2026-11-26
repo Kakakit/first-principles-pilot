@@ -4,7 +4,7 @@ import type {StructureDocument} from './structure';
 import catalog from '../resources/vasp-parameter-catalog.json';
 export type ParameterValue=string|null;
 export type HubbardRow={l:string;u:string;j:string};
-export type ParameterLayer={values:Record<string,ParameterValue>;preset?:'none'|'basic';moments?:Record<string,ParameterValue>;hubbard?:Record<string,HubbardRow>;confirmed_custom_tags?:string[];manualIncarText?:string;explicitCharge?:boolean};
+export type ParameterLayer={values:Record<string,ParameterValue>;preset?:'none'|'basic';moments?:Record<string,ParameterValue>;hubbard?:Record<string,HubbardRow>;confirmed_custom_tags?:string[];manualIncarText?:string;explicitCharge?:boolean;incarMode?:'overlay'|'complete';completeIncarText?:string;completeIncarFilename?:string};
 export type ParameterProject={version:1;shared:ParameterLayer;templates?:{name:string;layer:ParameterLayer}[]};
 export type Definition={tag:string;label:string;unit?:string;type:'number'|'integer'|'enum'|'ediffg'|'vector3';choices?:[string,string][];allow_positive_integer?:boolean;positive?:boolean;min?:number;help:string;url:string;applies_to?:string[]};
 export const definitions:Definition[]=catalog.definitions as Definition[];
@@ -24,6 +24,9 @@ export function validateLayer(value:unknown):asserts value is ParameterLayer {
  const p=value as ParameterLayer;const text=(v:unknown)=>v===null||(typeof v==='string'&&v.length<=200);
  if(!p||!p.values||Array.isArray(p.values)||typeof p.values!=='object'||Object.keys(p.values).length>100||!Object.values(p.values).every(text)||p.preset!==undefined&&!['none','basic'].includes(p.preset))throw new Error('参数草稿格式无效。');
  if(p.manualIncarText!==undefined&&(typeof p.manualIncarText!=='string'||new TextEncoder().encode(p.manualIncarText).length>262144))throw new Error('手动 INCAR 文本须不超过 256 KiB。');
+ if(p.incarMode!==undefined&&!['overlay','complete'].includes(p.incarMode))throw new Error('INCAR 输入方式无效。');
+ if(p.completeIncarText!==undefined&&(typeof p.completeIncarText!=='string'||new TextEncoder().encode(p.completeIncarText).length>262144||p.completeIncarText.includes('\0')))throw new Error('完整 INCAR 须为不超过 256 KiB 的普通文本。');
+ if(p.completeIncarFilename!==undefined&&(typeof p.completeIncarFilename!=='string'||p.completeIncarFilename.length>1000))throw new Error('INCAR 文件名无效。');
  if(p.confirmed_custom_tags&&(!Array.isArray(p.confirmed_custom_tags)||p.confirmed_custom_tags.length>100||!p.confirmed_custom_tags.every(tag=>typeof tag==='string'&&/^[A-Z][A-Z0-9_]*$/.test(tag))))throw new Error('自定义参数确认列表无效。');
  if(p.moments&&(!Object.values(p.moments).every(text)||Object.keys(p.moments).length>1500))throw new Error('磁矩草稿格式无效。');
  if(p.hubbard&&(!Object.entries(p.hubbard).every(([k,v])=>/^[A-Z][a-z]?$/.test(k)&&v&&['l','u','j'].every(x=>typeof v[x as keyof HubbardRow]==='string'&&v[x as keyof HubbardRow].length<=200))))throw new Error('DFT+U 草稿格式无效。');

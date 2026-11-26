@@ -24,6 +24,18 @@ class NavigationSettingsTests(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 preview('unknown')
 
+    def test_observer_setting_survives_an_older_full_save(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'local.json'
+            baseline={'workspace':folder,'port':8765,'research_root':''}
+            def read():
+                return {'saved':json.loads(path.read_text()) if path.exists() else {},'current':baseline}
+            with patch.object(local_setup,'CONFIG',path),patch.object(local_setup,'read',side_effect=read):
+                result=local_setup.save({'worker_mode':'track'},partial=True)
+                self.assertTrue(result['restart_required'])
+                self.assertEqual(local_setup.save(baseline)['saved']['worker_mode'],'track')
+                with self.assertRaises(ValueError):local_setup.save({'worker_mode':'invalid'},partial=True)
+
     def test_worker_patch_preserves_unavailable_legacy_directories(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'config.json'

@@ -109,6 +109,61 @@ class SourceContractV2Tests(unittest.TestCase):
         self.assertEqual(set(frozen['manifest']['source_contract']['roles']), {'structure'})
         self.assertIn('LSORBIT = .TRUE.', ex.bundle(frozen['id'])[1]['INCAR'].decode())
 
+    def test_node_poscar_draft_and_weighted_points_freeze_exact_files(self):
+        node = self.project['nodes'][2]['data']
+        node['sourceDraft'] = {'mode':'new','purpose':'charge','files':'charge'}
+        draft = node['inputDraft']
+        initial = inputs.generate(self.project, 'c')
+        base = initial['reference_geometry_sha256']
+        rows = initial['files']['POSCAR.reference'].splitlines(keepends=True)
+        rows[1] = '1.25\n'
+        text = ''.join(rows)
+        points = 'test\n2\nReciprocal\n0 0 0 1\n0.25 0.25 0.25 3\n'
+        draft.update(poscar_edit=text,poscar_edit_base=base,weighted_kpoints=points)
+        preview = inputs.generate(self.project, 'c', live=True)
+        self.assertEqual(preview['poscar_review']['text'],text)
+        self.assertAlmostEqual(preview['poscar_review']['after']/preview['poscar_review']['before'],1.25**3)
+        with self.assertRaisesRegex(ValueError, '尚未采用'):
+            inputs.freeze(self.project,'c','pending')
+        draft.update(poscar_text=draft.pop('poscar_edit'),poscar_base=draft.pop('poscar_edit_base'))
+        frozen = inputs.freeze(self.project,'c','scaled geometry')
+        manifest, files = ex.bundle(frozen['id'])
+        self.assertEqual(files['POSCAR'],text.encode())
+        self.assertEqual(files['KPOINTS'],points.encode())
+        self.assertEqual(ex.source_file_plan(sources.materialize(manifest['source_contract'],'one'),files['INCAR']),{})
+        self.assertNotEqual((self.roots['relax']/'CONTCAR').read_bytes(),files['POSCAR'])
+        count = len(self.project['nodes'][0]['data']['structure']['atoms'])
+        draft.update(selective_base=base, selective_flags='TFF'*count)
+        constrained = inputs.freeze(self.project, 'c', 'scaled and constrained')
+        _, new_files = ex.bundle(constrained['id'])
+        self.assertIn(b'T F F', new_files['POSCAR'])
+        self.assertEqual(new_files['POSCAR'].splitlines()[1], b'1.25')
+        draft['poscar_text'] = 'broken'
+        self.assertTrue(any('POSCAR' in err for err in inputs.generate(self.project,'c')['errors']))
+        draft['weighted_kpoints'] = points.replace('test\n2','test\n3')
+        self.assertTrue(any('KPOINTS' in err for err in inputs.generate(self.project,'c')['errors']))
+
+    def test_node_constraints_follow_relaxed_coordinates_without_remote_overwrite(self):
+        node = self.project['nodes'][2]['data']
+        node['sourceDraft'] = {'mode':'new','purpose':'charge','files':'charge'}
+        base = inputs.generate(self.project, 'c')['reference_geometry_sha256']
+        count = len(self.project['nodes'][0]['data']['structure']['atoms'])
+        node['inputDraft'].update(selective_base=base, selective_flags='FTF'*count)
+        actual = self.roots['relax'] / 'CONTCAR'
+        lines = actual.read_text().splitlines()
+        lines[1] = '1.2'
+        actual.write_text('\n'.join(lines)+'\n')
+        frozen = inputs.freeze(self.project, 'c', 'constrained relaxed structure')
+        manifest, files = ex.bundle(frozen['id'])
+        self.assertEqual(files['POSCAR'].decode().splitlines()[1], '1.2')
+        self.assertIn(b'F T F', files['POSCAR'])
+        contract = manifest['source_contract']
+        snapshot = sources.materialize(contract, 'one')
+        self.assertEqual(ex.source_file_plan(snapshot, files['INCAR']), {})
+        chain = {'schema':'fpilot.chain-source.v1','source_contract':contract,
+                 'actual_poscar':files['POSCAR'].decode(),'files':{'CONTCAR':{}}}
+        self.assertEqual(ex.source_file_plan(chain, files['INCAR']), {})
+
     def test_static_source_does_not_require_contcar_or_ionic_convergence(self):
         scf = self.make_source('scf', 'c')
         scf['evidence'].pop('ionic_converged'); self.store(scf)

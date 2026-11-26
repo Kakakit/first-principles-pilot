@@ -84,7 +84,19 @@ def start(args):
     signal.signal(signal.SIGTERM,stop_signal)
     try:
         if not args.no_worker and value.get('worker_enabled',True):
-            worker=subprocess.Popen([sys.executable,'-X','utf8','-m','backend.worker'],cwd=APP_ROOT,env=env,start_new_session=True)
+            worker=subprocess.Popen([sys.executable,'-X','utf8','-m','backend.worker','--mode',value.get('worker_mode','advance')],cwd=APP_ROOT,env=env,start_new_session=True)
+            if value.get('worker_mode')=='track':
+                from backend.worker import state
+                deadline=time.monotonic()+15
+                while time.monotonic()<deadline:
+                    if worker.poll() is not None:
+                        raise ValueError('只追踪进程未启动。请检查工作区是否已有后台进程，并核对启动日志。')
+                    status=state()
+                    if status.get('pid')==worker.pid and status.get('healthy') and status.get('mode')=='track':
+                        break
+                    time.sleep(.1)
+                else:
+                    raise ValueError('只追踪进程尚未就绪，请核对工作区和启动日志。')
         print('工作台：http://127.0.0.1:'+str(port)+'\n数据目录：'+str(workspace)+'\n按 Ctrl+C 停止。',flush=True)
         if not args.no_browser:
             import threading

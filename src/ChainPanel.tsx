@@ -1,5 +1,5 @@
-import DisclosureLabel from './DisclosureLabel';
 import {restoredHost} from './submissionDefaults';
+import DisclosureLabel from './DisclosureLabel';
 import {taskSummary} from './taskSummary';
 import TaskRecovery from './TaskRecovery';
 import CancelTask from './CancelTask';
@@ -33,7 +33,8 @@ type ChainStep=StepPreview&{state:string;bundle_id:string;attempts:string[];atte
 type ChainRun={id:string;created_at?:string;revision?:number;initial_dispatch?:InitialDispatch;project_id:string;state:string;plan_hash:string;mismatch_hash:string;max_jobs:number;source_alias?:string;verification_mode?:string;reuse_bindings?:Record<string,{attempt_id:string;verification_mode:string;alias?:string;files?:Record<string,unknown>}>;steps:ChainStep[];mismatches:Preview['mismatches'];authorization?:{config:ServerConfig;resources:Record<string,{node:string;cores:number|null;reason:string}>};last_worker_error?:string};
 const api=requestJson;
 
-export default function ChainPanel({project,view='run',onReview,onConfigure}:{project:Project;initialNodeId:string|null;view?:'config'|'run';onReview?:()=>void;onConfigure?:()=>void}){
+export default function ChainPanel({project,chainId,view='run',onReview,onConfigure}:{project:Project;initialNodeId:string|null;chainId?:string;view?:'config'|'run';onReview?:()=>void;onConfigure?:()=>void}){
+ const [openedChain,setOpenedChain]=useState<string>(),[openError,setOpenError]=useState(''),[openRetry,setOpenRetry]=useState(0);
  const possible=useMemo(()=>chainNodes(project),[project]);
  const [confirmOpen,setConfirmOpen]=useState(false);
  const [draftDifferences,setDraftDifferences]=useState<{node_id:string;label:string;field:string;frozen:unknown;draft:unknown}[]>([]);
@@ -78,11 +79,17 @@ export default function ChainPanel({project,view='run',onReview,onConfigure}:{pr
  const acceptRun=(value:ChainRun)=>{if(!mounted.current||activeRunId.current!==value.id)return;setRun(old=>latestChain(old,value));setHistory(old=>old.map(item=>item.id===value.id?latestChain(item,value)!:item));};
  const readRun=(id:string):Promise<ChainRun>=>api('/api/chains/'+encodeURIComponent(id)+'?project_id='+encodeURIComponent(project.id));
  const load=async()=>{const [server,result]=await Promise.all([api('/api/server'),api('/api/chains?project_id='+encodeURIComponent(project.id))]);if(!mounted.current)return;setConfig(old=>{
-   return old||restoredHost(server.config,server.registered_profiles||[],preferences?.get(draftKey+':alias',''));});setProfiles(server.registered_profiles||[]);setHistory(result.runs||[]);if(run&&!result.runs.some((item:ChainRun)=>item.id===run.id)){setRun(null);setDispatchRunId(null);return;}if(run){const value=await readRun(run.id);acceptRun(value);if(value.initial_dispatch?.state==='IN_PROGRESS')setDispatchRunId(value.id);}};
+   return old||restoredHost(server.config,server.registered_profiles||[],preferences?.get(draftKey+':alias',''));});setProfiles(server.registered_profiles||[]);setHistory(result.runs||[]);if(chainId)return;if(run&&!result.runs.some((item:ChainRun)=>item.id===run.id)){setRun(null);setDispatchRunId(null);return;}if(run){const value=await readRun(run.id);acceptRun(value);if(value.initial_dispatch?.state==='IN_PROGRESS')setDispatchRunId(value.id);}};
  useEffect(()=>{
   if(!dispatchRunId||dispatchRunId!==run?.id)return;
   return pollInitialChain(()=>readRun(dispatchRunId),value=>{acceptRun(value);if(value.state==='FROZEN'&&!pendingAuthorization.current)setDispatchRunId(null);},()=>setDispatchRunId(null));
  },[dispatchRunId,project.id,run?.id]);
+ useEffect(()=>{
+   if(!chainId)return;
+   let active=true;setOpenError('');
+   void readRun(chainId).then(value=>{if(active){setRun(value);setOpenedChain(chainId);setDispatchRunId(value.initial_dispatch?.state==='IN_PROGRESS'?value.id:null);}}).catch(e=>{if(active)setOpenError(errorMessage(e));});
+   return()=>{active=false;};
+ },[project.id,chainId,openRetry]);
  useEffect(()=>{void load().catch(e=>setError(errorMessage(e)));},[project.id]);
  useEffect(()=>{if(projectStamp===(project.updatedAt||''))return;setDispatchRunId(null);setPreview(null);setScripts({});setProjectStamp(project.updatedAt||'');},[project.updatedAt]);
  useEffect(()=>{let active=true;setDraftDifferences([]);if(run)void api('/api/chains/'+run.id+'/draft-differences',{project}).then(r=>{if(active)setDraftDifferences(r.differences);}).catch(()=>{});return()=>{active=false;};},[run?.id,project]);
@@ -122,7 +129,8 @@ export default function ChainPanel({project,view='run',onReview,onConfigure}:{pr
  const shown=run?.steps||preview?.steps||[];
  const readyToPrepare=Boolean(run?.state==='FROZEN'&&config&&(!Object.keys(run.reuse_bindings||{}).length||config.alias===run.source_alias)&&probe&&pool.length&&pool.length===candidates.length);
  const prepareSubmission=()=>call('正在审查计算链与候选节点脚本',async()=>{if(!run||!config)return;const resources=Object.fromEntries(run.steps.map(step=>[step.node_id,{vasp_executable:step.requires_ncl?'vasp_ncl':'vasp_std',candidates}]));const value=await api('/api/chains/'+run.id+'/resources-preview',{project_id:project.id,config,resources});setScripts(value.previews);const issues=chainResourceIssues(run.steps,pool,value.previews);if(issues.length)throw new Error('候选节点检查未通过，请查看下方逐节点原因并调整本次脚本或资源。');setConfirmOpen(true);});
- return <section className="input-workspace chain-panel"><h2>{view==='config'?'配置计算链':'提交计算链'}</h2>{view==='config'&&<p>选择需要执行的节点，并在冻结前审阅来源和续算预算。</p>}
+ if(chainId&&openedChain!==chainId)return openError?<p role="alert">{openError} <button className="button" onClick={()=>setOpenRetry(n=>n+1)}>重试读取原计算链</button></p>:<RemoteProgress label="正在读取原计算链"/>;
+ return <section className="input-workspace chain-panel"><h2>{view==='config'?'配置计算链':run&&run.state!=='FROZEN'?'计算链运行状态':'提交计算链'}</h2>{view==='config'&&<p>选择需要执行的节点，并在冻结前审阅来源和续算预算。</p>}
   {!(view!=='config')&&<div >  <section className="input-submit-card"><h3>1 · 选择与预览</h3><p>选择本次要执行的节点。对于下游需要的历史结果，预览会列出所需文件、来源作业和主机。</p><label className="workbench-field-line"><span className="field-line-name">本次执行主机</span><select disabled={busy||Boolean(run)} value={config?.alias||''} onChange={e=>{setConfig(old=>{const profile=profiles.find(item=>item.alias===e.target.value);return old&&profile?{...old,...Object.fromEntries(Object.entries(profile).filter(([key])=>['alias','queue','mpi_executable','vasp_executable','environment_script','module','launcher','runtime_environment','pmi_library','pmi_type'].includes(key))),scheduler:profile.scheduler.toLowerCase()}:old;});setReuseSources({});setPreview(null);setRun(null);setProbe(null);setScripts({});}}>{Array.from(new Set([config?.alias,...profiles.map(item=>item.alias)])).filter(Boolean).map(alias=><option key={alias} value={alias}>{alias}</option>)}</select></label><label className="workbench-field-line"><span className="field-line-name">大文件核验</span><select disabled={busy||Boolean(run)} value={verificationMode} onChange={e=>{setVerificationMode(e.target.value);setPreview(null);setRun(null);}}><option value="lightweight">轻量：来源、非空文件、大小与修改时间</option><option value="full">完整内容：扫描 SHA-256（较慢）</option></select></label><div className="chain-selection-toolbar"><button type="button" className="text-button" disabled={busy||Boolean(run)} onClick={()=>changeSelection(possible.map(node=>node.id))}>全选计算节点</button><button type="button" className="text-button" disabled={busy||Boolean(run)} onClick={()=>changeSelection([])}>清空选择</button><span role="status">本次执行 {selectedIds.length} 个节点</span>{run&&<><span>已冻结，执行范围已锁定</span><button type="button" className="button" disabled={busy} onClick={newSelection}>重新选择节点</button></>}</div><fieldset className="chain-intents" disabled={busy||Boolean(run)}><legend>节点执行方式</legend>{possible.map(item=>{
    const id=item.id,mode=modeFor(id);
    const canReuse=project.edges.some(e=>e.source===id&&selectedIds.includes(e.target));

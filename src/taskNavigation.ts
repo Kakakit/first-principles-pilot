@@ -1,4 +1,4 @@
-type LocationDetails={subpage?:string;section?:string;alias?:string;program?:string;focus?:string;bundleId?:string};
+type LocationDetails={baselineId?:string;comparisonNodes?:string;chainId?:string;subpage?:string;section?:string;alias?:string;program?:string;focus?:string;bundleId?:string};
 export type TaskNavigation={projectId:string;page:string;nodeId:string|null;attemptId:string;runScope:'node'|'chain'}&LocationDetails;
 export type TaskDestination={projectId?:string;page:string;nodeId?:string|null;attemptId?:string;runScope?:'node'|'chain'}&LocationDetails;
 
