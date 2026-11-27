@@ -2,11 +2,12 @@
 import hashlib
 import io
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
 import zipfile
-from contextlib import ExitStack
+from contextlib import ExitStack, closing
 from pathlib import Path
 from unittest.mock import patch
 from backend import recycle, execution as ex, extension_runs, electronic_plots
@@ -22,9 +23,9 @@ class HistoryCleanupTests(unittest.TestCase):
         self.stack.enter_context(patch.object(interactive_plots,'SAVED_ROOT',self.root/'plot-datasets'))
         self.stack.enter_context(patch.object(wannier_compare,'ROOT_COMPARE',self.root/'wannier-comparisons'))
         self.stack.enter_context(patch.object(ex,'ssh',side_effect=AssertionError('cleanup must not inspect or delete remote data')))
-        with ex.db() as db:pass
+        with closing(ex.db()) as db:pass
         for table in ('chain_runs','scan_batches'):
-            with sqlite3.connect(self.root/'execution.sqlite3') as db:
+            with closing(sqlite3.connect(self.root/'execution.sqlite3')) as db, db:
                 db.execute('CREATE TABLE '+table+' (id TEXT PRIMARY KEY,project_id TEXT,state TEXT,body TEXT)')
         self.addCleanup(self.stack.close);self.addCleanup(self.temp.cleanup)
 
@@ -34,7 +35,7 @@ class HistoryCleanupTests(unittest.TestCase):
 
     def attempt(self,key='a'*32,state='FAILED',**extra):
         record={'id':key,'state':state,'project_id':'p','config':{'alias':'mock'},'job_id':'123.mock',**extra}
-        with ex.db() as db:db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,state,json.dumps(record)))
+        with closing(ex.db()) as db, db:db.execute('INSERT INTO attempts VALUES(?,?,?)',(key,state,json.dumps(record)))
         return record
 
     def analysis(self,kind='analyses',key='b'*32,state='FAILED',**extra):
@@ -47,7 +48,7 @@ class HistoryCleanupTests(unittest.TestCase):
 
     def plan(self,kind,key='c'*32,state='FROZEN',**extra):
         value={'id':key,'state':state,'project_id':'p',**extra}
-        with sqlite3.connect(self.root/'execution.sqlite3') as db:
+        with closing(sqlite3.connect(self.root/'execution.sqlite3')) as db, db:
             db.execute('INSERT INTO '+recycle.TABLES[kind]+' VALUES(?,?,?,?)',(key,'p',state,json.dumps(value)))
         return value
 
@@ -145,17 +146,17 @@ class HistoryCleanupTests(unittest.TestCase):
                self.write('artifact-cache/inputs/'+cached_key,'owned'),
                self.write('result-summaries/'+key+'.json',{})]
         other=self.write('artifact-cache/previews/other.json',{'attempt_id':'d'*32})
-        with ex.db() as db:db.execute('INSERT INTO execution_events(attempt_id,at,event,details) VALUES(?,?,?,?)',(key,'now','test','{}'))
+        with closing(ex.db()) as db, db:db.execute('INSERT INTO execution_events(attempt_id,at,event,details) VALUES(?,?,?,?)',(key,'now','test','{}'))
         recycle.move('attempts',key);recycle.purge('attempts',key,True)
         with self.assertRaises(ValueError):ex.get(key)
         self.assertTrue(other.exists());self.assertTrue(all(not f.exists() for f in files))
-        with ex.db() as db:self.assertEqual(db.execute('SELECT count(*) FROM execution_events').fetchone()[0],0)
+        with closing(ex.db()) as db:self.assertEqual(db.execute('SELECT count(*) FROM execution_events').fetchone()[0],0)
 
     def test_database_failure_restores_all_files_and_recycle_marker(self):
         self.attempt();log=self.write('a'*32+'.watch.log','keep')
         recycle.move('attempts','a'*32)
         # Force a transaction failure after the files have moved.
-        with ex.db() as db:
+        with closing(ex.db()) as db, db:
             db.execute('INSERT INTO execution_events(attempt_id,at,event,details) VALUES(?,?,?,?)',('a'*32,'now','test','{}'))
             db.execute("CREATE TRIGGER fail_cleanup BEFORE DELETE ON execution_events BEGIN SELECT RAISE(ABORT,'fixture failure'); END")
         with self.assertRaisesRegex(ValueError,'已恢复'):recycle.purge('attempts','a'*32,True)
@@ -188,7 +189,12 @@ class HistoryCleanupTests(unittest.TestCase):
 
     def test_symlink_owned_output_is_removed_without_deleting_external_original(self):
         self.attempt();original=self.write('originals/log','original')
-        (self.root/('a'*32+'.watch.log')).symlink_to(original)
+        try:
+            (self.root/('a'*32+'.watch.log')).symlink_to(original)
+        except OSError as exc:
+            if os.name=='nt' and exc.winerror==1314:
+                self.skipTest('Windows user lacks symbolic-link privilege')
+            raise
         recycle.move('attempts','a'*32)
         recycle.purge('attempts','a'*32,True)
         self.assertFalse((self.root/('a'*32+'.watch.log')).is_symlink())
@@ -250,7 +256,7 @@ class HistoryCleanupTests(unittest.TestCase):
         ex.save({**stale,'state':'FAILED'})
         recycle.purge('attempts',stale['id'],True)
         stale.update(state='SUBMITTED',job_id='123.mock');ex.save(stale)
-        with ex.db() as db:
+        with closing(ex.db()) as db, db:
             self.assertEqual(db.execute('SELECT count(*) FROM execution_events').fetchone()[0],0)
             self.assertEqual(db.execute('SELECT count(*) FROM attempts').fetchone()[0],0)
 

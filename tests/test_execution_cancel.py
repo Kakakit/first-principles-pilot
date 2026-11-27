@@ -2,6 +2,7 @@ import copy
 import json
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 from backend import execution as ex, execution_cancel as cancel, execution_cancel_remote as adapter, scans, chain_runs, project_sync, recycle
@@ -18,7 +19,7 @@ class CancelTests(unittest.TestCase):
                        'node_id': 'n', 'job_id': '12.node01', 'updated_at': ex.now(),
                        'path_schema': 'fpilot.remote-attempt-path', 'remote_path_absolute': '/home/user/fpilot/material-projects/p/flows/main/stages/02-scf/attempts/a',
                        'remote_workspace_root_abs': '/home/user/fpilot', 'dispatch_started_at': '2026-10-13T00:00:00+00:00'}
-        with ex.db() as db: db.execute('INSERT INTO attempts VALUES(?,?,?)', (self.key, 'RUNNING', json.dumps(self.record)))
+        with closing(ex.db()) as db, db: db.execute('INSERT INTO attempts VALUES(?,?,?)', (self.key, 'RUNNING', json.dumps(self.record)))
         for module, name, result in ((ex, 'attempt_path', {'relative':'material-projects/p/flows/main/stages/02-scf/attempts/a'}),):
             mock = patch.object(module, name, return_value=result); mock.start(); self.addCleanup(mock.stop)
         self.live = {'result': 'LIVE', 'scheduler_state': 'R', 'terminal': False, 'owner': 'user'}

@@ -10,7 +10,7 @@ import stat
 import subprocess
 import threading
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 from .storage import ROOT
 from . import remote_transport, site_registration, attempt_operations, execution as ex
@@ -29,7 +29,7 @@ def _base():
 @contextmanager
 def _db():
     _base().mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(_base()/'index.sqlite3', timeout=30) as db:
+    with closing(sqlite3.connect(_base()/'index.sqlite3', timeout=30)) as db, db:
         db.execute('CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, body TEXT NOT NULL)')
         yield db
 

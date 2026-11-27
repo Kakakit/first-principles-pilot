@@ -2,6 +2,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -9,7 +10,7 @@ def paths(root, folder, filename='analysis.json', project_id=None, attempt_id=No
     base=Path(root)/folder
     if not base.is_dir():return []
     database=Path(root)/'history-index.sqlite3'
-    with sqlite3.connect(database,timeout=30) as db:
+    with closing(sqlite3.connect(database,timeout=30)) as db, db:
         db.execute('CREATE TABLE IF NOT EXISTS records (folder TEXT, id TEXT, size INTEGER, mtime INTEGER, project TEXT, attempts TEXT, created TEXT, PRIMARY KEY(folder,id))')
         known={r[0]:r[1:] for r in db.execute('SELECT id,size,mtime FROM records WHERE folder=?',(folder,))}
         seen=set()
